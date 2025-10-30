@@ -1,0 +1,9 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "types": ["react", "react-dom", "chrome", "node"],
+    "baseUrl": ".",
+  },
+  "include": ["./**/*.ts", "./**/*.tsx", "./**/*.d.ts", "types/**/*.d.ts", "../shared/docs/persistencev2.ts", "../shared/docs/Appv2.tsx"],
+  "exclude": ["../dist", "../node_modules"]
+}

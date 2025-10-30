@@ -1,0 +1,17 @@
+/digest.txt
+/core upgrades.md 
+shared/docs/
+node_modules/
+/dist
+package-lock.json
+docs/
+test-persistence.html
+test*
+//remove tests
+gemini.code-search.md
+test-extension.html
+test-comprehensive.html
+test-persistenceconsole.json
+test-persistence-simple.html
+warp.md
+gemini.md

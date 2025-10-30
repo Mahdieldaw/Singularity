@@ -1,0 +1,123 @@
+import React, { useRef, lazy, Suspense } from 'react';
+const ComposerMode = lazy(() => import('./components/composer/ComposerMode'));
+import { useAtom, useSetAtom } from 'jotai';
+import { usePortMessageHandler } from './hooks/usePortMessageHandler';
+import { useConnectionMonitoring } from './hooks/useConnectionMonitoring';
+import { useHistoryLoader } from './hooks/useHistoryLoader';
+import ChatView from './views/ChatView';
+import Header from './components/Header';
+import HistoryPanelConnected from './components/HistoryPanelConnected';
+import BannerConnected from './components/BannerConnected';
+import CompactModelTrayConnected from './components/CompactModelTrayConnected';
+import SettingsPanel from './components/SettingsPanel';
+import { isHistoryPanelOpenAtom, viewModeAtom } from './state/atoms';
+import { ViewMode } from './types';
+import { useInitialization } from './hooks/useInitialization'; // Import the new hook
+import { useOnClickOutside } from 'usehooks-ts';
+import { useKey } from './hooks/useKey';
+
+export default function App() {
+  // This is now the entry point for all startup logic.
+  const isInitialized = useInitialization();
+
+  // Initialize other global side effects that can run after init
+  usePortMessageHandler();
+  useConnectionMonitoring();
+  useHistoryLoader(isInitialized); // Pass the flag to the history loader
+
+  const [isHistoryOpen, setIsHistoryOpen] = useAtom(isHistoryPanelOpenAtom);
+  const [viewMode] = useAtom(viewModeAtom);
+
+  const historyPanelRef = useRef<HTMLDivElement>(null);
+
+  const closePanel = () => setIsHistoryOpen(false);
+
+  useOnClickOutside(historyPanelRef, closePanel);
+  useKey('Escape', closePanel);
+
+  // THE INITIALIZATION BARRIER
+  if (!isInitialized) {
+    // Render a simple loading state or nothing at all.
+    // This prevents any child components from running their hooks too early.
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', background: '#0f0f23' }}>
+        <div className="loading-spinner" /> 
+      </div>
+    );
+  }
+
+  // Once initialized, render the full application.
+  return (
+    <div style={{ 
+      display: 'flex', 
+      flexDirection: 'column', 
+      height: '100vh',
+      width: '100vw',
+      overflow: 'hidden',
+      background: 'linear-gradient(135deg, #0f0f23 0%, #1a1a3a 100%)',
+    }}>
+      <Header />
+      <BannerConnected />
+      
+      {/* Main content area */}
+      <div style={{ 
+        display: 'flex', 
+        flex: 1, 
+        overflow: 'hidden',
+        position: 'relative' 
+      }}>
+        <main style={{ 
+          flex: 1, 
+          display: 'flex', 
+          flexDirection: 'column',
+          overflow: 'hidden',
+          position: 'relative',
+        }}>
+          {viewMode === ViewMode.COMPOSER ? (
+            <Suspense fallback={<div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%' }}><div className="loading-spinner" /></div>}>
+              <ComposerMode />
+            </Suspense>
+          ) : (
+            <>
+              {/* ChatView contains: WelcomeScreen OR (Messages + ChatInput) */}
+              <ChatView />
+              
+              {/* CompactModelTray - Always visible at bottom */}
+              <CompactModelTrayConnected />
+            </>
+          )}
+        </main>
+        
+        {/* History Panel Overlay */}
+        {isHistoryOpen && (
+          <>
+            <div 
+              className="history-backdrop" 
+              onClick={closePanel} 
+              style={{ 
+                position: 'fixed', 
+                inset: 0,
+                background: 'rgba(0, 0, 0, 0.4)',
+                backdropFilter: 'blur(2px)',
+                zIndex: 1000
+              }} 
+            />
+            <div ref={historyPanelRef} style={{
+              position: 'fixed',
+              top: 0,
+              left: 0,
+              width: '320px',
+              height: '100vh',
+              zIndex: 1100,
+            }}>
+              <HistoryPanelConnected />
+            </div>
+          </>
+        )}
+      </div>
+      
+      {/* Settings Panel - Slides in from right */}
+      <SettingsPanel />
+    </div>
+  );
+}

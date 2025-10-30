@@ -1,0 +1,233 @@
+// ui/hooks/usePortMessageHandler.ts - ALIGNED VERSION
+import { useCallback, useRef, useEffect } from 'react';
+import { useSetAtom, useAtomValue } from 'jotai';
+import { 
+  messagesAtom, 
+  currentSessionIdAtom, 
+  pendingUserTurnsAtom,
+  isLoadingAtom,
+  uiPhaseAtom,
+  activeAiTurnIdAtom,
+  isContinuationModeAtom,
+  providerContextsAtom
+} from '../state/atoms';
+import { StreamingBuffer } from '../utils/streamingBuffer';
+import { applyStreamingUpdates, applyCompletionUpdate } from '../utils/turn-helpers';
+import api from '../services/extension-api';
+import type { TurnMessage, UserTurn, AiTurn, ProviderResponse } from '../types';
+
+/**
+ * CRITICAL: Step type detection must match backend stepId patterns
+ * Backend generates: 'batch-<timestamp>', 'synthesis-<provider>-<timestamp>', 'mapping-<provider>-<timestamp>'
+ */
+function getStepType(stepId: string): 'batch' | 'synthesis' | 'mapping' | null {
+  if (!stepId || typeof stepId !== 'string') return null;
+  
+  // Match backend patterns exactly
+  if (stepId.startsWith('synthesis-') || stepId.includes('-synthesis-')) return 'synthesis';
+  if (stepId.startsWith('mapping-') || stepId.includes('-mapping-')) return 'mapping';
+  if (stepId.startsWith('batch-') || stepId.includes('prompt')) return 'batch';
+  
+  console.warn(`[Port] Unknown stepId pattern: ${stepId}`);
+  return null;
+}
+
+/**
+ * Extract provider ID from stepId for synthesis/mapping steps
+ * Backend format: 'synthesis-gemini-1234567890' or 'mapping-chatgpt-1234567890'
+ */
+function extractProviderFromStepId(stepId: string, stepType: 'synthesis' | 'mapping'): string | null {
+  const match = stepId.match(new RegExp(`${stepType}-(\\w+)-\\d+`));
+  return match ? match[1] : null;
+}
+
+export function usePortMessageHandler() {
+  const setMessages = useSetAtom(messagesAtom);
+  const setCurrentSessionId = useSetAtom(currentSessionIdAtom);
+  const currentSessionId = useAtomValue(currentSessionIdAtom);
+  const setPendingUserTurns = useSetAtom(pendingUserTurnsAtom);
+  const setIsLoading = useSetAtom(isLoadingAtom);
+  const setUiPhase = useSetAtom(uiPhaseAtom);
+  const setIsContinuationMode = useSetAtom(isContinuationModeAtom);
+  const activeAiTurnId = useAtomValue(activeAiTurnIdAtom);
+  const setActiveAiTurnId = useSetAtom(activeAiTurnIdAtom);
+  const setProviderContexts = useSetAtom(providerContextsAtom);
+  
+  const streamingBufferRef = useRef<StreamingBuffer | null>(null);
+  const activeAiTurnIdRef = useRef<string | null>(null);
+
+  // Keep ref in sync with atom
+  useEffect(() => {
+    activeAiTurnIdRef.current = activeAiTurnId;
+  }, [activeAiTurnId]);
+
+  const handler = useCallback((message: any) => {
+    if (!message || !message.type) return;
+    
+    console.log('[Port Handler]', message.type, message);
+
+    switch (message.type) {
+      case 'SESSION_STARTED': {
+        const newSessionId = message.sessionId;
+        setCurrentSessionId(newSessionId);
+        
+        // Backfill session ID in messages
+        setMessages((draft: TurnMessage[]) => {
+          draft.forEach((m: TurnMessage) => {
+            if (!m.sessionId) m.sessionId = newSessionId;
+          });
+        });
+        
+        // Backfill session ID in pending user turns
+        setPendingUserTurns((draft: Map<string, UserTurn>) => {
+          draft.forEach((userTurn: UserTurn, aiId: string) => {
+            if (!userTurn.sessionId) {
+              draft.set(aiId, { ...userTurn, sessionId: newSessionId });
+            }
+          });
+        });
+        
+        try { api.setSessionId(newSessionId); } catch {}
+        break;
+      }
+
+      case 'PARTIAL_RESULT': {
+        const { stepId, providerId, chunk, sessionId: msgSessionId } = message;
+        if (!providerId || !chunk?.text) return;
+
+        // Ignore cross-session messages
+        if (msgSessionId && currentSessionId && msgSessionId !== currentSessionId) {
+          console.warn(`[Port] Ignoring PARTIAL_RESULT from ${msgSessionId} (active ${currentSessionId})`);
+          return;
+        }
+
+        const stepType = getStepType(stepId);
+        if (!stepType) {
+          console.warn(`[Port] Cannot determine step type for: ${stepId}`);
+          return;
+        }
+
+        // Initialize buffer if needed
+        if (!streamingBufferRef.current) {
+          streamingBufferRef.current = new StreamingBuffer((updates) => {
+            const activeId = activeAiTurnIdRef.current;
+            if (!activeId || !updates || updates.length === 0) return;
+
+            setMessages((draft: TurnMessage[]) => {
+              const aiTurn = draft.find((t: TurnMessage) => t.id === activeId && t.type === 'ai') as AiTurn | undefined;
+              if (!aiTurn) return;
+
+              // Apply batched updates using helper
+              applyStreamingUpdates(aiTurn, updates);
+            });
+          });
+        }
+
+        streamingBufferRef.current.addDelta(providerId, chunk.text, 'streaming', stepType);
+
+        // Store provider context in separate atom
+        if (chunk.meta) {
+          setProviderContexts((draft: Record<string, any>) => {
+            draft[providerId] = { ...(draft[providerId] || {}), ...chunk.meta };
+          });
+        }
+        break;
+      }
+
+      case 'WORKFLOW_STEP_UPDATE': {
+        const { stepId, status, result, error, sessionId: msgSessionId } = message;
+        
+        if (msgSessionId && currentSessionId && msgSessionId !== currentSessionId) {
+          console.warn(`[Port] Ignoring WORKFLOW_STEP_UPDATE from ${msgSessionId}`);
+          break;
+        }
+
+        if (status === 'completed' && result) {
+          streamingBufferRef.current?.flushImmediate();
+          
+          // ✅ CRITICAL FIX: Properly detect step type and route completions
+          const stepType = getStepType(stepId);
+          
+          if (!stepType) {
+            console.error(`[Port] Cannot route completion - unknown stepId: ${stepId}`);
+            break;
+          }
+
+          // Backend sends either:
+          // 1. { results: { claude: {...}, gemini: {...} } } for batch steps
+          // 2. { providerId: 'gemini', text: '...', status: '...' } for single-provider steps
+          const resultsMap = result.results || (result.providerId ? { [result.providerId]: result } : {});
+          
+          Object.entries(resultsMap).forEach(([providerId, data]: [string, any]) => {
+            const activeId = activeAiTurnIdRef.current;
+            if (!activeId) return;
+
+            console.log(`[Port] Completing ${stepType}/${providerId}:`, {
+              textLength: data?.text?.length,
+              status: data?.status
+            });
+
+            setMessages((draft: TurnMessage[]) => {
+              const aiTurn = draft.find((t: TurnMessage) => t.id === activeId && t.type === 'ai') as AiTurn | undefined;
+              if (!aiTurn) {
+                console.warn(`[Port] No active AI turn found for completion: ${activeId}`);
+                return;
+              }
+              
+              // Apply completion using helper with correct routing
+              applyCompletionUpdate(aiTurn, providerId, data, stepType);
+            });
+          });
+        } else if (status === 'failed') {
+          console.error(`[Port] Step failed: ${stepId}`, error);
+        }
+        break;
+      }
+
+      case 'WORKFLOW_COMPLETE': {
+        const { sessionId: msgSessionId } = message;
+        if (msgSessionId && currentSessionId && msgSessionId !== currentSessionId) {
+          console.warn(`[Port] Ignoring WORKFLOW_COMPLETE from ${msgSessionId}`);
+          break;
+        }
+
+        streamingBufferRef.current?.flushImmediate();
+        const completedTurnId = activeAiTurnIdRef.current;
+
+        setIsLoading(false);
+        setUiPhase('awaiting_action');
+        setIsContinuationMode(true);
+        setActiveAiTurnId(null);
+
+        // Cleanup pending user turns
+        if (completedTurnId) {
+          setPendingUserTurns((draft: Map<string, UserTurn>) => {
+            draft.delete(completedTurnId);
+          });
+        }
+        break;
+      }
+    }
+  }, [
+    setMessages, 
+    setCurrentSessionId, 
+    currentSessionId,
+    setPendingUserTurns,
+    setIsLoading,
+    setUiPhase,
+    setIsContinuationMode,
+    setActiveAiTurnId,
+    setProviderContexts
+  ]);
+
+  // Register handler with API
+  useEffect(() => {
+    api.setPortMessageHandler(handler);
+    return () => {
+      api.setPortMessageHandler(null);
+      streamingBufferRef.current?.clear();
+    };
+  }, [handler]);
+
+  return { streamingBufferRef };
+}
