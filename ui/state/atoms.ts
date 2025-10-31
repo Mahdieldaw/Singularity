@@ -54,12 +54,12 @@ export const showScrollToBottomAtom = atom<boolean>(false);
 // -----------------------------
 export const selectedModelsAtom = atomWithStorage<Record<string, boolean>>(
   'htos_selected_models',
-  DEFAULT_SELECTED_MODELS
+  {}
 );
 export const mappingEnabledAtom = atomWithStorage<boolean>('htos_mapping_enabled', true);
-export const mappingProviderAtom = atomWithStorage<string | null>('htos_mapping_provider', 'chatgpt');
-export const synthesisProviderAtom = atomWithStorage<string | null>('htos_synthesis_provider', 'gemini');
-export const synthesisProvidersAtom = atomWithStorage<string[]>('htos_synthesis_providers', ['gemini']);
+export const mappingProviderAtom = atomWithStorage<string | null>('htos_mapping_provider', null);
+export const synthesisProviderAtom = atomWithStorage<string | null>('htos_synthesis_provider', null);
+export const synthesisProvidersAtom = atomWithStorage<string[]>('htos_synthesis_providers', []);
 export const powerUserModeAtom = atomWithStorage<boolean>('htos_power_user_mode', false);
 export const thinkOnChatGPTAtom = atomWithStorage<boolean>('htos_think_chatgpt', false);
 export const isVisibleModeAtom = atomWithStorage<boolean>('htos_visible_mode', true);

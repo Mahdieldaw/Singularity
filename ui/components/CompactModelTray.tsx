@@ -62,7 +62,63 @@ const CompactModelTray = ({
   const isMapEnabled = mappingEnabled && !!mapProviderId;
   const isUnifyEnabled = !!unifyProviderId;
   const hasRefine = isMapEnabled || isUnifyEnabled;
-  
+
+  // Prefer user's last-used providers across turns/sessions when props are empty/null
+  useEffect(() => {
+    try {
+      // Restore selected (batch) models if the parent provided none
+      const activeCount = Object.values(selectedModels || {}).filter(Boolean).length;
+      if (activeCount === 0 && typeof onToggleModel === 'function') {
+        const keys = ['htos_selected_models', 'htos_last_selected_models', 'htos_last_used_selected_models'];
+        for (const k of keys) {
+          const raw = localStorage.getItem(k);
+          if (!raw) continue;
+          let parsed: any = null;
+          try { parsed = JSON.parse(raw); } catch (_) { continue; }
+          if (parsed && typeof parsed === 'object') {
+            // Apply saved map by toggling differences
+            LLM_PROVIDERS_CONFIG.forEach(p => {
+              const shouldBeSelected = !!parsed[p.id];
+              const currentlySelected = !!selectedModels[p.id];
+              if (shouldBeSelected && !currentlySelected) onToggleModel(p.id);
+              else if (!shouldBeSelected && currentlySelected) onToggleModel(p.id);
+            });
+            break;
+          }
+        }
+      }
+
+      // Don't override if parent already provided mapping/synthesis values
+      if (!mappingProvider && typeof onSetMappingProvider === 'function') {
+        const keys = ['htos_mapping_provider', 'htos_last_turn_mapping_provider', 'htos_last_used_mapping_provider'];
+        for (const k of keys) {
+          const val = localStorage.getItem(k);
+          if (val) {
+            onSetMappingProvider(val);
+            try { onToggleMapping?.(true); } catch (_) {}
+            break;
+          }
+        }
+      }
+
+      if (!synthesisProvider && typeof onSetSynthesisProvider === 'function') {
+        const keys = ['htos_synthesis_provider', 'htos_last_turn_synthesis_provider', 'htos_last_used_synthesis_provider'];
+        for (const k of keys) {
+          const val = localStorage.getItem(k);
+          if (val) {
+            onSetSynthesisProvider(val);
+            break;
+          }
+        }
+      }
+    } catch (err) {
+      // best-effort only
+      console.warn('[CompactModelTray] failed to restore last-used providers/selection', err);
+    }
+    // run only once on mount
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Generate compact labels
   const getWitnessLabel = () => {
     if (activeCount === 0) return '[No Models]';
