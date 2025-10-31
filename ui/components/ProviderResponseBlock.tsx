@@ -1,4 +1,5 @@
 // ProviderResponseBlock.tsx - COMPLETE FIXED VERSION
+import React from 'react';
 import { LLMProvider, AppStep, ProviderResponse } from '../types';
 import { LLM_PROVIDERS_CONFIG } from '../constants';
 import { BotIcon, ChevronDownIcon, ChevronUpIcon } from './Icons';
@@ -563,4 +564,4 @@ const ProviderResponseBlock = ({
   );
 };
 
-export default ProviderResponseBlock;
+export default React.memo(ProviderResponseBlock);

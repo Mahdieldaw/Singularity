@@ -143,15 +143,18 @@ const UserTurnBlock = ({ userTurn, isExpanded, onToggle }: UserTurnBlockProps) =
               style={{
                 fontSize: '14px', 
                 color: '#cbd5e1', 
-                whiteSpace: 'nowrap', 
+                 
                 overflow: 'hidden', 
-                textOverflow: 'ellipsis',
+                
                 paddingTop: '4px',
-                marginBottom: '4px'
+                marginBottom: '4px',
+                display: '-webkit-box',
+                WebkitLineClamp: 3,
+                WebkitBoxOrient: 'vertical',
               }}
               title={userTurn.text}
             >
-              {userTurn.text.replace(/\n/g, ' ')}
+              {userTurn.text}
             </div>
         )}
         

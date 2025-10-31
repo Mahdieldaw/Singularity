@@ -1,5 +1,5 @@
 // ui/components/AiTurnBlockConnected.tsx
-import React from 'react';
+import React, { useCallback } from 'react';
 import { useAtom, useSetAtom } from 'jotai';
 import AiTurnBlock from './AiTurnBlock';
 import { 
@@ -43,11 +43,11 @@ export default function AiTurnBlockConnected({ aiTurn }: AiTurnBlockConnectedPro
       isLoading={isLoading}
       currentAppStep={currentAppStep}
       showSourceOutputs={showSourceOutputs}
-      onToggleSourceOutputs={() => setShowSourceOutputs(prev => !prev)}
-      onEnterComposerMode={() => setViewMode(ViewMode.COMPOSER)}
+      onToggleSourceOutputs={useCallback(() => setShowSourceOutputs(prev => !prev), [setShowSourceOutputs])}
+      onEnterComposerMode={useCallback(() => setViewMode(ViewMode.COMPOSER), [setViewMode])}
       activeSynthesisClipProviderId={turnClips.synthesis}
       activeMappingClipProviderId={turnClips.mapping}
-      onClipClick={(type, pid) => void handleClipClick(aiTurn.id, type, pid)}
+      onClipClick={useCallback((type: 'synthesis' | 'mapping', pid: string) => void handleClipClick(aiTurn.id, type, pid), [handleClipClick, aiTurn.id])}   
     />
   );
 }

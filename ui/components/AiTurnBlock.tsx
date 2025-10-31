@@ -1,9 +1,10 @@
 // ui/components/AiTurnBlock.tsx - SAFE RESPONSE RENDERING
+import React from 'react';
 import { AiTurn, ProviderResponse, AppStep } from '../types';
 import ProviderResponseBlock from './ProviderResponseBlock';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { useMemo, useState, useCallback, useRef, useEffect } from 'react';
+import { useMemo, useState, useCallback, useRef, useEffect, useLayoutEffect } from 'react';
 import { hasComposableContent } from '../utils/composerUtils';
 import { LLM_PROVIDERS_CONFIG } from '../constants';
 import ClipsCarousel from './ClipsCarousel';
@@ -46,45 +47,63 @@ function parseSynthesisResponse(response?: string | null) {
   };
 }
 
-// In AiTurnBlock.tsx - Smart height calculation that handles failures
-const useEqualHeightSections = (hasSynthesis: boolean, hasMapping: boolean) => {
-  const [containerHeight, setContainerHeight] = useState<number | null>(null);
+// In AiTurnBlock.tsx - Measure shorter section and cap only the longer to match it.
+const useShorterHeight = (
+  hasSynthesis: boolean,
+  hasMapping: boolean,
+  synthesisVersion: string | number
+) => {
   const synthRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<HTMLDivElement>(null);
-  const shorterSectionRef = useRef<'synthesis' | 'mapping' | null>(null);
+  const [shorterHeight, setShorterHeight] = useState<number | null>(null);
+  const [shorterSection, setShorterSection] = useState<'synthesis' | 'mapping' | null>(null);
 
-  useEffect(() => {
-    const updateHeights = () => {
-      if (!hasSynthesis || !hasMapping || !synthRef.current || !mapRef.current) {
-        setContainerHeight(null);
-        shorterSectionRef.current = null;
-        return;
-      }
-      
-      const synthHeight = synthRef.current.scrollHeight;
-      const mapHeight = mapRef.current.scrollHeight;
-      
-      const newShorterSection = synthHeight <= mapHeight ? 'synthesis' : 'mapping';
-      const shorterHeight = Math.min(synthHeight, mapHeight);
-      
-      if (shorterSectionRef.current === null || newShorterSection !== shorterSectionRef.current) {
-        const maxAllowedHeight = Math.min(window.innerHeight * 0.6, 500);
-        const finalHeight = Math.min(shorterHeight, maxAllowedHeight);
-        setContainerHeight(finalHeight);
-        shorterSectionRef.current = newShorterSection;
-      }
-    };
+  const borderBoxHeight = (el: HTMLElement) => {
+    const cs = window.getComputedStyle(el);
+    const border = parseFloat(cs.borderTopWidth) + parseFloat(cs.borderBottomWidth);
+    // scrollHeight includes padding but not borders; add borders so it matches border-box sizing.
+    return el.scrollHeight + border;
+  };
 
-    updateHeights();
-    
-    const resizeObserver = new ResizeObserver(updateHeights);
-    if (synthRef.current) resizeObserver.observe(synthRef.current);
-    if (mapRef.current) resizeObserver.observe(mapRef.current);
+  const measure = useCallback(() => {
+    const s = synthRef.current;
+    const m = mapRef.current;
+    if (!hasSynthesis || !hasMapping || !s || !m) {
+      setShorterHeight(null);
+      setShorterSection(null);
+      return;
+    }
 
-    return () => resizeObserver.disconnect();
+    // Use natural content heights (scrollHeight) for both panels.
+    const synthH = borderBoxHeight(s);
+    const mapH = borderBoxHeight(m);
+    const isSynthShorter = synthH <= mapH;
+    const h = isSynthShorter ? synthH : mapH;
+    const sec = isSynthShorter ? 'synthesis' : 'mapping';
+
+    setShorterSection(prev => (prev !== sec ? sec : prev));
+    setShorterHeight(prev => (prev === null || Math.abs(prev - h) > 1 ? h : prev));
   }, [hasSynthesis, hasMapping]);
 
-  return { containerHeight, synthRef, mapRef };
+  useEffect(() => {
+    const s = synthRef.current;
+    const m = mapRef.current;
+    if (!s || !m) return;
+    const ro = new ResizeObserver(() => measure());
+    ro.observe(s);
+    ro.observe(m);
+    measure(); // initial
+    return () => ro.disconnect();
+  }, [measure]);
+
+  // Re-measure right after synthesis text changes (synthesis is produced after mapping)
+  useLayoutEffect(() => {
+    if (!hasSynthesis || !hasMapping) return;
+    const id = requestAnimationFrame(measure);
+    return () => cancelAnimationFrame(id);
+  }, [synthesisVersion, hasSynthesis, hasMapping, measure]);
+
+  return { synthRef, mapRef, shorterHeight, shorterSection };
 };
 
 
@@ -223,22 +242,39 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
   const hasSynthesis = !!(activeSynthPid && displayedSynthesisTake?.text);
   const hasMapping = !!(activeMappingPid && getLatestResponse(mappingResponses[activeMappingPid])?.text);
   
-  const { containerHeight, synthRef, mapRef } = useEqualHeightSections(hasSynthesis, hasMapping);
+  const { synthRef, mapRef, shorterHeight, shorterSection } = useShorterHeight(hasSynthesis, hasMapping, displayedSynthesisText);
 
-  // Adjust container styles based on content availability
-  // Replace the getSectionStyle function with this:
-const getSectionStyle = (hasContent: boolean): React.CSSProperties => ({
-  border: '1px solid #475569', 
-  borderRadius: 8, 
-  padding: 12, 
-  flex: 1,
-  display: 'flex',
-  flexDirection: 'column',
-  // ✅ Handle null case properly
-  height: (hasSynthesis && hasMapping && containerHeight) ? containerHeight : 'auto',
-  overflowY: (hasSynthesis && hasMapping) ? 'auto' : 'visible',
-  minHeight: '150px'
-});
+  // Helper function to get section styles
+  const getSectionStyle = (section: 'synthesis' | 'mapping'): React.CSSProperties => {
+    const baseStyle: React.CSSProperties = {
+      border: '1px solid #475569',
+      borderRadius: 8,
+      padding: 12,
+      flex: 1,
+      display: 'flex',
+      flexDirection: 'column',
+      minHeight: 150,
+      height: 'auto',
+      boxSizing: 'border-box'
+    };
+
+    // If both sections have content and we measured the shorter
+    if (hasSynthesis && hasMapping && shorterHeight && shorterSection) {
+      const isLonger = shorterSection !== section;
+      return {
+        ...baseStyle,
+        maxHeight: isLonger ? `${shorterHeight}px` : 'none',
+        overflowY: 'visible'
+      };
+    }
+
+    // Default: unconstrained flow
+    return {
+      ...baseStyle,
+      maxHeight: 'none',
+      overflowY: 'visible'
+    };
+  };
 
   // Safely resolve a user prompt string from possible shapes without relying on AiTurn type
   const userPrompt: string | null = ((): string | null => {
@@ -263,13 +299,13 @@ const getSectionStyle = (hasContent: boolean): React.CSSProperties => ({
         <div className="ai-turn-content" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           {/* Primaries: smart height based on content availability */}
           <div className="primaries" style={{ marginBottom: '1rem', position: 'relative' }}>
-            <div style={{ display: 'flex', flexDirection: 'row', gap: 12, alignItems: 'stretch' }}>
+            <div style={{ display: 'flex', flexDirection: 'row', gap: 12, alignItems: 'flex-start' }}>
               
               {/* Synthesis Section */}
               <div 
                 ref={synthRef}
                 className="synthesis-section" 
-                style={getSectionStyle(hasSynthesis)}
+                style={getSectionStyle('synthesis')}
               >
                 <div className="section-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, flexShrink: 0 }}>
                   <h4 style={{ margin: 0, fontSize: 14, color: '#e2e8f0' }}>Synthesis</h4>
@@ -277,7 +313,19 @@ const getSectionStyle = (hasContent: boolean): React.CSSProperties => ({
                     {isSynthesisExpanded ? <ChevronUpIcon style={{width: 16, height: 16}} /> : <ChevronDownIcon style={{width: 16, height: 16}} />}
                   </button>
                 </div>
-                {isSynthesisExpanded && (
+                {!hasSynthesis && (
+                  <div style={{ 
+                    display: 'flex', 
+                    alignItems: 'center', 
+                    justifyContent: 'center', 
+                    height: '100%',
+                    color: '#64748b',
+                    fontStyle: 'italic'
+                  }}>
+                    No synthesis available
+                  </div>
+                )}
+                {isSynthesisExpanded && hasSynthesis && (
   <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
     <div style={{ flexShrink: 0 }}> {/* Wrap ClipsCarousel */}
       <ClipsCarousel
@@ -335,7 +383,7 @@ const getSectionStyle = (hasContent: boolean): React.CSSProperties => ({
               <div 
                 ref={mapRef}
                 className="mapping-section" 
-                style={getSectionStyle(hasMapping)}
+                style={getSectionStyle('mapping')}
               >
                 <div className="section-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, flexShrink: 0 }}>
                   <h4 style={{ margin: 0, fontSize: 14, color: '#e2e8f0' }}>Mapping</h4>
@@ -374,8 +422,20 @@ const getSectionStyle = (hasContent: boolean): React.CSSProperties => ({
                     </button>
                   </div>
                 </div>
-                {isMappingExpanded && (
-                  <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+                {!hasMapping && (
+                  <div style={{ 
+                    display: 'flex', 
+                    alignItems: 'center', 
+                    justifyContent: 'center', 
+                    height: '100%',
+                    color: '#64748b',
+                    fontStyle: 'italic'
+                  }}>
+                    No mapping available
+                  </div>
+                )}
+                {isMappingExpanded && hasMapping && (
+                  <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minHeight: 0 }}>
                     {mappingTab === 'map' && (
                       <ClipsCarousel
                         providers={LLM_PROVIDERS_CONFIG}
@@ -450,18 +510,6 @@ const getSectionStyle = (hasContent: boolean): React.CSSProperties => ({
                     </div>
                   </div>
                 )}
-                 {!hasMapping && (
-                  <div style={{ 
-                    display: 'flex', 
-                    alignItems: 'center', 
-                    justifyContent: 'center', 
-                    height: '100%',
-                    color: '#64748b',
-                    fontStyle: 'italic'
-                  }}>
-                    No mapping available
-                  </div>
-                )}
               </div>
             </div>
           </div>
@@ -497,7 +545,7 @@ const getSectionStyle = (hasContent: boolean): React.CSSProperties => ({
             isReducedMotion={isReducedMotion}
             aiTurnId={aiTurn.id}
             sessionId={aiTurn.sessionId ?? undefined}
-            onEnterComposerMode={() => onEnterComposerMode?.(aiTurn)}
+            onEnterComposerMode={useCallback(() => onEnterComposerMode?.(aiTurn), [onEnterComposerMode, aiTurn])}
           />
         </div>
       )}
@@ -522,4 +570,4 @@ const getSectionStyle = (hasContent: boolean): React.CSSProperties => ({
   );
 };
 
-export default AiTurnBlock;
+export default React.memo(AiTurnBlock);

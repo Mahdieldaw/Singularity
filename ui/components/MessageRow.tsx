@@ -3,9 +3,11 @@ import { TurnMessage } from '../types';
 import UserTurnBlockConnected from './UserTurnBlockConnected';
 import AiTurnBlockConnected from './AiTurnBlockConnected';
 
-export default function MessageRow({ message }: { message: TurnMessage }) {
+function MessageRow({ message }: { message: TurnMessage }) {
   if ((message as any).type === 'user') {
     return <UserTurnBlockConnected userTurn={message as any} />;
   }
   return <AiTurnBlockConnected aiTurn={message as any} />;
 }
+
+export default React.memo(MessageRow);
