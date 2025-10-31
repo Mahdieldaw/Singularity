@@ -18,14 +18,16 @@ export function useClipActions() {
     if (!aiTurn) return;
 
     const responsesMap = type === 'synthesis' ? (aiTurn.synthesisResponses || {}) : (aiTurn.mappingResponses || {});
-    const hasExisting = Array.isArray(responsesMap[providerId])
-      ? (responsesMap[providerId] as any).length > 0
-      : !!responsesMap[providerId];
+    const responseEntry = responsesMap[providerId];
+    const hasExisting = Array.isArray(responseEntry) && responseEntry.length > 0;
 
-    // Use Immer-style setter provided by atomWithImmer
-    setActiveClips((draft: Record<string, { synthesis?: string; mapping?: string }>) => {
-      draft[aiTurnId] = { ...(draft[aiTurnId] || {}), [type]: providerId };
-    });
+    setActiveClips((prev) => ({
+      ...prev,
+      [aiTurnId]: {
+        ...(prev?.[aiTurnId] || {}),
+        [type]: providerId,
+      },
+    }));
 
     // If the selected provider is not present in the AI turn's batchResponses, add an optimistic pending
     // batch response so the batch count increases and the model shows up in the batch area.
@@ -56,6 +58,12 @@ export function useClipActions() {
     if (hasExisting) return;
 
     if (type === 'synthesis') {
+    // For historical turns, allow synthesis even if mapping doesn't exist yet
+    // The backend will handle the mapping requirement appropriately
+    const isHistoricalTurn = !aiTurn.batchResponses || Object.keys(aiTurn.batchResponses).length === 0;
+    
+    if (!isHistoricalTurn) {
+      // Only enforce mapping requirement for non-historical turns
       const mappingResponses = aiTurn.mappingResponses || {};
       const hasCompletedMapping = Object.values(mappingResponses).some((value: any) => {
         const arr = Array.isArray(value) ? value : [value];
@@ -67,6 +75,7 @@ export function useClipActions() {
         setAlertText('No mapping result exists for this round. Run mapping first before synthesizing.');
         return;
       }
+    }
 
       if (!userTurnId) return;
       await runSynthesisForRound(userTurnId, providerId);

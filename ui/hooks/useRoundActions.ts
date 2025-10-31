@@ -1,4 +1,4 @@
-// ui/hooks/useRoundActions.ts
+// ui/hooks/useRoundActions.ts - FIXED VERSION
 import { useCallback, useRef } from 'react';
 import { useAtom, useSetAtom } from 'jotai';
 import { 
@@ -67,14 +67,32 @@ export function useRoundActions() {
 
     const { ai } = roundInfo;
 
-    // Validate we have enough batch outputs
-    const results: Record<string, string> = {};
-    Object.entries(ai.batchResponses || {}).forEach(([pid, resp]) => {
-      if (resp.status === 'completed' && resp.text?.trim()) {
-        results[pid] = resp.text;
-      }
-    });
-    if (Object.keys(results).length < 2) return;
+    // FIXED: Use the same eligibility logic as useEligibility
+    const outputsFromBatch = Object.values(ai.batchResponses || {}).filter(
+      (r: any) => r.status === 'completed' && r.text?.trim()
+    );
+
+    // Also check if we have any completed synthesis or mapping responses
+    const hasCompletedSynthesis = ai?.synthesisResponses 
+      ? Object.values(ai.synthesisResponses).some(resp => {
+          const responses = Array.isArray(resp) ? resp : [resp];
+          return responses.some(r => r.status === 'completed' && r.text?.trim());
+        })
+      : false;
+
+    const hasCompletedMapping = ai?.mappingResponses 
+      ? Object.values(ai.mappingResponses).some(resp => {
+          const responses = Array.isArray(resp) ? resp : [resp];
+          return responses.some(r => r.status === 'completed' && r.text?.trim());
+        })
+      : false;
+
+    // Same eligibility logic as useEligibility
+    const enoughOutputs = outputsFromBatch.length >= 2 || hasCompletedSynthesis || hasCompletedMapping;
+    if (!enoughOutputs) {
+      console.warn(`Not enough outputs for synthesis in round ${userTurnId}`);
+      return;
+    }
 
     // Determine which providers to synthesize
     const selected = providerIdOverride
@@ -97,7 +115,9 @@ export function useRoundActions() {
       const aiTurn = draft.find(t => t.id === ai.id && t.type === 'ai') as AiTurn | undefined;
       if (!aiTurn) return;
 
-      const prev = aiTurn.synthesisResponses || {};
+      // ✅ Initialize if missing
+      if (!aiTurn.synthesisResponses) aiTurn.synthesisResponses = {};
+      const prev = aiTurn.synthesisResponses;
       const next: Record<string, ProviderResponse[]> = { ...prev };
       
       selected.forEach((pid) => {
@@ -189,17 +209,35 @@ export function useRoundActions() {
     const roundInfo = findRoundForUserTurn(userTurnId);
     if (!roundInfo?.user || !roundInfo.ai) return;
 
-    const userTurn = roundInfo.user as UserTurn; // ← Add
-const { ai: roundAi } = roundInfo;
+    const userTurn = roundInfo.user as UserTurn;
+    const { ai } = roundInfo;
     
-    // Validate we have enough batch outputs
-    const modelOutputs: Record<string, string> = {};
-    Object.entries(roundAi.batchResponses || {}).forEach(([pid, resp]) => {
-      if (resp.status === 'completed' && resp.text?.trim()) {
-        modelOutputs[pid] = resp.text;
-      }
-    });
-    if (Object.keys(modelOutputs).length < 2) return;
+    // FIXED: Use the same eligibility logic as useEligibility
+    const outputsFromBatch = Object.values(ai.batchResponses || {}).filter(
+      (r: any) => r.status === 'completed' && r.text?.trim()
+    );
+
+    // Also check if we have any completed synthesis or mapping responses
+    const hasCompletedSynthesis = ai?.synthesisResponses 
+      ? Object.values(ai.synthesisResponses).some(resp => {
+          const responses = Array.isArray(resp) ? resp : [resp];
+          return responses.some(r => r.status === 'completed' && r.text?.trim());
+        })
+      : false;
+
+    const hasCompletedMapping = ai?.mappingResponses 
+      ? Object.values(ai.mappingResponses).some(resp => {
+          const responses = Array.isArray(resp) ? resp : [resp];
+          return responses.some(r => r.status === 'completed' && r.text?.trim());
+        })
+      : false;
+
+    // Same eligibility logic as useEligibility
+    const enoughOutputs = outputsFromBatch.length >= 2 || hasCompletedSynthesis || hasCompletedMapping;
+    if (!enoughOutputs) {
+      console.warn(`Not enough outputs for mapping in round ${userTurnId}`);
+      return;
+    }
 
     const effectiveMappingProvider = providerIdOverride || mappingSelectionByRound[userTurnId];
     if (!effectiveMappingProvider) return;
@@ -212,7 +250,7 @@ const { ai: roundAi } = roundInfo;
 
     // Add optimistic pending mapping response to the AI turn
     setMessages((draft: TurnMessage[]) => {
-      const aiTurn = draft.find(t => t.id === roundAi.id && t.type === 'ai') as AiTurn | undefined;
+      const aiTurn = draft.find(t => t.id === ai.id && t.type === 'ai') as AiTurn | undefined;
       if (!aiTurn) return;
 
       const prev = aiTurn.mappingResponses || {};
@@ -232,7 +270,7 @@ const { ai: roundAi } = roundInfo;
     });
 
     // Set active turn for streaming
-    setActiveAiTurnId(roundAi.id);
+    setActiveAiTurnId(ai.id);
     setIsLoading(true);
     setUiPhase('streaming');
     setCurrentAppStep('synthesis');

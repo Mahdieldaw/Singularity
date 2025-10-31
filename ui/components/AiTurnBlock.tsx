@@ -114,6 +114,7 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
   activeMappingClipProviderId,
   onClipClick,
 }) => {
+
   const [isSynthesisExpanded, setIsSynthesisExpanded] = useState(true);
   const [isMappingExpanded, setIsMappingExpanded] = useState(true);
   const [mappingTab, setMappingTab] = useState<'map' | 'options'>('map');
@@ -122,27 +123,40 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
    * ✅ CRITICAL FIX: Safely normalize responses to arrays
    */
   const synthesisResponses = useMemo(() => {
-    const map = aiTurn.synthesisResponses || {};
-    const out: Record<string, ProviderResponse[]> = {};
-    Object.entries(map).forEach(([pid, resp]) => {
-      out[pid] = normalizeResponseArray(resp);
-    });
-
-    // DEBUG: dump normalized responses for inspection in console
-    // This will show whether provider responses contain text/status as expected.
-    console.debug("[AiTurnBlock] normalized synthesisResponses:", out);
-
-    return out;
-  }, [aiTurn.synthesisResponses]);
+  if (!aiTurn.synthesisResponses) aiTurn.synthesisResponses = {};
+  
+  const out: Record<string, ProviderResponse[]> = {};
+  
+  // ✅ CRITICAL: Initialize ALL providers first
+  LLM_PROVIDERS_CONFIG.forEach(p => {
+    out[String(p.id)] = [];
+  });
+  
+  // ✅ Then overlay actual data
+  Object.entries(aiTurn.synthesisResponses).forEach(([pid, resp]) => {
+    out[pid] = normalizeResponseArray(resp);
+  });
+  
+  return out;
+}, [aiTurn.id, JSON.stringify(aiTurn.synthesisResponses)]);
 
   const mappingResponses = useMemo(() => {
-    const map = aiTurn.mappingResponses || {};
-    const out: Record<string, ProviderResponse[]> = {};
-    Object.entries(map).forEach(([pid, resp]) => {
-      out[pid] = normalizeResponseArray(resp);
-    });
-    return out;
-  }, [aiTurn.mappingResponses]);
+  const map = aiTurn.mappingResponses || {};
+  const out: Record<string, ProviderResponse[]> = {};
+  
+  // ✅ Initialize complete domain
+  LLM_PROVIDERS_CONFIG.forEach(p => {
+    out[String(p.id)] = [];
+  });
+  
+  // ✅ Overlay data
+  Object.entries(map).forEach(([pid, resp]) => {
+    out[pid] = normalizeResponseArray(resp);
+  });
+  
+  return out;
+}, [aiTurn.id, JSON.stringify(aiTurn.mappingResponses)]);
+
 
   // Prepare source content (batch + hidden)
   const allSources = useMemo(() => {
@@ -313,18 +327,6 @@ const getSectionStyle = (hasContent: boolean): React.CSSProperties => ({
                         <div style={{ color: '#64748b', display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontStyle: 'italic' }}>Choose a model to synthesize.</div>
                       )}
                     </div>
-                  </div>
-                )}
-                {!hasSynthesis && (
-                  <div style={{ 
-                    display: 'flex', 
-                    alignItems: 'center', 
-                    justifyContent: 'center', 
-                    height: '100%',
-                    color: '#64748b',
-                    fontStyle: 'italic'
-                  }}>
-                    No synthesis available
                   </div>
                 )}
               </div>

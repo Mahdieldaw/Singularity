@@ -6,6 +6,7 @@ import {
   currentSessionIdAtom,
   selectedModelsAtom,
   isHistoryPanelOpenAtom,
+  activeClipsAtom, // ← ADD THIS IMPORT
   // Add any other atoms that need resetting
 } from '../state/atoms';
 import api from '../services/extension-api';
@@ -20,8 +21,8 @@ export function useInitialization(): boolean {
   const setCurrentSessionId = useSetAtom(currentSessionIdAtom);
   const setSelectedModels = useSetAtom(selectedModelsAtom);
   const setIsHistoryPanelOpen = useSetAtom(isHistoryPanelOpenAtom);
+  const setActiveClips = useSetAtom(activeClipsAtom); // ← ADD THIS SETTER
 
-  
   useEffect(() => {
     // Prevent this from running more than once
     if (isInitialized) return;
@@ -40,14 +41,24 @@ export function useInitialization(): boolean {
 
       // --- Stage 2: State Reset & Defaulting (from your old bootstrap hook) ---
       // This ensures the UI starts in a clean, predictable state.
-      const defaultModels = LLM_PROVIDERS_CONFIG.reduce<Record<string, boolean>>((acc, p) => {
-        acc[p.id] = ['claude', 'gemini', 'chatgpt'].includes(p.id);
-        return acc;
-      }, {});
-      
       setMessages([]);
       setCurrentSessionId(null); // Critical: Start with no session
-      setSelectedModels(defaultModels);
+      
+      // ✅ ADD THIS: Reset activeClipsAtom to empty object
+      setActiveClips({});
+      
+      // Restore last-used selected models if available; otherwise respect atom default
+      try {
+        const raw = localStorage.getItem('htos_selected_models');
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (parsed && typeof parsed === 'object') {
+            setSelectedModels(parsed);
+          }
+        }
+      } catch (_) {
+        // best-effort only
+      }
       setIsHistoryPanelOpen(false);
       console.log('[Init] UI state has been reset to defaults.');
 
@@ -58,7 +69,7 @@ export function useInitialization(): boolean {
     };
 
     initialize();
-  }, [isInitialized, setMessages, setCurrentSessionId, setSelectedModels, setIsHistoryPanelOpen]);
+  }, [isInitialized, setMessages, setCurrentSessionId, setSelectedModels, setIsHistoryPanelOpen, setActiveClips]); // ← ADD setActiveClips to deps
 
   return isInitialized;
 }

@@ -75,7 +75,7 @@ export const synthSelectionsByRoundAtom = atomWithImmer<Record<string, Record<st
 export const mappingSelectionByRoundAtom = atomWithImmer<Record<string, string | null>>({});
 export const thinkSynthByRoundAtom = atomWithImmer<Record<string, boolean>>({});
 export const thinkMappingByRoundAtom = atomWithImmer<Record<string, boolean>>({});
-export const activeClipsAtom = atomWithImmer<Record<string, { synthesis?: string; mapping?: string }>>({});
+export const activeClipsAtom = atom<Record<string, { synthesis?: string; mapping?: string }>>({});
 
 // -----------------------------
 // History & sessions

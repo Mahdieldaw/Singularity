@@ -12,14 +12,20 @@ const ClipsCarousel: React.FC<ClipsCarouselProps> = ({ providers, responsesMap, 
   // In ClipsCarousel.tsx - Simplified for historical-only usage
   const getProviderState = (providerId: string): 'never-run' | 'available' | 'loading' => {
     const responses = responsesMap[providerId];
-    
-    // ✅ Always historical: no responses = never run (clickable)
-    if (responses === undefined || !responses || responses.length === 0) {
+
+    if (responses === undefined) {
       return 'never-run';
     }
-    
+
+    if (!Array.isArray(responses) || responses.length === 0) {
+      return 'never-run';
+    }
+
     const last = responses[responses.length - 1];
-    if (last.status === 'pending' || last.status === 'streaming') return 'loading';
+    if (last.status === 'pending' || last.status === 'streaming') {
+      return 'loading';
+    }
+
     return 'available';
   };
 
@@ -28,7 +34,7 @@ const ClipsCarousel: React.FC<ClipsCarouselProps> = ({ providers, responsesMap, 
       {providers.map((p) => {
         const state = getProviderState(String(p.id));
         const isSelected = activeProviderId === p.id;
-        const isDisabled = state === 'loading'; // Only disable when actually loading
+        const isDisabled = state === 'loading'; // ← ONLY disable when loading
         const isNeverRun = state === 'never-run';
         
         const baseBg = isNeverRun ? '#0f172a' : 'rgba(255,255,255,0.06)';
