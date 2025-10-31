@@ -59,23 +59,26 @@ export default function ChatView() {
           <div style={{ flex: 1, overflow: 'hidden' }}>
             <Virtuoso
               data={validMessages}
+              // follow only when the user is already at the bottom; prevents forcing scroll when user is reading older turns
               followOutput="auto"
-              components={{ 
-                Scroller: React.forwardRef((props: any, ref: any) => (
-                  <div 
-                    {...props} 
-                    ref={(node) => {
-                      // Combine refs
-                      if (typeof ref === 'function') {
-                        ref(node);
-                      } else if (ref) {
-                        ref.current = node;
-                      }
-                      scrollerRef.current = node;
-                    }} 
-                  />
-                ))
-              }}
+              // render extra content above/below viewport to reduce reflows/jumps during streaming/height changes
+              increaseViewportBy={{ top: 800, bottom: 600 }}
+               components={{ 
+                 Scroller: React.forwardRef((props: any, ref: any) => (
+                   <div 
+                     {...props} 
+                     ref={(node) => {
+                       // Combine refs
+                       if (typeof ref === 'function') {
+                         ref(node);
+                       } else if (ref) {
+                         ref.current = node;
+                       }
+                       scrollerRef.current = node;
+                     }} 
+                   />
+                 ))
+               }}
               itemContent={itemContent}
               computeItemKey={(index, message) => {
                 // ✅ FIX: Safe key computation

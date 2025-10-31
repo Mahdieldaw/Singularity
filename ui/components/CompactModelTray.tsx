@@ -105,12 +105,12 @@ const CompactModelTray = ({
       ref={containerRef}
       style={{
         position: 'fixed',
-        bottom: `${chatInputHeight + 16}px`, // FIX: Dynamic bottom position
+        bottom: `${chatInputHeight + 24}px`, // FIX: slightly larger offset so tray lifts above expanded input
         left: '50%',
         transform: 'translateX(-50%)',
         width: 'min(800px, calc(100% - 32px))',
         maxHeight: 'calc(100vh - 120px)', // Prevent overlap
-        zIndex: 999,
+        zIndex: 2000, // ensure tray appears above chat input and overlays
         transition: 'bottom 0.2s ease-out',
       }}
     >
@@ -218,19 +218,20 @@ const CompactModelTray = ({
               style={{
                 position: 'absolute',
                 bottom: '100%',
-                right: '50%', // Align to map label
-                background: 'rgba(255, 255, 255, 0.08)',
-                backdropFilter: 'blur(20px)',
-                border: '1px solid rgba(255, 255, 255, 0.1)',
+                right: '65%', // move further left so dropdown aligns better with the Map label
+                background: 'rgba(3, 7, 18, 0.72)', // darker backdrop for readability
+                color: '#e2e8f0',
+                border: '1px solid rgba(255, 255, 255, 0.06)',
                 borderRadius: '8px',
                 padding: '8px',
-                minWidth: '150px',
+                minWidth: '170px',
                 zIndex: 1000,
+                boxShadow: '0 8px 24px rgba(2,6,23,0.6)'
               }}
               role="menu"
               aria-label="Map provider selection"
             >
-              {selectedProviders.map((provider) => {
+              {LLM_PROVIDERS_CONFIG.map((provider) => {
                 const isSelected = mapProviderId === provider.id;
                 const isDisabled = unifyProviderId === provider.id; // Cannot select same as unify
                 return (
@@ -238,6 +239,8 @@ const CompactModelTray = ({
                     key={provider.id}
                     onClick={() => {
                       if (isDisabled || isLoading) return;
+                      // If provider isn't enabled globally, enable it so it's available as a batch provider
+                      if (!selectedModels[provider.id]) onToggleModel(provider.id);
                       if (mapProviderId === provider.id) {
                         // Toggle off Map when clicking the already selected provider
                         onSetMappingProvider?.(null);
@@ -255,20 +258,21 @@ const CompactModelTray = ({
                       display: 'block',
                       width: '100%',
                       textAlign: 'left',
-                      padding: '4px 8px',
-                      background: isSelected ? 'rgba(34, 197, 94, 0.3)' : 'transparent',
-                      color: isSelected ? '#22c55e' : '#94a3b8',
+                      padding: '6px 10px',
+                      background: isSelected ? 'rgba(34, 197, 94, 0.12)' : 'transparent',
+                      color: isSelected ? '#22c55e' : '#e2e8f0',
                       border: 'none',
                       borderRadius: '4px',
                       cursor: isDisabled ? 'not-allowed' : 'pointer',
-                      transition: 'all 0.2s ease',
+                      transition: 'all 0.12s ease',
                       opacity: isDisabled ? 0.5 : 1,
+                      fontSize: '12px' // increased to match model selector
                     }}
                     onMouseEnter={(e) => {
-                      if (isSelected) e.currentTarget.style.boxShadow = '0 0 8px rgba(34, 197, 94, 0.5)';
+                      if (!isDisabled) e.currentTarget.style.background = 'rgba(255,255,255,0.02)';
                     }}
                     onMouseLeave={(e) => {
-                      e.currentTarget.style.boxShadow = 'none';
+                      e.currentTarget.style.background = isSelected ? 'rgba(34, 197, 94, 0.12)' : 'transparent';
                     }}
                   >
                     {provider.name}
@@ -276,11 +280,6 @@ const CompactModelTray = ({
                   </button>
                 );
               })}
-              {selectedProviders.length < 2 && (
-                <div style={{ fontSize: '10px', color: '#64748b', padding: '4px 8px', textAlign: 'center' }}>
-                  Select 2+ models to enable.
-                </div>
-              )}
             </div>
           )}
 
@@ -303,21 +302,22 @@ const CompactModelTray = ({
               style={{
                 position: 'absolute',
                 bottom: '100%',
-                right: 0, // Align to unify label
-                background: 'rgba(255, 255, 255, 0.08)',
-                backdropFilter: 'blur(20px)',
-                border: '1px solid rgba(255, 255, 255, 0.1)',
+                right: '55%', // move left so unify dropdown centers better under the Unify label
+                background: 'rgba(3, 7, 18, 0.72)',
+                color: '#e2e8f0',
+                border: '1px solid rgba(255, 255, 255, 0.06)',
                 borderRadius: '8px',
                 padding: '8px',
-                minWidth: '150px',
+                minWidth: '170px',
                 zIndex: 1000,
+                boxShadow: '0 8px 24px rgba(2,6,23,0.6)'
               }}
               role="menu"
               aria-label="Unify provider selection"
             >
               {powerUserMode ? (
                 // Multi-select for power user
-                selectedProviders.map((provider) => {
+                LLM_PROVIDERS_CONFIG.map((provider) => {
                   const isSelected = synthesisProviders.includes(provider.id);
                   const isDisabled = mapProviderId === provider.id; // Cannot select same as map
                   return (
@@ -327,12 +327,12 @@ const CompactModelTray = ({
                         display: 'flex',
                         alignItems: 'center',
                         gap: '8px',
-                        padding: '4px 8px',
+                        padding: '6px 8px',
                         cursor: isDisabled ? 'not-allowed' : 'pointer',
                         borderRadius: '4px',
-                        background: isSelected ? 'rgba(251, 191, 36, 0.3)' : 'transparent',
+                        background: isSelected ? 'rgba(251, 191, 36, 0.12)' : 'transparent',
                         opacity: isDisabled ? 0.5 : 1,
-                        transition: 'all 0.2s ease',
+                        transition: 'all 0.12s ease',
                       }}
                       onMouseEnter={(e) => {
                         if (isSelected && !isDisabled) e.currentTarget.style.boxShadow = '0 0 8px rgba(251, 191, 36, 0.5)';
@@ -344,7 +344,12 @@ const CompactModelTray = ({
                       <input
                         type="checkbox"
                         checked={isSelected}
-                        onChange={() => !isLoading && !isDisabled && onToggleSynthesisProvider?.(provider.id)}
+                        onChange={() => {
+                          if (isDisabled || isLoading) return;
+                          // enable provider globally if not already
+                          if (!selectedModels[provider.id]) onToggleModel(provider.id);
+                          !isLoading && onToggleSynthesisProvider?.(provider.id);
+                        }}
                         disabled={isDisabled || isLoading}
                         style={{ width: '14px', height: '14px', accentColor: '#fbbf24' }}
                       />
@@ -356,7 +361,7 @@ const CompactModelTray = ({
                 })
               ) : (
                 // Single select
-                selectedProviders.map((provider) => {
+                LLM_PROVIDERS_CONFIG.map((provider) => {
                   const isSelected = unifyProviderId === provider.id;
                   const isDisabled = mapProviderId === provider.id;
                   return (
@@ -364,6 +369,8 @@ const CompactModelTray = ({
                       key={provider.id}
                       onClick={() => {
                         if (isDisabled || isLoading) return;
+                        // enable globally if not selected
+                        if (!selectedModels[provider.id]) onToggleModel(provider.id);
                         if (unifyProviderId === provider.id) {
                           // Toggle off Unify when clicking the already selected provider
                           onSetSynthesisProvider?.(null);
@@ -377,20 +384,21 @@ const CompactModelTray = ({
                         display: 'block',
                         width: '100%',
                         textAlign: 'left',
-                        padding: '4px 8px',
-                        background: isSelected ? 'rgba(251, 191, 36, 0.3)' : 'transparent',
-                        color: isSelected ? '#fbbf24' : '#94a3b8',
+                        padding: '6px 10px',
+                        background: isSelected ? 'rgba(251, 191, 36, 0.12)' : 'transparent',
+                        color: isSelected ? '#fbbf24' : '#e2e8f0',
                         border: 'none',
                         borderRadius: '4px',
                         cursor: isDisabled ? 'not-allowed' : 'pointer',
-                        transition: 'all 0.2s ease',
+                        transition: 'all 0.12s ease',
                         opacity: isDisabled ? 0.5 : 1,
+                        fontSize: '12px' // increased to match model selector
                       }}
                       onMouseEnter={(e) => {
-                        if (isSelected && !isDisabled) e.currentTarget.style.boxShadow = '0 0 8px rgba(251, 191, 36, 0.5)';
+                        if (!isDisabled) e.currentTarget.style.background = 'rgba(255,255,255,0.02)';
                       }}
                       onMouseLeave={(e) => {
-                        e.currentTarget.style.boxShadow = 'none';
+                        e.currentTarget.style.background = isSelected ? 'rgba(251, 191, 36, 0.12)' : 'transparent';
                       }}
                     >
                       {provider.name}
@@ -398,11 +406,6 @@ const CompactModelTray = ({
                     </button>
                   );
                 })
-              )}
-              {selectedProviders.length < 2 && (
-                <div style={{ fontSize: '10px', color: '#64748b', padding: '4px 8px', textAlign: 'center' }}>
-                  Select 2+ models to enable.
-                </div>
               )}
             </div>
           )}
@@ -719,34 +722,34 @@ const CompactModelTray = ({
                       {selectedProviders
                         .filter(p => mapProviderId !== p.id) // Exclude current map
                         .map(provider => {
-                          const isSelected = synthesisProviders.includes(provider.id);
-                          return (
-                            <label
-                              key={provider.id}
-                              style={{
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: '6px',
-                                padding: '4px',
-                                borderRadius: '4px',
-                                background: isSelected ? 'rgba(251, 191, 36, 0.2)' : 'transparent',
-                                cursor: 'pointer',
-                                transition: 'all 0.2s ease',
-                              }}
-                            >
-                              <input
-                                type="checkbox"
-                                checked={isSelected}
-                                onChange={() => !isLoading && onToggleSynthesisProvider?.(provider.id)}
-                                disabled={isLoading}
-                                style={{ width: '14px', height: '14px', accentColor: '#fbbf24' }}
-                              />
-                              <span style={{ fontSize: '11px', color: isSelected ? '#fbbf24' : '#94a3b8' }}>
-                                {provider.name}
-                              </span>
-                            </label>
-                          );
-                        })}
+                        const isSelected = synthesisProviders.includes(provider.id);
+                        return (
+                          <label
+                            key={provider.id}
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '6px',
+                              padding: '4px',
+                              borderRadius: '4px',
+                              background: isSelected ? 'rgba(251, 191, 36, 0.2)' : 'transparent',
+                              cursor: 'pointer',
+                              transition: 'all 0.2s ease',
+                            }}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={isSelected}
+                              onChange={() => !isLoading && onToggleSynthesisProvider?.(provider.id)}
+                              disabled={isLoading}
+                              style={{ width: '14px', height: '14px', accentColor: '#fbbf24' }}
+                            />
+                            <span style={{ fontSize: '12px', color: isSelected ? '#fbbf24' : '#94a3b8' }}>
+                              {provider.name}
+                            </span>
+                          </label>
+                        );
+                      })}
                     </div>
                   ) : (
                     <select

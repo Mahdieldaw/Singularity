@@ -1,6 +1,7 @@
 import { useCallback } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { messagesAtom, activeClipsAtom, alertTextAtom } from '../state/atoms';
+import { useSetAtom as useSetJotaiAtom } from 'jotai';
 import { useRoundActions } from './useRoundActions';
 import type { AiTurn, TurnMessage } from '../types';
 
@@ -9,6 +10,7 @@ export function useClipActions() {
   const activeClips = useAtomValue(activeClipsAtom);
   const setActiveClips = useSetAtom(activeClipsAtom);
   const setAlertText = useSetAtom(alertTextAtom);
+  const setMessages = useSetJotaiAtom(messagesAtom as any);
   const { runSynthesisForRound, runMappingForRound } = useRoundActions();
 
   const handleClipClick = useCallback(async (aiTurnId: string, type: 'synthesis' | 'mapping', providerId: string) => {
@@ -24,6 +26,26 @@ export function useClipActions() {
     setActiveClips((draft: Record<string, { synthesis?: string; mapping?: string }>) => {
       draft[aiTurnId] = { ...(draft[aiTurnId] || {}), [type]: providerId };
     });
+
+    // If the selected provider is not present in the AI turn's batchResponses, add an optimistic pending
+    // batch response so the batch count increases and the model shows up in the batch area.
+    if (!aiTurn.batchResponses || !aiTurn.batchResponses[providerId]) {
+      setMessages((draft: any) => {
+        const turn = draft.find((t: any) => t.type === 'ai' && (t as AiTurn).id === aiTurnId) as AiTurn | undefined;
+        if (!turn) return;
+        turn.batchResponses = turn.batchResponses || {};
+        // Only add if still missing (concurrent updates may have added it)
+        if (!turn.batchResponses[providerId]) {
+          turn.batchResponses[providerId] = {
+            providerId,
+            text: '',
+            status: 'pending',
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+          } as any;
+        }
+      });
+    }
 
     const userTurnId = aiTurn.userTurnId;
     if (type === 'mapping' && userTurnId) {

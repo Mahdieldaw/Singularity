@@ -1,7 +1,8 @@
+// ProviderResponseBlock.tsx - COMPLETE FIXED VERSION
 import { LLMProvider, AppStep, ProviderResponse } from '../types';
 import { LLM_PROVIDERS_CONFIG } from '../constants';
 import { BotIcon, ChevronDownIcon, ChevronUpIcon } from './Icons';
-import { useState, useCallback, useMemo, useRef, useEffect } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import { ProviderPill } from './ProviderPill';
 import { useAtomValue } from 'jotai';
 import { providerContextsAtom } from '../state/atoms';
@@ -70,6 +71,7 @@ const ProviderResponseBlock = ({
   onEnterComposerMode
 }: ProviderResponseBlockProps) => {
   const providerContexts = useAtomValue(providerContextsAtom);
+  
   // Normalize responses
   const effectiveProviderResponses = providerResponses 
     ? { ...providerResponses }
@@ -82,39 +84,11 @@ const ProviderResponseBlock = ({
 
   const effectiveProviderStates = Object.entries(effectiveProviderResponses).reduce((acc, [providerId, response]) => {
     acc[providerId] = {
-      text: (response as any).text || '', // ⭐ FIX 1: Ensure text is never undefined
+      text: (response as any).text || '',
       status: (response as any).status,
     };
     return acc;
   }, {} as ProviderStates);
-
-  // -------------------------
-  // Scroll isolation helpers
-  // -------------------------
-  // Keep refs for each provider content container so each card can manage its own scroll
-  const contentRefs = useRef<Record<string, HTMLDivElement | null>>({});
-  const [userScrollMap, setUserScrollMap] = useState<Record<string, boolean>>({});
-
-  const handleContentScroll = useCallback((providerId: string) => (e: React.UIEvent<HTMLDivElement>) => {
-    const target = e.currentTarget as HTMLDivElement;
-    const isAtBottom = target.scrollHeight - target.scrollTop - target.clientHeight < 20;
-    setUserScrollMap(prev => ({ ...prev, [providerId]: !isAtBottom }));
-  }, []);
-
-  // Auto-scroll streaming providers unless the user has scrolled up
-  useEffect(() => {
-    Object.keys(effectiveProviderStates).forEach((pid) => {
-      const state = effectiveProviderStates[pid];
-      const ref = contentRefs.current[pid];
-      const userHasScrolled = !!userScrollMap[pid];
-      const isStreaming = state?.status === 'streaming';
-      if (ref && isStreaming && !userHasScrolled) {
-        requestAnimationFrame(() => {
-          try { ref.scrollTop = ref.scrollHeight; } catch (e) {}
-        });
-      }
-    });
-  }, [effectiveProviderStates, userScrollMap, isLoading]);
 
   const [expandedProviders, setExpandedProviders] = useState<Record<string, boolean>>({});
   
@@ -194,8 +168,7 @@ const ProviderResponseBlock = ({
     return null;
   }
 
-  // ⭐ FIX 1: Render ALL providers (not just visible) to ensure data is available
-  // We render hidden ones with display:none so they maintain state
+  // Render ALL providers (not just visible) to ensure data is available
   const renderProviderCard = (providerId: string, isVisible: boolean) => {
     const state = effectiveProviderStates[providerId];
     const provider = getProviderConfig(providerId);
@@ -212,18 +185,19 @@ const ProviderResponseBlock = ({
       <div 
         key={providerId}
         style={{
-          // ⭐ FIX 3: Wider cards (380px instead of 350px)
           minWidth: '380px',
           maxWidth: '380px',
-          height: '400px',
-          display: isVisible ? 'flex' : 'none', // ⭐ FIX 1: Hidden cards still mounted
+          // ✅ Enable internal scrolling with constrained height
+          maxHeight: isExpanded ? '400px' : '200px',
+          display: isVisible ? 'flex' : 'none',
           flexDirection: 'column',
           background: '#1e293b',
           border: '1px solid #334155',
           borderRadius: '12px',
-          padding: '16px',
+          padding: '12px',
           flexShrink: 0,
-          transition: isReducedMotion ? 'none' : 'background 0.2s ease',
+          transition: isReducedMotion ? 'none' : 'background 0.18s ease, max-height 0.18s ease',
+          overflow: 'hidden', // Container clips content
           ...(isExpanded && { background: '#293548' })
         }}
         aria-live="polite"
@@ -288,59 +262,49 @@ const ProviderResponseBlock = ({
           </button>
         </div>
 
-        {/* ⭐ SCROLLABLE CONTENT AREA - Fixed height prevents viewport jumps */}
+        {/* ✅ CONTENT AREA: Now scrolls internally */}
         <div
-          ref={(el) => { contentRefs.current[providerId] = el; }}
-          onScroll={handleContentScroll(providerId)}
           style={{
-            flex: 1,
-            overflowY: 'auto',
+            flex: '1 1 auto', // Take available space
+            overflowY: 'auto', // ✅ Enable internal scrolling
             overflowX: 'hidden',
-            padding: '12px',
-            background: 'rgba(0, 0, 0, 0.2)',
+            padding: isExpanded ? '12px' : '8px 12px',
+            background: isExpanded ? 'rgba(0, 0, 0, 0.18)' : 'rgba(0,0,0,0.04)',
             borderRadius: '8px',
-            // Performance optimizations
-            contentVisibility: 'auto',
-            contain: 'layout paint',
-            // Remove smooth scrolling during updates to prevent jumpy behavior
-            scrollBehavior: 'auto',
-            // Prevent the browser from trying to propagate momentum or snap
-            overscrollBehavior: 'contain',
-            position: 'relative', // For collapsed overlay
           }}
         >
           {!isExpanded ? (
             <>
-              {/* ⭐ FIX 2: Collapsed preview with visual indicator */}
+              {/* Collapsed preview with visual indicator */}
               <div style={{ 
                 fontSize: '13px', 
                 lineHeight: '1.5', 
                 color: '#e2e8f0',
                 display: '-webkit-box',
-                WebkitLineClamp: 3, // Show 3 lines instead of 2
+                WebkitLineClamp: 3,
                 WebkitBoxOrient: 'vertical',
                 overflow: 'hidden',
-                marginBottom: '8px',
+                marginBottom: '6px',
               }}>
                 {displayText}
                 {isStreaming && !state?.text && <span className="streaming-dots" />}
               </div>
               
-              {/* ⭐ FIX 2: Visual "Click to expand" indicator */}
+              {/* Visual "Click to expand" indicator */}
               {state?.text && state.text.length > 200 && (
                 <div style={{
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
                   gap: '6px',
-                  padding: '8px',
+                  padding: '6px',
                   background: 'rgba(100, 116, 139, 0.1)',
                   borderRadius: '6px',
                   fontSize: '11px',
                   color: '#94a3b8',
                   cursor: 'pointer',
                   border: '1px dashed #475569',
-                  marginTop: '12px',
+                  marginTop: '8px',
                 }}
                 onClick={() => toggleExpanded(providerId)}
                 >
@@ -364,13 +328,14 @@ const ProviderResponseBlock = ({
         </div>
 
         {/* Fixed Footer - 32px */}
+        {/* Footer: hide in collapsed preview to avoid empty background space */}
         <div style={{ 
-          marginTop: '12px',
-          display: 'flex', 
+          marginTop: isExpanded ? '12px' : '8px',
+          display: isExpanded ? 'flex' : 'none', 
           justifyContent: 'flex-end', 
           gap: '8px',
           flexShrink: 0,
-          height: '32px'
+          height: isExpanded ? '32px' : '0'
         }}>
           <button
             onClick={(e) => {
@@ -561,11 +526,11 @@ const ProviderResponseBlock = ({
           </div>
         </div>
 
-        {/* ⭐ CAROUSEL LAYOUT: [Left Indicator] [3 Main Cards] [Right Indicator] */}
+        {/* CAROUSEL LAYOUT: [Left Indicator] [3 Main Cards] [Right Indicator] */}
         <div style={{
           display: 'flex',
           alignItems: 'center',
-          gap: '12px', // ⭐ FIX 3: Reduced gap to maximize card space
+          gap: '12px',
         }}>
           {/* Left Side Indicator */}
           {hiddenProviders.left && (
@@ -577,12 +542,12 @@ const ProviderResponseBlock = ({
           {/* Main Cards Container (3 slots) */}
           <div style={{
             display: 'flex',
-            gap: '12px',
+            gap: '8px',
             flex: 1,
             justifyContent: 'center',
             minWidth: 0,
           }}>
-            {/* ⭐ FIX 1: Render ALL providers, control visibility via display:none */}
+            {/* Render ALL providers, control visibility via display:none */}
             {allProviderIds.map(id => renderProviderCard(id, visibleSlots.includes(id)))}
           </div>
 

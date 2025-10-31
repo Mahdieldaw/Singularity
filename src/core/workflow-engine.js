@@ -124,6 +124,7 @@ ${modelOutputsBlock}
 // Track last seen text per provider/session for delta streaming
 const lastStreamState = new Map();
 
+
 function makeDelta(sessionId, providerId, fullText = "") {
   if (!sessionId) return fullText || "";
   
@@ -168,25 +169,34 @@ function makeDelta(sessionId, providerId, fullText = "") {
     return "";
   }
 
-  // CASE 4: Text got shorter (should never happen in streaming) — error state
+  // CASE 4: Text got shorter - smart detection with warnings instead of errors
   if (fullText.length < prev.length) {
     const regression = prev.length - fullText.length;
     
-    // ✅ Allow up to 50 char regressions (thinking blocks, corrections)
-    if (regression <= 50) {
-      logger.stream(`Small regression (${regression} chars) for ${providerId} - resetting`);
+    // Calculate regression percentage
+    const regressionPercent = (regression / prev.length) * 100;
+    
+    // ✅ Allow small absolute regressions OR small percentage regressions
+    const isSmallRegression = regression <= 200 || regressionPercent <= 5;
+    
+    if (isSmallRegression) {
+      logger.stream(`Acceptable regression for ${providerId}:`, { 
+        chars: regression, 
+        percent: regressionPercent.toFixed(1) + '%' 
+      });
       lastStreamState.set(key, fullText);
-      return ""; // Let next chunk provide new delta
+      return "";
     }
     
-    logger.error(`[makeDelta] Large text regression for ${providerId}:`, { 
+    // Only warn (not error) about significant regressions
+    logger.warn(`[makeDelta] Significant text regression for ${providerId}:`, { 
       prevLen: prev.length, 
       fullLen: fullText.length,
-      regression 
+      regression,
+      regressionPercent: regressionPercent.toFixed(1) + '%'
     });
     return "";
   }
-
 
   // CASE 5: Fallback (shouldn't reach here, but safe default)
   return "";
