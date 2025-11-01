@@ -1,7 +1,6 @@
 // ui/components/AiTurnBlock.tsx - HYBRID COLLAPSIBLE SOLUTION
 import React from 'react';
 import { AiTurn, ProviderResponse, AppStep } from '../types';
-import ProviderResponseBlock from './ProviderResponseBlock';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useMemo, useState, useCallback, useRef, useEffect, useLayoutEffect } from 'react';
@@ -53,7 +52,8 @@ function parseSynthesisResponse(response?: string | null) {
 const useShorterHeight = (
   hasSynthesis: boolean,
   hasMapping: boolean,
-  synthesisVersion: string | number
+  synthesisVersion: string | number,
+  pause: boolean
 ) => {
   const synthRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<HTMLDivElement>(null);
@@ -66,6 +66,7 @@ const useShorterHeight = (
   const rafId = useRef<number | null>(null);
 
   const measureOnce = useCallback(() => {
+    if (pause) return;
     const s = synthRef.current;
     const m = mapRef.current;
     
@@ -88,7 +89,7 @@ const useShorterHeight = (
     // Only update if changed by more than 2px to avoid micro-adjustments
     setShorterHeight(prev => (prev === null || Math.abs(prev - h) > 2) ? h : prev);
     setShorterSection(prev => prev !== sec ? sec : prev);
-  }, [hasSynthesis, hasMapping]);
+  }, [hasSynthesis, hasMapping, pause]);
 
   const scheduleMeasure = useCallback(() => {
     if (rafId.current !== null) return;
@@ -140,10 +141,10 @@ const useShorterHeight = (
   }, [scheduleMeasure]);
 
   useLayoutEffect(() => {
-    if (!hasSynthesis || !hasMapping) return;
+    if (!hasSynthesis || !hasMapping || pause) return;
     const id = requestAnimationFrame(measureOnce);
     return () => cancelAnimationFrame(id);
-  }, [synthesisVersion, hasSynthesis, hasMapping, measureOnce]);
+  }, [synthesisVersion, hasSynthesis, hasMapping, pause, measureOnce]);
 
   return { synthRef, mapRef, shorterHeight, shorterSection };
 };
@@ -160,6 +161,7 @@ interface AiTurnBlockProps {
   activeSynthesisClipProviderId?: string;
   activeMappingClipProviderId?: string;
   onClipClick?: (type: 'synthesis' | 'mapping', providerId: string) => void;
+  children?: React.ReactNode;
 }
 
 const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
@@ -169,10 +171,12 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
   onEnterComposerMode,
   isReducedMotion = false,
   isLoading = false,
+  isLive = false,
   currentAppStep,
   activeSynthesisClipProviderId,
   activeMappingClipProviderId,
   onClipClick,
+  children,
 }) => {
   const [isSynthesisExpanded, setIsSynthesisExpanded] = useState(true);
   const [isMappingExpanded, setIsMappingExpanded] = useState(true);
@@ -270,7 +274,12 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
   const hasSynthesis = !!(activeSynthPid && displayedSynthesisTake?.text);
   const hasMapping = !!(activeMappingPid && getLatestResponse(mappingResponses[activeMappingPid])?.text);
 
-  const { synthRef, mapRef, shorterHeight, shorterSection } = useShorterHeight(hasSynthesis, hasMapping, displayedSynthesisText);
+  const { synthRef, mapRef, shorterHeight, shorterSection } = useShorterHeight(
+    hasSynthesis,
+    hasMapping,
+    displayedSynthesisText,
+    (isLive || isLoading)
+  );
 
   // Determine if sections are truncated
   const synthTruncated = hasSynthesis && hasMapping && shorterHeight && shorterSection === 'mapping';
@@ -278,6 +287,7 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
 
   const getSectionStyle = (section: 'synthesis' | 'mapping', isExpanded: boolean): React.CSSProperties => {
     const isTruncated = section === 'synthesis' ? synthTruncated : mapTruncated;
+    const duringStreaming = isLive || isLoading;
     
     return {
       border: '1px solid #475569',
@@ -290,7 +300,8 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
       height: 'auto',
       boxSizing: 'border-box',
       maxHeight: (isTruncated && !isExpanded) ? `${shorterHeight}px` : 'none',
-      overflow: 'visible',
+      // During streaming, clamp outer section to avoid outer list reflows
+      overflow: duringStreaming ? 'hidden' : 'visible',
       position: 'relative'
     };
   };
@@ -330,8 +341,20 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
                 </div>
                 
                 {!hasSynthesis && (
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#64748b', fontStyle: 'italic' }}>
-                    No synthesis available
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, height: '100%', color: '#94a3b8' }}>
+                    {(() => {
+                      const latest = activeSynthPid ? getLatestResponse(synthesisResponses[activeSynthPid]) : undefined;
+                      const isGenerating = (latest && (latest.status === 'streaming' || latest.status === 'pending')) || isLive || isLoading;
+                      if (isGenerating) {
+                        return (
+                          <>
+                            <span style={{ fontStyle: 'italic' }}>Synthesis generating</span>
+                            <span className="streaming-dots" />
+                          </>
+                        );
+                      }
+                      return <span style={{ fontStyle: 'italic', color: '#64748b' }}>No synthesis yet</span>;
+                    })()}
                   </div>
                 )}
                 
@@ -355,7 +378,38 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
                         borderRadius: 8, 
                         padding: 12,
                         flex: 1,
-                        overflowY: 'visible'
+                        // During streaming, keep inner area scrollable to avoid growing the outer container
+                        overflowY: (isLive || isLoading) ? 'auto' : 'visible',
+                        maxHeight: (isLive || isLoading) ? '40vh' : 'none',
+                        minHeight: 0,
+                        overscrollBehavior: 'contain'
+                      }}
+                      onWheelCapture={(e: React.WheelEvent<HTMLDivElement>) => {
+                        const el = e.currentTarget;
+                        const dy = e.deltaY ?? 0;
+                        const canDown = el.scrollTop + el.clientHeight < el.scrollHeight;
+                        const canUp = el.scrollTop > 0;
+                        if ((dy > 0 && canDown) || (dy < 0 && canUp)) {
+                          e.stopPropagation();
+                        }
+                      }}
+                      onWheel={(e: React.WheelEvent<HTMLDivElement>) => {
+                        const el = e.currentTarget;
+                        const dy = e.deltaY ?? 0;
+                        const canDown = el.scrollTop + el.clientHeight < el.scrollHeight;
+                        const canUp = el.scrollTop > 0;
+                        if ((dy > 0 && canDown) || (dy < 0 && canUp)) {
+                          e.stopPropagation();
+                        }
+                      }}
+                      onTouchStartCapture={(e: React.TouchEvent<HTMLDivElement>) => { e.stopPropagation(); }}
+                      onTouchMove={(e: React.TouchEvent<HTMLDivElement>) => {
+                        const el = e.currentTarget;
+                        const canDown = el.scrollTop + el.clientHeight < el.scrollHeight;
+                        const canUp = el.scrollTop > 0;
+                        if (canDown || canUp) {
+                          e.stopPropagation();
+                        }
                       }}
                     >
                       {activeSynthPid ? (
@@ -495,8 +549,20 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
                 </div>
                 
                 {!hasMapping && (
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#64748b', fontStyle: 'italic' }}>
-                    No mapping available
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, height: '100%', color: '#94a3b8' }}>
+                    {(() => {
+                      const latest = activeMappingPid ? getLatestResponse(mappingResponses[activeMappingPid]) : undefined;
+                      const isGenerating = (latest && (latest.status === 'streaming' || latest.status === 'pending')) || isLive || isLoading;
+                      if (isGenerating) {
+                        return (
+                          <>
+                            <span style={{ fontStyle: 'italic' }}>Conflict map generating</span>
+                            <span className="streaming-dots" />
+                          </>
+                        );
+                      }
+                      return <span style={{ fontStyle: 'italic', color: '#64748b' }}>No mapping yet</span>;
+                    })()}
                   </div>
                 )}
                 
@@ -520,7 +586,9 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
                         borderRadius: 8, 
                         padding: 12,
                         flex: 1,
-                        overflowY: 'visible'
+                        overflowY: (isLive || isLoading) ? 'auto' : 'visible',
+                        maxHeight: (isLive || isLoading) ? '40vh' : 'none',
+                        minHeight: 0
                       }}
                     >
                       {mappingTab === 'options' ? (
@@ -638,7 +706,6 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
                 )}
               </div>
             </div>
-          </div>
 
           {hasSources && (
             <div 
@@ -660,15 +727,7 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
                 </div>
                 {showSourceOutputs && (
                   <div className="sources-content">
-                    <ProviderResponseBlock
-                      providerResponses={allSources}
-                      isLoading={isLoading}
-                      currentAppStep={currentAppStep as AppStep}
-                      isReducedMotion={isReducedMotion}
-                      aiTurnId={aiTurn.id}
-                      sessionId={aiTurn.sessionId ?? undefined}
-                      onEnterComposerMode={handleEnterComposerMode}
-                    />
+                    {children}
                   </div>
                 )}
               </div>
@@ -685,6 +744,7 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
               </button>
             </div>
           )}
+          </div>
         </div>
       </div>
     </div>

@@ -6,6 +6,8 @@ import { atomWithStorage } from 'jotai/utils';
 import type {
   TurnMessage,
   UserTurn,
+  AiTurn,
+  ProviderResponse,
   UiPhase,
   AppStep,
   HistorySessionSummary,
@@ -14,18 +16,55 @@ import type {
   CanvasTabData
 } from '../types';
 import { ViewMode } from '../types';
-import { LLM_PROVIDERS_CONFIG } from '../constants';
 
-// Build a sensible default selected models map (matches original App defaults)
-const DEFAULT_SELECTED_MODELS: Record<string, boolean> = LLM_PROVIDERS_CONFIG.reduce<Record<string, boolean>>((acc, p) => {
-  acc[p.id] = ['claude', 'gemini', 'chatgpt'].includes(p.id);
-  return acc;
-}, {} as Record<string, boolean>);
+// =============================================================================
+// ATOMIC STATE PRIMITIVES (Map + ID index)
+// =============================================================================
+/**
+ * Map-based turn storage for O(1) lookups and surgical updates.
+ * This is the single source of truth for all turn data.
+ */
+export const turnsMapAtom = atomWithImmer<Map<string, TurnMessage>>(new Map());
+
+/**
+ * Ordered list of turn IDs. Changes only when turns are added/removed.
+ */
+export const turnIdsAtom = atomWithImmer<string[]>([]);
+
+/**
+ * Backward-compat: derived messages view from Map + IDs. Read-only.
+ */
+export const messagesAtom = atom<TurnMessage[]>((get) => {
+  const ids = get(turnIdsAtom);
+  const map = get(turnsMapAtom);
+  return ids.map(id => map.get(id)).filter((t): t is TurnMessage => !!t);
+});
+
+/**
+ * Selector: provider responses for a specific AI turn (isolated subscription).
+ */
+export const providerResponsesForTurnAtom = atom(
+  (get) => (turnId: string): Record<string, ProviderResponse> => {
+    const turn = get(turnsMapAtom).get(turnId);
+    if (!turn || turn.type !== 'ai') return {};
+    const aiTurn = turn as AiTurn;
+    return {
+      ...(aiTurn.batchResponses || {}),
+      ...(aiTurn.hiddenBatchOutputs || {})
+    };
+  }
+);
+
+/**
+ * Selector: get a single turn by ID (entity accessor).
+ */
+export const turnByIdAtom = atom(
+  (get) => (turnId: string): TurnMessage | undefined => get(turnsMapAtom).get(turnId)
+);
 
 // -----------------------------
 // Core chat state
 // -----------------------------
-export const messagesAtom = atomWithImmer<TurnMessage[]>([]);
 export const currentSessionIdAtom = atomWithStorage<string | null>('htos_last_session_id', null);
 export const pendingUserTurnsAtom = atomWithImmer<Map<string, UserTurn>>(new Map());
 
@@ -44,7 +83,7 @@ export const isContinuationModeAtom = atom<boolean>(false);
 export const viewModeAtom = atom<ViewMode>(ViewMode.CHAT);
 export const isHistoryPanelOpenAtom = atom<boolean>(false);
 export const isSettingsOpenAtom = atom<boolean>(false);
-export const showWelcomeAtom = atom((get: any) => get(messagesAtom).length === 0);
+export const showWelcomeAtom = atom((get) => get(turnIdsAtom).length === 0);
 export const expandedUserTurnsAtom = atomWithImmer<Record<string, boolean>>({});
 export const showSourceOutputsAtom = atom<boolean>(false);
 export const showScrollToBottomAtom = atom<boolean>(false);
@@ -105,12 +144,13 @@ export const chatInputHeightAtom = atom<number>(80);
 // -----------------------------
 // Derived atoms (examples)
 // -----------------------------
-export const activeProviderCountAtom = atom((get: any) => {
+export const activeProviderCountAtom = atom((get) => {
   const selected = get(selectedModelsAtom) || {};
   return Object.values(selected).filter(Boolean).length;
 });
 
-export const isFirstTurnAtom = atom((get: any) => {
-  const messages = get(messagesAtom) as TurnMessage[];
-  return !messages.some((m: any) => m.type === 'user');
+export const isFirstTurnAtom = atom((get) => {
+  const ids = get(turnIdsAtom);
+  const map = get(turnsMapAtom);
+  return !ids.some(id => map.get(id)?.type === 'user');
 });

@@ -174,9 +174,11 @@ const ProviderResponseBlock = ({
       <div 
         key={providerId}
         style={{
-          minWidth: '380px',
+          flex: '1 1 320px',
+          minWidth: '260px',
           maxWidth: '380px',
-          height: '220px', // Fixed height
+          width: '100%',
+          height: '220px',
           display: isVisible ? 'flex' : 'none',
           flexDirection: 'column',
           background: '#1e293b',
@@ -221,6 +223,38 @@ const ProviderResponseBlock = ({
 
         {/* Scrollable Content Area */}
         <div
+          className="provider-card-scroll"
+          onWheelCapture={(e: React.WheelEvent<HTMLDivElement>) => {
+            const el = e.currentTarget;
+            const dy = e.deltaY ?? 0;
+            const canDown = el.scrollTop + el.clientHeight < el.scrollHeight;
+            const canUp = el.scrollTop > 0;
+            if ((dy > 0 && canDown) || (dy < 0 && canUp)) {
+              // keep wheel within the card when it can scroll
+              e.stopPropagation();
+            }
+          }}
+          onWheel={(e: React.WheelEvent<HTMLDivElement>) => {
+            const el = e.currentTarget;
+            const dy = e.deltaY ?? 0;
+            const canDown = el.scrollTop + el.clientHeight < el.scrollHeight;
+            const canUp = el.scrollTop > 0;
+            if ((dy > 0 && canDown) || (dy < 0 && canUp)) {
+              e.stopPropagation();
+            }
+          }}
+          onTouchStartCapture={(e: React.TouchEvent<HTMLDivElement>) => {
+            // hint to keep gesture inside this element
+            e.stopPropagation();
+          }}
+          onTouchMove={(e: React.TouchEvent<HTMLDivElement>) => {
+            const el = e.currentTarget;
+            const canDown = el.scrollTop + el.clientHeight < el.scrollHeight;
+            const canUp = el.scrollTop > 0;
+            if (canDown || canUp) {
+              e.stopPropagation();
+            }
+          }}
           style={{
             flex: 1,
             overflowY: 'auto',
@@ -228,7 +262,8 @@ const ProviderResponseBlock = ({
             padding: '12px',
             background: 'rgba(0, 0, 0, 0.18)',
             borderRadius: '8px',
-            minHeight: 0
+            minHeight: 0,
+            overscrollBehavior: 'contain'
           }}
         >
           <div className="prose prose-sm max-w-none dark:prose-invert" style={{ 
@@ -428,8 +463,10 @@ const ProviderResponseBlock = ({
             display: 'flex',
             gap: '8px',
             flex: 1,
-            justifyContent: 'center',
+            justifyContent: 'flex-start',
             minWidth: 0,
+            flexWrap: 'wrap',
+            width: '100%',
           }}>
             {/* Render ALL providers, control visibility via display:none */}
             {allProviderIds.map(id => renderProviderCard(id, visibleSlots.includes(id)))}

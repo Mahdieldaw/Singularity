@@ -53,7 +53,6 @@ export default function App() {
       flexDirection: 'column', 
       height: '100vh',
       width: '100vw',
-      overflow: 'hidden',
       background: 'linear-gradient(135deg, #0f0f23 0%, #1a1a3a 100%)',
       minHeight: 0,
     }}>
@@ -64,7 +63,6 @@ export default function App() {
       <div style={{ 
         display: 'flex', 
         flex: 1, 
-        overflow: 'hidden',
         position: 'relative',
         minHeight: 0,
       }}>
@@ -72,23 +70,16 @@ export default function App() {
           flex: 1, 
           display: 'flex', 
           flexDirection: 'column',
-          overflow: 'hidden',
           position: 'relative',
           minHeight: 0,
         }}>
-          {viewMode === ViewMode.COMPOSER ? (
-            <Suspense fallback={<div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%' }}><div className="loading-spinner" /></div>}>
-              <ComposerMode />
-            </Suspense>
-          ) : (
-            <>
-              {/* ChatView contains: WelcomeScreen OR (Messages + ChatInput) */}
-              <ChatView />
-              
-              {/* CompactModelTray - Always visible at bottom */}
-              <CompactModelTrayConnected />
-            </>
-          )}
+         {viewMode === ViewMode.COMPOSER ? (
+  <Suspense fallback={<div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%' }}><div className="loading-spinner" /></div>}>
+    <ComposerMode />
+  </Suspense>
+) : (
+  <ChatView />  // ← Just ChatView, remove the fragment and ModelTray
+)}
         </main>
         
         {/* History Panel Overlay */}

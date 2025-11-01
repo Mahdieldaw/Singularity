@@ -1,8 +1,10 @@
 // ui/hooks/useRoundActions.ts - FIXED VERSION
 import { useCallback, useRef } from 'react';
 import { useAtom, useSetAtom } from 'jotai';
+
 import { 
-  messagesAtom, 
+  messagesAtom,
+  turnsMapAtom,
   synthSelectionsByRoundAtom, 
   mappingSelectionByRoundAtom, 
   activeClipsAtom, 
@@ -19,7 +21,9 @@ import type { ProviderKey } from '../../shared/contract';
 import type { TurnMessage, UserTurn, AiTurn, ProviderResponse } from '../types';
 
 export function useRoundActions() {
-  const [messages, setMessages] = useAtom(messagesAtom);
+  const [messages] = useAtom(messagesAtom);
+  const setTurnsMap = useSetAtom(turnsMapAtom);
+
   const [synthSelectionsByRound, setSynthSelectionsByRound] = useAtom(synthSelectionsByRoundAtom);
   const [mappingSelectionByRound, setMappingSelectionByRound] = useAtom(mappingSelectionByRoundAtom);
   const [activeClips] = useAtom(activeClipsAtom);
@@ -111,17 +115,14 @@ export function useRoundActions() {
     const preferredMappingProvider = preferredMappingCandidate || null;
 
     // Add optimistic pending synthesis responses to the AI turn
-    setMessages((draft: TurnMessage[]) => {
-      const aiTurn = draft.find(t => t.id === ai.id && t.type === 'ai') as AiTurn | undefined;
-      if (!aiTurn) return;
-
-      // ✅ Initialize if missing
+    setTurnsMap((draft: Map<string, TurnMessage>) => {
+      const existing = draft.get(ai.id);
+      if (!existing || existing.type !== 'ai') return;
+      const aiTurn = existing as AiTurn;
       if (!aiTurn.synthesisResponses) aiTurn.synthesisResponses = {};
-      const prev = aiTurn.synthesisResponses;
-      const next: Record<string, ProviderResponse[]> = { ...prev };
-      
+      const next: Record<string, ProviderResponse[]> = { ...aiTurn.synthesisResponses };
       selected.forEach((pid) => {
-        const arr = Array.isArray(next[pid]) ? next[pid] : [];
+        const arr = Array.isArray(next[pid]) ? [...next[pid]] : [];
         arr.push({ 
           providerId: pid as ProviderKey, 
           text: '', 
@@ -130,7 +131,6 @@ export function useRoundActions() {
         });
         next[pid] = arr;
       });
-      
       aiTurn.synthesisResponses = next;
     });
 
@@ -196,7 +196,7 @@ export function useRoundActions() {
     thinkSynthByRound, 
     mappingSelectionByRound, 
     activeClips, 
-    setMessages,
+    setTurnsMap,
     setActiveAiTurnId,
     setIsLoading, 
     setUiPhase, 
@@ -249,16 +249,13 @@ export function useRoundActions() {
     });
 
     // Add optimistic pending mapping response to the AI turn
-    setMessages((draft: TurnMessage[]) => {
-      const aiTurn = draft.find(t => t.id === ai.id && t.type === 'ai') as AiTurn | undefined;
-      if (!aiTurn) return;
-
+    setTurnsMap((draft: Map<string, TurnMessage>) => {
+      const existing = draft.get(ai.id);
+      if (!existing || existing.type !== 'ai') return;
+      const aiTurn = existing as AiTurn;
       const prev = aiTurn.mappingResponses || {};
       const next: Record<string, ProviderResponse[]> = { ...prev };
-      const arr = Array.isArray(next[effectiveMappingProvider]) 
-        ? [...next[effectiveMappingProvider]] 
-        : [];
-      
+      const arr = Array.isArray(next[effectiveMappingProvider]) ? [...next[effectiveMappingProvider]] : [];
       arr.push({
         providerId: effectiveMappingProvider as ProviderKey,
         text: '',
@@ -308,7 +305,7 @@ export function useRoundActions() {
     mappingSelectionByRound, 
     setMappingSelectionByRound,
     thinkMappingByRound,
-    setMessages,
+    setTurnsMap,
     setActiveAiTurnId,
     setIsLoading, 
     setUiPhase, 

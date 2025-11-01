@@ -1,29 +1,27 @@
 import React, { useMemo } from 'react';
 import { Virtuoso } from 'react-virtuoso';
 import { useAtom } from 'jotai';
-import { messagesAtom, isLoadingAtom, showWelcomeAtom } from '../state/atoms';
+import { turnIdsAtom, isLoadingAtom, showWelcomeAtom, uiPhaseAtom } from '../state/atoms';
+
 import MessageRow from '../components/MessageRow';
 import ChatInputConnected from '../components/ChatInputConnected';
 import WelcomeScreen from '../components/WelcomeScreen';
 import { useScrollPersistence } from '../hooks/useScrollPersistence';
+import CompactModelTrayConnected from '../components/CompactModelTrayConnected';
 
 export default function ChatView() {
-  const [messages] = useAtom(messagesAtom as any) as [any[], any];
+  const [turnIds] = useAtom(turnIdsAtom as any) as [string[], any];
   const [isLoading] = useAtom(isLoadingAtom as any) as [boolean, any];
   const [showWelcome] = useAtom(showWelcomeAtom as any) as [boolean, any];
-  
+  const [uiPhase] = useAtom(uiPhaseAtom as any) as ['idle' | 'streaming' | 'awaiting_action', any];
+
   const scrollerRef = useScrollPersistence();
 
-  const validMessages = useMemo(() => {
-    if (!messages || !Array.isArray(messages)) return [];
-    return messages.filter(m => m && m.id);
-  }, [messages]);
-
-  const itemContent = useMemo(() => (index: number, message: any) => {
-    if (!message) {
-      return <div style={{ padding: '8px', color: '#ef4444' }}>Error: Invalid message</div>;
+  const itemContent = useMemo(() => (index: number, turnId: string) => {
+    if (!turnId) {
+      return <div style={{ padding: '8px', color: '#ef4444' }}>Error: Invalid turn ID</div>;
     }
-    return <MessageRow message={message} />;
+    return <MessageRow turnId={turnId} />;
   }, []);
 
   return (
@@ -33,54 +31,43 @@ export default function ChatView() {
       height: '100%', 
       width: '100%',
       flex: 1,
-      overflow: 'hidden',
       minHeight: 0
     }}>
-      <div style={{ 
-        flex: 1, 
-        overflow: 'hidden', 
-        display: 'flex', 
-        flexDirection: 'column',
-        minHeight: 0
-      }}>
-        {showWelcome ? (
-          <WelcomeScreen />
-        ) : (
-          <div style={{ flex: 1, overflow: 'hidden', minHeight: 0 }}>
-            <Virtuoso
-              data={validMessages}
-              followOutput="auto"
-              increaseViewportBy={{ top: 800, bottom: 600 }}
-              components={{ 
-                Scroller: React.forwardRef((props: any, ref: any) => (
-                  <div 
-                    {...props} 
-                    ref={(node) => {
-                      if (typeof ref === 'function') ref(node);
-                      else if (ref) ref.current = node;
-                      scrollerRef.current = node;
-                    }}
-                    className="chat-virtuoso-scroller"
-                    style={{ 
-                      ...props.style,
-                      height: '100%', 
-                      minHeight: 0,
-                      overflowY: 'auto',
-                      boxSizing: 'border-box'
-                    }}
-                  />
-                ))
-              }}
-              itemContent={itemContent}
-              computeItemKey={(index, message) => message?.id || `fallback-${index}`}
-            />
-          </div>
-        )}
-      </div>
-      
-      <div style={{ borderTop: '1px solid #1f2937', flex: '0 0 auto' }}>
-        <ChatInputConnected />
-      </div>
+      {showWelcome ? (
+        <WelcomeScreen />
+      ) : (
+        <Virtuoso
+          style={{ flex: 1 }}
+          data={turnIds}
+          followOutput={(isAtBottom: boolean) => (isAtBottom ? 'smooth' : false)}
+          increaseViewportBy={{ top: 800, bottom: 600 }}
+          components={{ 
+            Scroller: React.forwardRef((props: any, ref: any) => (
+              <div 
+                {...props} 
+                ref={(node) => {
+                  if (typeof ref === 'function') ref(node);
+                  else if (ref) (ref as any).current = node;
+                  (scrollerRef as any).current = node;
+                }}
+                style={{
+                  ...(props.style || {}),
+                  height: '100%',
+                  minHeight: 0,
+                  overflowY: 'auto',
+                  overscrollBehavior: 'contain',
+                  WebkitOverflowScrolling: 'touch'
+                }}
+              />
+            ))
+          }}
+          itemContent={itemContent}
+          computeItemKey={(index, turnId) => turnId || `fallback-${index}`}
+        />
+      )}
+
+      <ChatInputConnected />
+      <CompactModelTrayConnected />  
     </div>
   );
 }

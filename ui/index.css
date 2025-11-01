@@ -246,16 +246,6 @@ html, body, #root {
   color: #00A9E0;
 }
 
-/* make Virtuoso scroller the single scroll surface in chat view */
-.chat-virtuoso-scroller {
-  height: 100% !important;
-  min-height: 0 !important;
-  overflow-y: auto !important;
-  -webkit-overflow-scrolling: touch;
-  overscroll-behavior: contain; /* prevent scroll chaining to page */
-  scrollbar-gutter: stable;
-}
-
 /* ensure wrapper elements in chat layout allow children to shrink */
 .chat-view, .chat-input-wrapper, .chat-main, main {
   min-height: 0 !important;

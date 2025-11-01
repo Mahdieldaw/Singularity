@@ -1,7 +1,14 @@
 import React, { useCallback } from 'react';
 import { useAtom } from 'jotai';
 import { useChat } from '../hooks/useChat';
-import { isLoadingAtom, isContinuationModeAtom, activeProviderCountAtom, isVisibleModeAtom, isReducedMotionAtom } from '../state/atoms';
+import { 
+  isLoadingAtom, 
+  isContinuationModeAtom, 
+  activeProviderCountAtom, 
+  isVisibleModeAtom, 
+  isReducedMotionAtom,
+  chatInputHeightAtom  // ← ADD THIS
+} from '../state/atoms';
 import ChatInput from './ChatInput';
 
 const ChatInputConnected = () => {
@@ -10,6 +17,7 @@ const ChatInputConnected = () => {
   const [activeProviderCount] = useAtom(activeProviderCountAtom as any) as [number, any];
   const [isVisibleMode] = useAtom(isVisibleModeAtom as any) as [boolean, any];
   const [isReducedMotion] = useAtom(isReducedMotionAtom as any) as [boolean, any];
+  const [, setChatInputHeight] = useAtom(chatInputHeightAtom);  // ← ADD THIS
   const { sendMessage } = useChat();
 
   const handleSend = useCallback((prompt: string) => {
@@ -29,6 +37,7 @@ const ChatInputConnected = () => {
       activeProviderCount={activeProviderCount}
       isVisibleMode={isVisibleMode}
       isContinuationMode={isContinuationMode}
+      onHeightChange={setChatInputHeight}  // ← ADD THIS
     />
   );
 };

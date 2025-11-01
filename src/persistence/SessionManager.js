@@ -345,7 +345,7 @@ export class SessionManager {
         contextHistory: [],
         createdAt: sessionRecord.createdAt,
         lastActivity: sessionRecord.updatedAt,
-        title: sessionRecord.title || 'Untitled Session',
+        title: sessionRecord.title,
         turns: turnsArray,
         threads: threadsObj
       };

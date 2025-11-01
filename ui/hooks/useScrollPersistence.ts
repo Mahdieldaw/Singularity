@@ -1,6 +1,4 @@
-import { useEffect, useRef } from 'react';
-import { useAtom } from 'jotai';
-import { currentSessionIdAtom } from '../state/atoms';
+import { useRef } from 'react';
 
 const LS_SCROLL_KEY = 'htos_scroll_positions';
 
@@ -27,40 +25,10 @@ function getScrollPositionLS(sid: string): number | null {
   return typeof v === 'number' ? v : null;
 }
 
+// This hook is now ONLY responsible for saving/restoring scroll position across sessions.
+// All live streaming scroll logic has been removed.
 export function useScrollPersistence() {
-  const [currentSessionId] = useAtom(currentSessionIdAtom as any) as [string | null, any];
+  // Temporarily disabled: no save/restore during troubleshooting scroll behavior
   const scrollerRef = useRef<HTMLElement | null>(null);
-
-  useEffect(() => {
-    const handleSave = () => {
-      if (currentSessionId && scrollerRef.current) {
-        try { saveScrollPositionLS(String(currentSessionId), scrollerRef.current.scrollTop); } catch {}
-      }
-    };
-
-    const onVis = () => {
-      if (document.visibilityState === 'hidden') handleSave();
-    };
-
-    window.addEventListener('beforeunload', handleSave);
-    document.addEventListener('visibilitychange', onVis);
-
-    return () => {
-      window.removeEventListener('beforeunload', handleSave);
-      document.removeEventListener('visibilitychange', onVis);
-      handleSave();
-    };
-  }, [currentSessionId]);
-
-  useEffect(() => {
-    if (!currentSessionId) return;
-    setTimeout(() => {
-      const pos = getScrollPositionLS(String(currentSessionId));
-      if (pos !== null && scrollerRef.current) {
-        try { scrollerRef.current.scrollTo?.({ top: pos, behavior: 'auto' } as any); } catch {}
-      }
-    }, 100);
-  }, [currentSessionId]);
-
   return scrollerRef;
 }

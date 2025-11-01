@@ -1,9 +1,11 @@
-// ui/hooks/useChat.ts - ALIGNED SESSION LOADING
+// ui/hooks/useChat.ts - MAP-BASED STATE MANAGEMENT
 import { useCallback } from 'react';
-import { useAtom, useSetAtom } from 'jotai';
+import { useAtom, useAtomValue, useSetAtom } from 'jotai';
 import api from '../services/extension-api';
 import { 
-  messagesAtom, 
+  turnsMapAtom,
+  turnIdsAtom,
+  messagesAtom,
   currentSessionIdAtom, 
   pendingUserTurnsAtom, 
   isLoadingAtom, 
@@ -15,7 +17,6 @@ import {
   powerUserModeAtom, 
   thinkOnChatGPTAtom, 
   activeAiTurnIdAtom, 
-  showWelcomeAtom, 
   currentAppStepAtom, 
   uiPhaseAtom, 
   isContinuationModeAtom, 
@@ -36,23 +37,28 @@ import type {
 } from '../types';
 
 export function useChat() {
-  const [messages, setMessages] = useAtom(messagesAtom);
-  const [currentSessionId, setCurrentSessionId] = useAtom(currentSessionIdAtom);
+  // Reads
+  const selectedModels = useAtomValue(selectedModelsAtom);
+  const mappingEnabled = useAtomValue(mappingEnabledAtom);
+  const mappingProvider = useAtomValue(mappingProviderAtom);
+  const synthesisProvider = useAtomValue(synthesisProviderAtom);
+  const synthesisProviders = useAtomValue(synthesisProvidersAtom);
+  const powerUserMode = useAtomValue(powerUserModeAtom);
+  const thinkOnChatGPT = useAtomValue(thinkOnChatGPTAtom);
+  const currentSessionId = useAtomValue(currentSessionIdAtom);
+  const turnIds = useAtomValue(turnIdsAtom);
+
+  // Writes
+  const setTurnsMap = useSetAtom(turnsMapAtom);
+  const setTurnIds = useSetAtom(turnIdsAtom);
+  const setCurrentSessionId = useSetAtom(currentSessionIdAtom);
   const [pendingUserTurns, setPendingUserTurns] = useAtom(pendingUserTurnsAtom);
-  const [, setIsLoading] = useAtom(isLoadingAtom);
-  const [selectedModels] = useAtom(selectedModelsAtom);
-  const [mappingEnabled] = useAtom(mappingEnabledAtom);
-  const [mappingProvider] = useAtom(mappingProviderAtom);
-  const [synthesisProvider] = useAtom(synthesisProviderAtom);
-  const [synthesisProviders] = useAtom(synthesisProvidersAtom);
-  const [powerUserMode] = useAtom(powerUserModeAtom);
-  const [thinkOnChatGPT] = useAtom(thinkOnChatGPTAtom);
-  const [, setActiveAiTurnId] = useAtom(activeAiTurnIdAtom);
-  const [, setShowWelcome] = useAtom(showWelcomeAtom);
-  const [, setCurrentAppStep] = useAtom(currentAppStepAtom);
-  const [, setUiPhase] = useAtom(uiPhaseAtom);
-  const [, setIsContinuationMode] = useAtom(isContinuationModeAtom);
-  const [, setIsHistoryPanelOpen] = useAtom(isHistoryPanelOpenAtom);
+  const setIsLoading = useSetAtom(isLoadingAtom);
+  const setActiveAiTurnId = useSetAtom(activeAiTurnIdAtom);
+  const setCurrentAppStep = useSetAtom(currentAppStepAtom);
+  const setUiPhase = useSetAtom(uiPhaseAtom);
+  const setIsContinuationMode = useSetAtom(isContinuationModeAtom);
+  const setIsHistoryPanelOpen = useSetAtom(isHistoryPanelOpenAtom);
 
   const sendMessage = useCallback(async (prompt: string, mode: 'new' | 'continuation') => {
     if (!prompt || !prompt.trim()) return;
@@ -83,8 +89,12 @@ export function useChat() {
       draft.set(aiTurnId, userTurn);
     });
 
-    setMessages((draft: TurnMessage[]) => {
-      draft.push(userTurn);
+    // Write user turn to Map + IDs
+    setTurnsMap((draft: Map<string, TurnMessage>) => {
+      draft.set(userTurn.id, userTurn);
+    });
+    setTurnIds((draft: string[]) => {
+      draft.push(userTurn.id);
     });
 
     try {
@@ -97,7 +107,7 @@ export function useChat() {
       const effectiveMappingProvider = mappingProvider || fallbackMapping || null;
       const shouldUseMapping = !!(mappingEnabled && effectiveMappingProvider && activeProviders.length > 1 && activeProviders.includes(effectiveMappingProvider as ProviderKey));
 
-      const requestMode: 'new-conversation' | 'continuation' = (mode === 'new' && (!currentSessionId || messages.length === 0)) ? 'new-conversation' : 'continuation';
+      const requestMode: 'new-conversation' | 'continuation' = (mode === 'new' && (!currentSessionId || turnIds.length === 0)) ? 'new-conversation' : 'continuation';
 
       const request: ExecuteWorkflowRequest = {
         sessionId: (requestMode === 'new-conversation' ? null : currentSessionId) as any,
@@ -120,8 +130,12 @@ export function useChat() {
         effectiveMappingProvider || undefined
       );
 
-      setMessages((draft: TurnMessage[]) => {
-        draft.push(aiTurn);
+      // Add AI turn to Map + IDs
+      setTurnsMap((draft: Map<string, TurnMessage>) => {
+        draft.set(aiTurn.id, aiTurn);
+      });
+      setTurnIds((draft: string[]) => {
+        draft.push(aiTurn.id);
       });
 
       setActiveAiTurnId(aiTurn.id);
@@ -138,12 +152,29 @@ export function useChat() {
         draft.delete(aiTurnId);
       });
     }
-  }, [setMessages, setPendingUserTurns, selectedModels, currentSessionId, setCurrentSessionId, setIsLoading, setActiveAiTurnId, synthesisProvider, mappingEnabled, mappingProvider, thinkOnChatGPT, synthesisProviders, powerUserMode, messages.length]);
+  }, [
+    setTurnsMap,
+    setTurnIds,
+    setPendingUserTurns,
+    selectedModels,
+    currentSessionId,
+    setCurrentSessionId,
+    setIsLoading,
+    setActiveAiTurnId,
+    synthesisProvider,
+    mappingEnabled,
+    mappingProvider,
+    thinkOnChatGPT,
+    synthesisProviders,
+    powerUserMode,
+    turnIds.length
+  ]);
 
   const newChat = useCallback(() => {
     setCurrentSessionId(null);
-    setMessages((draft: TurnMessage[]) => { draft.length = 0; });
-  }, [setMessages, setCurrentSessionId]);
+    setTurnsMap((draft: Map<string, TurnMessage>) => { draft.clear(); });
+    setTurnIds((draft: string[]) => { draft.length = 0; });
+  }, [setTurnsMap, setTurnIds, setCurrentSessionId]);
 
   const selectChat = useCallback(async (session: HistorySessionSummary) => {
     const sessionId = session.sessionId || session.id;
@@ -161,16 +192,18 @@ export function useChat() {
 
       if (!fullSession || !fullSession.turns) {
         console.warn('[useChat] Empty session loaded');
-        setMessages((draft: TurnMessage[]) => { draft.length = 0; });
+        setTurnsMap((draft: Map<string, TurnMessage>) => { draft.clear(); });
+        setTurnIds((draft: string[]) => { draft.length = 0; });
         setIsLoading(false);
         return;
       }
 
       /**
-       * ✅ CRITICAL FIX: Transform backend "rounds" format
+       * CRITICAL FIX: Transform backend "rounds" format
        * Backend sends: { userTurnId, aiTurnId, user: {...}, providers: {...}, synthesisResponses, mappingResponses }
        */
-      const transformedMessages: TurnMessage[] = [];
+      const newIds: string[] = [];
+      const newMap = new Map<string, TurnMessage>();
       
       fullSession.turns.forEach((round: any) => {
         // 1. Extract UserTurn
@@ -182,7 +215,8 @@ export function useChat() {
             createdAt: round.user.createdAt || round.createdAt || Date.now(),
             sessionId: fullSession.sessionId
           };
-          transformedMessages.push(userTurn);
+          newIds.push(userTurn.id);
+          newMap.set(userTurn.id, userTurn);
         }
 
         // 2. Extract AiTurn
@@ -228,28 +262,28 @@ export function useChat() {
             synthesisResponses: normalizeSynthMap(round.synthesisResponses),
             mappingResponses: normalizeSynthMap(round.mappingResponses)
           };
-          
-          transformedMessages.push(aiTurn);
+          newIds.push(aiTurn.id);
+          newMap.set(aiTurn.id, aiTurn);
         }
       });
 
-      console.log('[useChat] Loaded session with', transformedMessages.length, 'turns');
+      console.log('[useChat] Loaded session with', newIds.length, 'turns');
 
-      setMessages((draft: TurnMessage[]) => {
-        draft.length = 0;
-        draft.push(...transformedMessages);
-      });
+      // Replace Map + IDs atomically
+      setTurnsMap(newMap);
+      setTurnIds(newIds);
 
       await api.ensurePort({ sessionId });
 
     } catch (error) {
       console.error('[useChat] Error loading session:', error);
-      setMessages((draft: TurnMessage[]) => { draft.length = 0; });
+      setTurnsMap((draft: Map<string, TurnMessage>) => { draft.clear(); });
+      setTurnIds((draft: string[]) => { draft.length = 0; });
     } finally {
       setIsLoading(false);
       setIsHistoryPanelOpen(false);
     }
-  }, [setMessages, setCurrentSessionId, setIsLoading, setIsHistoryPanelOpen]);
+  }, [setTurnsMap, setTurnIds, setCurrentSessionId, setIsLoading, setIsHistoryPanelOpen]);
 
   const deleteChat = useCallback(async (sessionId: string) => {
     try {
@@ -259,5 +293,7 @@ export function useChat() {
     }
   }, []);
 
+  // Backward-compat: derive messages for consumers still expecting it
+  const messages = useAtomValue(messagesAtom);
   return { sendMessage, newChat, selectChat, deleteChat, messages };
 }

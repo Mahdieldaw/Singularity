@@ -2,7 +2,7 @@
 import { useCallback, useRef, useEffect } from 'react';
 import { useSetAtom, useAtomValue } from 'jotai';
 import { 
-  messagesAtom, 
+  turnsMapAtom,
   currentSessionIdAtom, 
   pendingUserTurnsAtom,
   isLoadingAtom,
@@ -14,7 +14,7 @@ import {
 import { StreamingBuffer } from '../utils/streamingBuffer';
 import { applyStreamingUpdates, applyCompletionUpdate } from '../utils/turn-helpers';
 import api from '../services/extension-api';
-import type { TurnMessage, UserTurn, AiTurn, ProviderResponse } from '../types';
+import type { TurnMessage, UserTurn, AiTurn } from '../types';
 
 /**
  * CRITICAL: Step type detection must match backend stepId patterns
@@ -37,12 +37,14 @@ function getStepType(stepId: string): 'batch' | 'synthesis' | 'mapping' | null {
  * Backend format: 'synthesis-gemini-1234567890' or 'mapping-chatgpt-1234567890'
  */
 function extractProviderFromStepId(stepId: string, stepType: 'synthesis' | 'mapping'): string | null {
-  const match = stepId.match(new RegExp(`${stepType}-(\\w+)-\\d+`));
+  // Support provider IDs with hyphens/dots/etc., assuming last segment is numeric timestamp
+  const re = new RegExp(`^${stepType}-(.+)-(\\d+)$`);
+  const match = stepId.match(re);
   return match ? match[1] : null;
 }
 
 export function usePortMessageHandler() {
-  const setMessages = useSetAtom(messagesAtom);
+  const setTurnsMap = useSetAtom(turnsMapAtom);
   const setCurrentSessionId = useSetAtom(currentSessionIdAtom);
   const currentSessionId = useAtomValue(currentSessionIdAtom);
   const setPendingUserTurns = useSetAtom(pendingUserTurnsAtom);
@@ -71,10 +73,12 @@ export function usePortMessageHandler() {
         const newSessionId = message.sessionId;
         setCurrentSessionId(newSessionId);
         
-        // Backfill session ID in messages
-        setMessages((draft: TurnMessage[]) => {
-          draft.forEach((m: TurnMessage) => {
-            if (!m.sessionId) m.sessionId = newSessionId;
+        // Backfill session ID in turns map
+        setTurnsMap((draft: Map<string, TurnMessage>) => {
+          draft.forEach((m: TurnMessage, key: string) => {
+            if (!m.sessionId) {
+              draft.set(key, { ...m, sessionId: newSessionId } as TurnMessage);
+            }
           });
         });
         
@@ -93,7 +97,7 @@ export function usePortMessageHandler() {
 
       case 'PARTIAL_RESULT': {
         const { stepId, providerId, chunk, sessionId: msgSessionId } = message;
-        if (!providerId || !chunk?.text) return;
+        if (!chunk?.text) return;
 
         // Ignore cross-session messages
         if (msgSessionId && currentSessionId && msgSessionId !== currentSessionId) {
@@ -107,28 +111,38 @@ export function usePortMessageHandler() {
           return;
         }
 
+        // Some backends omit providerId for synthesis/mapping partials; derive from stepId if needed
+        let pid: string | null | undefined = providerId;
+        if ((!pid || typeof pid !== 'string') && (stepType === 'synthesis' || stepType === 'mapping')) {
+          pid = extractProviderFromStepId(stepId, stepType);
+        }
+        if (!pid) {
+          console.warn(`[Port] PARTIAL_RESULT missing providerId and could not be derived for step ${stepId}`);
+          return;
+        }
+
         // Initialize buffer if needed
         if (!streamingBufferRef.current) {
           streamingBufferRef.current = new StreamingBuffer((updates) => {
             const activeId = activeAiTurnIdRef.current;
             if (!activeId || !updates || updates.length === 0) return;
 
-            setMessages((draft: TurnMessage[]) => {
-              const aiTurn = draft.find((t: TurnMessage) => t.id === activeId && t.type === 'ai') as AiTurn | undefined;
-              if (!aiTurn) return;
-
+            setTurnsMap((draft: Map<string, TurnMessage>) => {
+              const existing = draft.get(activeId);
+              if (!existing || existing.type !== 'ai') return;
+              const aiTurn = existing as AiTurn;
               // Apply batched updates using helper
               applyStreamingUpdates(aiTurn, updates);
             });
           });
         }
 
-        streamingBufferRef.current.addDelta(providerId, chunk.text, 'streaming', stepType);
+        streamingBufferRef.current.addDelta(pid, chunk.text, 'streaming', stepType);
 
         // Store provider context in separate atom
         if (chunk.meta) {
           setProviderContexts((draft: Record<string, any>) => {
-            draft[providerId] = { ...(draft[providerId] || {}), ...chunk.meta };
+            draft[pid as string] = { ...(draft[pid as string] || {}), ...chunk.meta };
           });
         }
         break;
@@ -167,13 +181,13 @@ export function usePortMessageHandler() {
               status: data?.status
             });
 
-            setMessages((draft: TurnMessage[]) => {
-              const aiTurn = draft.find((t: TurnMessage) => t.id === activeId && t.type === 'ai') as AiTurn | undefined;
-              if (!aiTurn) {
+            setTurnsMap((draft: Map<string, TurnMessage>) => {
+              const existing = draft.get(activeId);
+              if (!existing || existing.type !== 'ai') {
                 console.warn(`[Port] No active AI turn found for completion: ${activeId}`);
                 return;
               }
-              
+              const aiTurn = existing as AiTurn;
               // Apply completion using helper with correct routing
               applyCompletionUpdate(aiTurn, providerId, data, stepType);
             });
@@ -209,7 +223,7 @@ export function usePortMessageHandler() {
       }
     }
   }, [
-    setMessages, 
+    setTurnsMap, 
     setCurrentSessionId, 
     currentSessionId,
     setPendingUserTurns,

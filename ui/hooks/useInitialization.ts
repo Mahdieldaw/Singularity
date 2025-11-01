@@ -2,12 +2,12 @@
 import { useState, useEffect } from 'react';
 import { useSetAtom } from 'jotai';
 import {
-  messagesAtom,
+  turnsMapAtom,
+  turnIdsAtom,
   currentSessionIdAtom,
   selectedModelsAtom,
   isHistoryPanelOpenAtom,
-  activeClipsAtom, // ← ADD THIS IMPORT
-  // Add any other atoms that need resetting
+  activeClipsAtom,
 } from '../state/atoms';
 import api from '../services/extension-api';
 import { LLM_PROVIDERS_CONFIG } from '../constants';
@@ -17,11 +17,12 @@ export function useInitialization(): boolean {
   const [isInitialized, setIsInitialized] = useState(false);
 
   // Get setters for all atoms that need to be reset
-  const setMessages = useSetAtom(messagesAtom);
+  const setTurnsMap = useSetAtom(turnsMapAtom);
+  const setTurnIds = useSetAtom(turnIdsAtom);
   const setCurrentSessionId = useSetAtom(currentSessionIdAtom);
   const setSelectedModels = useSetAtom(selectedModelsAtom);
   const setIsHistoryPanelOpen = useSetAtom(isHistoryPanelOpenAtom);
-  const setActiveClips = useSetAtom(activeClipsAtom); // ← ADD THIS SETTER
+  const setActiveClips = useSetAtom(activeClipsAtom);
 
   useEffect(() => {
     // Prevent this from running more than once
@@ -39,12 +40,12 @@ export function useInitialization(): boolean {
         return; 
       }
 
-      // --- Stage 2: State Reset & Defaulting (from your old bootstrap hook) ---
-      // This ensures the UI starts in a clean, predictable state.
-      setMessages([]);
+      // --- Stage 2: State Reset & Defaulting ---
+      // Clear Map-based chat state to ensure a clean start
+      setTurnsMap((draft) => { draft.clear(); });
+      setTurnIds((draft) => { draft.length = 0; });
       setCurrentSessionId(null); // Critical: Start with no session
       
-      // ✅ ADD THIS: Reset activeClipsAtom to empty object
       setActiveClips({});
       
       // Restore last-used selected models if available; otherwise respect atom default
@@ -69,7 +70,7 @@ export function useInitialization(): boolean {
     };
 
     initialize();
-  }, [isInitialized, setMessages, setCurrentSessionId, setSelectedModels, setIsHistoryPanelOpen, setActiveClips]); // ← ADD setActiveClips to deps
+  }, [isInitialized, setTurnsMap, setTurnIds, setCurrentSessionId, setSelectedModels, setIsHistoryPanelOpen, setActiveClips]);
 
   return isInitialized;
 }

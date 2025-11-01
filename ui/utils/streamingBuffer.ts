@@ -10,6 +10,7 @@ interface BatchUpdate {
 }
 
 export class StreamingBuffer {
+  // Keyed by `${responseType}:${providerId}` to avoid collisions across types
   private pendingDeltas: Map<string, {
     deltas: { text: string; ts: number }[];
     status: string;
@@ -24,15 +25,16 @@ export class StreamingBuffer {
   }
 
   addDelta(providerId: string, delta: string, status: string, responseType: ResponseType) {
-    if (!this.pendingDeltas.has(providerId)) {
-      this.pendingDeltas.set(providerId, {
+    const key = `${responseType}:${providerId}`;
+    if (!this.pendingDeltas.has(key)) {
+      this.pendingDeltas.set(key, {
         deltas: [],
         status,
         responseType
       });
     }
     
-    const entry = this.pendingDeltas.get(providerId)!;
+    const entry = this.pendingDeltas.get(key)!;
     entry.deltas.push({ text: delta, ts: Date.now() });
     entry.status = status;
     entry.responseType = responseType;
@@ -58,7 +60,9 @@ export class StreamingBuffer {
   private flushAll() {
     const updates: BatchUpdate[] = [];
     
-    this.pendingDeltas.forEach((entry, providerId) => {
+    this.pendingDeltas.forEach((entry, compositeKey) => {
+      const idx = compositeKey.indexOf(':');
+      const providerId = idx >= 0 ? compositeKey.slice(idx + 1) : compositeKey;
       const concatenatedText = entry.deltas.map(d => d.text).join('');
       const lastTs = entry.deltas.length ? entry.deltas[entry.deltas.length - 1].ts : Date.now();
       updates.push({

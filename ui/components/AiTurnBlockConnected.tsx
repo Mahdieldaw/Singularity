@@ -2,6 +2,8 @@
 import React, { useCallback } from 'react';
 import { useAtom, useSetAtom } from 'jotai';
 import AiTurnBlock from './AiTurnBlock';
+import ProviderResponseBlockConnected from './ProviderResponseBlockConnected';
+
 import { 
   isLoadingAtom, 
   currentAppStepAtom, 
@@ -47,7 +49,11 @@ export default function AiTurnBlockConnected({ aiTurn }: AiTurnBlockConnectedPro
       onEnterComposerMode={useCallback(() => setViewMode(ViewMode.COMPOSER), [setViewMode])}
       activeSynthesisClipProviderId={turnClips.synthesis}
       activeMappingClipProviderId={turnClips.mapping}
-      onClipClick={useCallback((type: 'synthesis' | 'mapping', pid: string) => void handleClipClick(aiTurn.id, type, pid), [handleClipClick, aiTurn.id])}   
-    />
+      onClipClick={useCallback((type: 'synthesis' | 'mapping', pid: string) => {
+        void handleClipClick(aiTurn.id, type, pid);
+      }, [handleClipClick, aiTurn.id])}
+    >
+      <ProviderResponseBlockConnected aiTurnId={aiTurn.id} />
+    </AiTurnBlock>
   );
 }
