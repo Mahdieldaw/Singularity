@@ -24,10 +24,14 @@ header {
   align-items: center;
 }
 
-/* Prevent content overflow in turn blocks */
-.user-turn-block,
-.ai-turn-block {
-  overflow: hidden;
+/* ADD THIS INSTEAD - only clip the batch sources wrapper if needed */
+.batch-filler {
+  overflow: hidden; /* Prevent batch responses from breaking layout */
+}
+
+/* Ensure primaries can expand */
+.primaries {
+  overflow: visible;
 }
 
 /* Ensure code blocks within turns don't cause horizontal scroll */
@@ -240,4 +244,25 @@ html, body, #root {
 .provenance-badge[data-provider="qwen"] {
   border-color: #00A9E0;
   color: #00A9E0;
+}
+
+/* make Virtuoso scroller the single scroll surface in chat view */
+.chat-virtuoso-scroller {
+  height: 100% !important;
+  min-height: 0 !important;
+  overflow-y: auto !important;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain; /* prevent scroll chaining to page */
+  scrollbar-gutter: stable;
+}
+
+/* ensure wrapper elements in chat layout allow children to shrink */
+.chat-view, .chat-input-wrapper, .chat-main, main {
+  min-height: 0 !important;
+}
+
+/* ensure the input area stays visible */
+.chat-input-wrapper {
+  flex: 0 0 auto !important;
+  z-index: 10;
 }

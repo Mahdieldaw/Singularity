@@ -55,6 +55,7 @@ export default function App() {
       width: '100vw',
       overflow: 'hidden',
       background: 'linear-gradient(135deg, #0f0f23 0%, #1a1a3a 100%)',
+      minHeight: 0,
     }}>
       <Header />
       <BannerConnected />
@@ -64,14 +65,16 @@ export default function App() {
         display: 'flex', 
         flex: 1, 
         overflow: 'hidden',
-        position: 'relative' 
+        position: 'relative',
+        minHeight: 0,
       }}>
-        <main style={{ 
+        <main className="chat-main" style={{ 
           flex: 1, 
           display: 'flex', 
           flexDirection: 'column',
           overflow: 'hidden',
           position: 'relative',
+          minHeight: 0,
         }}>
           {viewMode === ViewMode.COMPOSER ? (
             <Suspense fallback={<div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%' }}><div className="loading-spinner" /></div>}>

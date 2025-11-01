@@ -1,4 +1,4 @@
-// ui/components/AiTurnBlock.tsx - SAFE RESPONSE RENDERING
+// ui/components/AiTurnBlock.tsx - HYBRID COLLAPSIBLE SOLUTION
 import React from 'react';
 import { AiTurn, ProviderResponse, AppStep } from '../types';
 import ProviderResponseBlock from './ProviderResponseBlock';
@@ -47,7 +47,9 @@ function parseSynthesisResponse(response?: string | null) {
   };
 }
 
-// In AiTurnBlock.tsx - Measure shorter section and cap only the longer to match it.
+/**
+ * Cooperative height measurement hook - pauses during user interaction
+ */
 const useShorterHeight = (
   hasSynthesis: boolean,
   hasMapping: boolean,
@@ -55,57 +57,96 @@ const useShorterHeight = (
 ) => {
   const synthRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<HTMLDivElement>(null);
+
   const [shorterHeight, setShorterHeight] = useState<number | null>(null);
   const [shorterSection, setShorterSection] = useState<'synthesis' | 'mapping' | null>(null);
+  
+  const isUserActive = useRef(false);
+  const userActiveTimer = useRef<number | null>(null);
+  const rafId = useRef<number | null>(null);
 
-  const borderBoxHeight = (el: HTMLElement) => {
-    const cs = window.getComputedStyle(el);
-    const border = parseFloat(cs.borderTopWidth) + parseFloat(cs.borderBottomWidth);
-    // scrollHeight includes padding but not borders; add borders so it matches border-box sizing.
-    return el.scrollHeight + border;
-  };
-
-  const measure = useCallback(() => {
+  const measureOnce = useCallback(() => {
     const s = synthRef.current;
     const m = mapRef.current;
+    
     if (!hasSynthesis || !hasMapping || !s || !m) {
       setShorterHeight(null);
       setShorterSection(null);
       return;
     }
 
-    // Use natural content heights (scrollHeight) for both panels.
-    const synthH = borderBoxHeight(s);
-    const mapH = borderBoxHeight(m);
+    // Skip measurement during user interaction to avoid thrash
+    if (isUserActive.current) return;
+
+    const synthH = s.scrollHeight;
+    const mapH = m.scrollHeight;
+
     const isSynthShorter = synthH <= mapH;
     const h = isSynthShorter ? synthH : mapH;
     const sec = isSynthShorter ? 'synthesis' : 'mapping';
 
-    setShorterSection(prev => (prev !== sec ? sec : prev));
-    setShorterHeight(prev => (prev === null || Math.abs(prev - h) > 1 ? h : prev));
+    // Only update if changed by more than 2px to avoid micro-adjustments
+    setShorterHeight(prev => (prev === null || Math.abs(prev - h) > 2) ? h : prev);
+    setShorterSection(prev => prev !== sec ? sec : prev);
   }, [hasSynthesis, hasMapping]);
+
+  const scheduleMeasure = useCallback(() => {
+    if (rafId.current !== null) return;
+    rafId.current = requestAnimationFrame(() => {
+      rafId.current = null;
+      measureOnce();
+    });
+  }, [measureOnce]);
 
   useEffect(() => {
     const s = synthRef.current;
     const m = mapRef.current;
     if (!s || !m) return;
-    const ro = new ResizeObserver(() => measure());
+
+    const ro = new ResizeObserver(() => scheduleMeasure());
     ro.observe(s);
     ro.observe(m);
-    measure(); // initial
-    return () => ro.disconnect();
-  }, [measure]);
 
-  // Re-measure right after synthesis text changes (synthesis is produced after mapping)
+    const markUserActive = () => {
+      isUserActive.current = true;
+      if (userActiveTimer.current !== null) {
+        window.clearTimeout(userActiveTimer.current);
+      }
+      userActiveTimer.current = window.setTimeout(() => {
+        isUserActive.current = false;
+        userActiveTimer.current = null;
+        scheduleMeasure();
+      }, 300);
+    };
+
+    // Listen for user interactions
+    const events = ['wheel', 'touchstart', 'pointerdown'];
+    events.forEach(evt => {
+      s.addEventListener(evt, markUserActive, { passive: true });
+      m.addEventListener(evt, markUserActive, { passive: true });
+    });
+
+    scheduleMeasure(); // initial
+
+    return () => {
+      ro.disconnect();
+      if (rafId.current) cancelAnimationFrame(rafId.current);
+      if (userActiveTimer.current) window.clearTimeout(userActiveTimer.current);
+      events.forEach(evt => {
+        s.removeEventListener(evt, markUserActive as EventListener);
+        m.removeEventListener(evt, markUserActive as EventListener);
+      });
+    };
+  }, [scheduleMeasure]);
+
   useLayoutEffect(() => {
     if (!hasSynthesis || !hasMapping) return;
-    const id = requestAnimationFrame(measure);
+    const id = requestAnimationFrame(measureOnce);
     return () => cancelAnimationFrame(id);
-  }, [synthesisVersion, hasSynthesis, hasMapping, measure]);
+  }, [synthesisVersion, hasSynthesis, hasMapping, measureOnce]);
 
   return { synthRef, mapRef, shorterHeight, shorterSection };
 };
-
 
 interface AiTurnBlockProps {
   aiTurn: AiTurn;
@@ -133,51 +174,39 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
   activeMappingClipProviderId,
   onClipClick,
 }) => {
-
   const [isSynthesisExpanded, setIsSynthesisExpanded] = useState(true);
   const [isMappingExpanded, setIsMappingExpanded] = useState(true);
   const [mappingTab, setMappingTab] = useState<'map' | 'options'>('map');
+  
+  // Track which section is manually expanded (if truncated)
+  const [synthExpanded, setSynthExpanded] = useState(false);
+  const [mapExpanded, setMapExpanded] = useState(false);
 
-  /**
-   * ✅ CRITICAL FIX: Safely normalize responses to arrays
-   */
+  // ✅ CRITICAL: Move all hooks to top level (before any conditional logic)
+  const handleEnterComposerMode = useCallback(() => {
+    onEnterComposerMode?.(aiTurn);
+  }, [onEnterComposerMode, aiTurn]);
+
   const synthesisResponses = useMemo(() => {
-  if (!aiTurn.synthesisResponses) aiTurn.synthesisResponses = {};
-  
-  const out: Record<string, ProviderResponse[]> = {};
-  
-  // ✅ CRITICAL: Initialize ALL providers first
-  LLM_PROVIDERS_CONFIG.forEach(p => {
-    out[String(p.id)] = [];
-  });
-  
-  // ✅ Then overlay actual data
-  Object.entries(aiTurn.synthesisResponses).forEach(([pid, resp]) => {
-    out[pid] = normalizeResponseArray(resp);
-  });
-  
-  return out;
-}, [aiTurn.id, JSON.stringify(aiTurn.synthesisResponses)]);
+    if (!aiTurn.synthesisResponses) aiTurn.synthesisResponses = {};
+    const out: Record<string, ProviderResponse[]> = {};
+    LLM_PROVIDERS_CONFIG.forEach(p => (out[String(p.id)] = []));
+    Object.entries(aiTurn.synthesisResponses).forEach(([pid, resp]) => {
+      out[pid] = normalizeResponseArray(resp);
+    });
+    return out;
+  }, [aiTurn.id, JSON.stringify(aiTurn.synthesisResponses)]);
 
   const mappingResponses = useMemo(() => {
-  const map = aiTurn.mappingResponses || {};
-  const out: Record<string, ProviderResponse[]> = {};
-  
-  // ✅ Initialize complete domain
-  LLM_PROVIDERS_CONFIG.forEach(p => {
-    out[String(p.id)] = [];
-  });
-  
-  // ✅ Overlay data
-  Object.entries(map).forEach(([pid, resp]) => {
-    out[pid] = normalizeResponseArray(resp);
-  });
-  
-  return out;
-}, [aiTurn.id, JSON.stringify(aiTurn.mappingResponses)]);
+    const map = aiTurn.mappingResponses || {};
+    const out: Record<string, ProviderResponse[]> = {};
+    LLM_PROVIDERS_CONFIG.forEach(p => (out[String(p.id)] = []));
+    Object.entries(map).forEach(([pid, resp]) => {
+      out[pid] = normalizeResponseArray(resp);
+    });
+    return out;
+  }, [aiTurn.id, JSON.stringify(aiTurn.mappingResponses)]);
 
-
-  // Prepare source content (batch + hidden)
   const allSources = useMemo(() => {
     const sources: Record<string, ProviderResponse> = { ...(aiTurn.batchResponses || {}) };
     if (aiTurn.hiddenBatchOutputs) {
@@ -201,7 +230,7 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
 
   const providerIds = useMemo(() => LLM_PROVIDERS_CONFIG.map(p => String(p.id)), []);
 
-  const computeActiveProvider = (
+  const computeActiveProvider = useCallback((
     explicit: string | undefined,
     map: Record<string, ProviderResponse[]>
   ): string | undefined => {
@@ -211,7 +240,7 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
       if (arr && arr.length > 0) return pid;
     }
     return undefined;
-  };
+  }, [providerIds]);
 
   const activeSynthPid = computeActiveProvider(activeSynthesisClipProviderId, synthesisResponses);
   const activeMappingPid = computeActiveProvider(activeMappingClipProviderId, mappingResponses);
@@ -238,15 +267,19 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
     return String(getSynthesisAndOptions(displayedSynthesisTake).synthesis ?? '');
   }, [displayedSynthesisTake, getSynthesisAndOptions]);
 
-  // ✅ Determine if we have valid content in each section
   const hasSynthesis = !!(activeSynthPid && displayedSynthesisTake?.text);
   const hasMapping = !!(activeMappingPid && getLatestResponse(mappingResponses[activeMappingPid])?.text);
-  
+
   const { synthRef, mapRef, shorterHeight, shorterSection } = useShorterHeight(hasSynthesis, hasMapping, displayedSynthesisText);
 
-  // Helper function to get section styles
-  const getSectionStyle = (section: 'synthesis' | 'mapping'): React.CSSProperties => {
-    const baseStyle: React.CSSProperties = {
+  // Determine if sections are truncated
+  const synthTruncated = hasSynthesis && hasMapping && shorterHeight && shorterSection === 'mapping';
+  const mapTruncated = hasSynthesis && hasMapping && shorterHeight && shorterSection === 'synthesis';
+
+  const getSectionStyle = (section: 'synthesis' | 'mapping', isExpanded: boolean): React.CSSProperties => {
+    const isTruncated = section === 'synthesis' ? synthTruncated : mapTruncated;
+    
+    return {
       border: '1px solid #475569',
       borderRadius: 8,
       padding: 12,
@@ -255,37 +288,20 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
       flexDirection: 'column',
       minHeight: 150,
       height: 'auto',
-      boxSizing: 'border-box'
-    };
-
-    // If both sections have content and we measured the shorter
-    if (hasSynthesis && hasMapping && shorterHeight && shorterSection) {
-      const isLonger = shorterSection !== section;
-      return {
-        ...baseStyle,
-        maxHeight: isLonger ? `${shorterHeight}px` : 'none',
-        overflowY: 'visible'
-      };
-    }
-
-    // Default: unconstrained flow
-    return {
-      ...baseStyle,
-      maxHeight: 'none',
-      overflowY: 'visible'
+      boxSizing: 'border-box',
+      maxHeight: (isTruncated && !isExpanded) ? `${shorterHeight}px` : 'none',
+      overflow: 'visible',
+      position: 'relative'
     };
   };
 
-  // Safely resolve a user prompt string from possible shapes without relying on AiTurn type
   const userPrompt: string | null = ((): string | null => {
     const maybe = (aiTurn as any);
     return maybe?.userPrompt ?? maybe?.prompt ?? maybe?.input ?? null;
   })();
 
   return (
-    // Bounded turn unit: Virtuoso will treat this entire block as a single item.
     <div className="turn-block" style={{ paddingBottom: '1rem', borderBottom: '1px solid #334155' }}>
-      {/* Optional: show the user prompt at the top of the turn */}
       {userPrompt && (
         <div className="user-prompt-block" style={{ marginBottom: 8 }}>
           <div style={{ fontSize: 12, color: '#94a3b8', marginBottom: 6 }}>User</div>
@@ -297,15 +313,14 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
 
       <div className="ai-turn-block" style={{ border: '1px solid #334155', borderRadius: 12, padding: 12 }}>
         <div className="ai-turn-content" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          {/* Primaries: smart height based on content availability */}
           <div className="primaries" style={{ marginBottom: '1rem', position: 'relative' }}>
             <div style={{ display: 'flex', flexDirection: 'row', gap: 12, alignItems: 'flex-start' }}>
-              
+
               {/* Synthesis Section */}
               <div 
                 ref={synthRef}
                 className="synthesis-section" 
-                style={getSectionStyle('synthesis')}
+                style={getSectionStyle('synthesis', synthExpanded)}
               >
                 <div className="section-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, flexShrink: 0 }}>
                   <h4 style={{ margin: 0, fontSize: 14, color: '#e2e8f0' }}>Synthesis</h4>
@@ -313,39 +328,35 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
                     {isSynthesisExpanded ? <ChevronUpIcon style={{width: 16, height: 16}} /> : <ChevronDownIcon style={{width: 16, height: 16}} />}
                   </button>
                 </div>
+                
                 {!hasSynthesis && (
-                  <div style={{ 
-                    display: 'flex', 
-                    alignItems: 'center', 
-                    justifyContent: 'center', 
-                    height: '100%',
-                    color: '#64748b',
-                    fontStyle: 'italic'
-                  }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#64748b', fontStyle: 'italic' }}>
                     No synthesis available
                   </div>
                 )}
+                
                 {isSynthesisExpanded && hasSynthesis && (
-  <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-    <div style={{ flexShrink: 0 }}> {/* Wrap ClipsCarousel */}
-      <ClipsCarousel
-        providers={LLM_PROVIDERS_CONFIG}
-        responsesMap={synthesisResponses}
-        activeProviderId={activeSynthPid}
-        onClipClick={(pid) => onClipClick?.('synthesis', pid)}
-      />
-    </div>
-    <div 
-      className="clip-content" 
-      style={{ 
-        marginTop: 12, 
-        background: '#0f172a', 
-        border: '1px solid #334155', 
-        borderRadius: 8, 
-        padding: 12,
-        flex: 1,
-        overflowY: 'auto'
-      }}
+                  <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, overflow: synthTruncated && !synthExpanded ? 'hidden' : 'visible' }}>
+                    <div style={{ flexShrink: 0 }}>
+                      <ClipsCarousel
+                        providers={LLM_PROVIDERS_CONFIG}
+                        responsesMap={synthesisResponses}
+                        activeProviderId={activeSynthPid}
+                        onClipClick={(pid) => onClipClick?.('synthesis', pid)}
+                      />
+                    </div>
+
+                    <div 
+                      className="clip-content" 
+                      style={{ 
+                        marginTop: 12, 
+                        background: '#0f172a', 
+                        border: '1px solid #334155', 
+                        borderRadius: 8, 
+                        padding: 12,
+                        flex: 1,
+                        overflowY: 'visible'
+                      }}
                     >
                       {activeSynthPid ? (
                         (() => {
@@ -375,6 +386,66 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
                         <div style={{ color: '#64748b', display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontStyle: 'italic' }}>Choose a model to synthesize.</div>
                       )}
                     </div>
+
+                    {/* Expand button for truncated content */}
+                    {synthTruncated && !synthExpanded && (
+                      <>
+                        <div style={{
+                          position: 'absolute',
+                          bottom: 0,
+                          left: 0,
+                          right: 0,
+                          height: 60,
+                          background: 'linear-gradient(transparent, #1e293b)',
+                          pointerEvents: 'none',
+                          borderRadius: '0 0 8px 8px'
+                        }} />
+                        <button
+                          onClick={() => setSynthExpanded(true)}
+                          style={{
+                            position: 'absolute',
+                            bottom: 12,
+                            left: '50%',
+                            transform: 'translateX(-50%)',
+                            padding: '6px 12px',
+                            background: '#334155',
+                            border: '1px solid #475569',
+                            borderRadius: 6,
+                            color: '#e2e8f0',
+                            cursor: 'pointer',
+                            fontSize: 12,
+                            zIndex: 1,
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 4
+                          }}
+                        >
+                          Show full response <ChevronDownIcon style={{ width: 14, height: 14 }} />
+                        </button>
+                      </>
+                    )}
+                    
+                    {synthExpanded && synthTruncated && (
+                      <button
+                        onClick={() => setSynthExpanded(false)}
+                        style={{
+                          marginTop: 12,
+                          padding: '6px 12px',
+                          background: '#334155',
+                          border: '1px solid #475569',
+                          borderRadius: 6,
+                          color: '#94a3b8',
+                          cursor: 'pointer',
+                          fontSize: 12,
+                          alignSelf: 'center',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 4
+                        }}
+                      >
+                        <ChevronUpIcon style={{ width: 14, height: 14 }} /> Collapse
+                      </button>
+                    )}
                   </div>
                 )}
               </div>
@@ -383,12 +454,12 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
               <div 
                 ref={mapRef}
                 className="mapping-section" 
-                style={getSectionStyle('mapping')}
+                style={getSectionStyle('mapping', mapExpanded)}
               >
                 <div className="section-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, flexShrink: 0 }}>
                   <h4 style={{ margin: 0, fontSize: 14, color: '#e2e8f0' }}>Mapping</h4>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                     <button 
+                    <button 
                       onClick={() => setMappingTab('map')}
                       title="Conflict Map"
                       style={{ 
@@ -422,29 +493,24 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
                     </button>
                   </div>
                 </div>
+                
                 {!hasMapping && (
-                  <div style={{ 
-                    display: 'flex', 
-                    alignItems: 'center', 
-                    justifyContent: 'center', 
-                    height: '100%',
-                    color: '#64748b',
-                    fontStyle: 'italic'
-                  }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#64748b', fontStyle: 'italic' }}>
                     No mapping available
                   </div>
                 )}
+                
                 {isMappingExpanded && hasMapping && (
-                  <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minHeight: 0 }}>
+                  <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: mapTruncated && !mapExpanded ? 'hidden' : 'visible', minHeight: 0 }}>
                     {mappingTab === 'map' && (
                       <ClipsCarousel
                         providers={LLM_PROVIDERS_CONFIG}
                         responsesMap={mappingResponses}
                         activeProviderId={activeMappingPid}
                         onClipClick={(pid) => onClipClick?.('mapping', pid)}
-                   
                       />
                     )}
+                    
                     <div 
                       className="clip-content" 
                       style={{ 
@@ -454,7 +520,7 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
                         borderRadius: 8, 
                         padding: 12,
                         flex: 1,
-                        overflowY: 'auto' // Content area scrolls if needed
+                        overflowY: 'visible'
                       }}
                     >
                       {mappingTab === 'options' ? (
@@ -508,56 +574,111 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
                         <div style={{ color: '#64748b', display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontStyle: 'italic' }}>Choose a model to map.</div>
                       )}
                     </div>
+
+                    {/* Expand button for truncated content */}
+                    {mapTruncated && !mapExpanded && (
+                      <>
+                        <div style={{
+                          position: 'absolute',
+                          bottom: 0,
+                          left: 0,
+                          right: 0,
+                          height: 60,
+                          background: 'linear-gradient(transparent, #1e293b)',
+                          pointerEvents: 'none',
+                          borderRadius: '0 0 8px 8px'
+                        }} />
+                        <button
+                          onClick={() => setMapExpanded(true)}
+                          style={{
+                            position: 'absolute',
+                            bottom: 12,
+                            left: '50%',
+                            transform: 'translateX(-50%)',
+                            padding: '6px 12px',
+                            background: '#334155',
+                            border: '1px solid #475569',
+                            borderRadius: 6,
+                            color: '#e2e8f0',
+                            cursor: 'pointer',
+                            fontSize: 12,
+                            zIndex: 1,
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 4
+                          }}
+                        >
+                          Show full response <ChevronDownIcon style={{ width: 14, height: 14 }} />
+                        </button>
+                      </>
+                    )}
+                    
+                    {mapExpanded && mapTruncated && (
+                      <button
+                        onClick={() => setMapExpanded(false)}
+                        style={{
+                          marginTop: 12,
+                          padding: '6px 12px',
+                          background: '#334155',
+                          border: '1px solid #475569',
+                          borderRadius: 6,
+                          color: '#94a3b8',
+                          cursor: 'pointer',
+                          fontSize: 12,
+                          alignSelf: 'center',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 4
+                        }}
+                      >
+                        <ChevronUpIcon style={{ width: 14, height: 14 }} /> Collapse
+                      </button>
+                    )}
                   </div>
                 )}
               </div>
             </div>
           </div>
 
-          {/* Batch - bounded and scrollable so it doesn't push primaries off-screen */}
-         
-{hasSources && (
-  <div 
-    className="batch-filler" 
-    style={{ 
-      // ✅ REMOVED: maxHeight and overflowY - let it flow naturally
-      paddingRight: 6,
-      border: '1px solid #475569', 
-      borderRadius: 8, 
-      padding: 12 
-    }}
-  >
-    <div className="sources-wrapper">
-      <div className="sources-toggle" style={{ textAlign: 'center', marginBottom: 8 }}>
-        <button
-          onClick={() => onToggleSourceOutputs?.()}
-          style={{ padding: '6px 12px', borderRadius: 8, border: '1px solid #334155', background: '#0b1220', color: '#e2e8f0', cursor: 'pointer' }}
-        >
-          {showSourceOutputs ? 'Hide Sources' : 'Show Sources'}
-        </button>
-      </div>
-      {showSourceOutputs && (
-        <div className="sources-content">
-          <ProviderResponseBlock
-            providerResponses={allSources}
-            isLoading={isLoading}
-            currentAppStep={currentAppStep as AppStep}
-            isReducedMotion={isReducedMotion}
-            aiTurnId={aiTurn.id}
-            sessionId={aiTurn.sessionId ?? undefined}
-            onEnterComposerMode={useCallback(() => onEnterComposerMode?.(aiTurn), [onEnterComposerMode, aiTurn])}
-          />
-        </div>
-      )}
-    </div>
-  </div>
-)}
+          {hasSources && (
+            <div 
+              className="batch-filler" 
+              style={{ 
+                border: '1px solid #475569', 
+                borderRadius: 8, 
+                padding: 12 
+              }}
+            >
+              <div className="sources-wrapper">
+                <div className="sources-toggle" style={{ textAlign: 'center', marginBottom: 8 }}>
+                  <button
+                    onClick={() => onToggleSourceOutputs?.()}
+                    style={{ padding: '6px 12px', borderRadius: 8, border: '1px solid #334155', background: '#0b1220', color: '#e2e8f0', cursor: 'pointer' }}
+                  >
+                    {showSourceOutputs ? 'Hide Sources' : 'Show Sources'}
+                  </button>
+                </div>
+                {showSourceOutputs && (
+                  <div className="sources-content">
+                    <ProviderResponseBlock
+                      providerResponses={allSources}
+                      isLoading={isLoading}
+                      currentAppStep={currentAppStep as AppStep}
+                      isReducedMotion={isReducedMotion}
+                      aiTurnId={aiTurn.id}
+                      sessionId={aiTurn.sessionId ?? undefined}
+                      onEnterComposerMode={handleEnterComposerMode}
+                    />
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
 
-          {/* Composer Mode Entry Button */}
           {hasComposableContent(aiTurn) && (
             <div className="composer-entry" style={{ textAlign: 'center' }}>
               <button
-                onClick={() => onEnterComposerMode?.(aiTurn)}
+                onClick={handleEnterComposerMode}
                 style={{ padding: '8px 12px', borderRadius: 8, border: '1px solid #334155', background: '#1d4ed8', color: '#fff', cursor: 'pointer' }}
               >
                 Open in Composer

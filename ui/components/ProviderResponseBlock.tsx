@@ -2,7 +2,7 @@
 import React from 'react';
 import { LLMProvider, AppStep, ProviderResponse } from '../types';
 import { LLM_PROVIDERS_CONFIG } from '../constants';
-import { BotIcon, ChevronDownIcon, ChevronUpIcon } from './Icons';
+import { BotIcon } from './Icons';
 import { useState, useCallback, useMemo } from 'react';
 import { ProviderPill } from './ProviderPill';
 import { useAtomValue } from 'jotai';
@@ -91,7 +91,7 @@ const ProviderResponseBlock = ({
     return acc;
   }, {} as ProviderStates);
 
-  const [expandedProviders, setExpandedProviders] = useState<Record<string, boolean>>({});
+
   
   // Get all provider IDs in order (excluding 'system')
   const allProviderIds = useMemo(() => 
@@ -119,12 +119,7 @@ const ProviderResponseBlock = ({
     return LLM_PROVIDERS_CONFIG.find(p => p.id === providerId);
   };
 
-  const toggleExpanded = (providerId: string) => {
-    setExpandedProviders(prev => ({
-      ...prev,
-      [providerId]: !prev[providerId]
-    }));
-  };
+
 
   // Swap a hidden provider into the first visible slot
   const swapProviderIn = useCallback((hiddenProviderId: string) => {
@@ -136,14 +131,9 @@ const ProviderResponseBlock = ({
     });
   }, []);
 
-  const handleExpandAll = () => {
-    const allExpanded = allProviderIds.reduce((acc, id) => ({ ...acc, [id]: true }), {} as Record<string, boolean>);
-    setExpandedProviders(allExpanded);
-  };
 
-  const handleCollapseAll = () => {
-    setExpandedProviders({});
-  };
+
+
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -169,12 +159,10 @@ const ProviderResponseBlock = ({
     return null;
   }
 
-  // Render ALL providers (not just visible) to ensure data is available
   const renderProviderCard = (providerId: string, isVisible: boolean) => {
     const state = effectiveProviderStates[providerId];
     const provider = getProviderConfig(providerId);
     const context = providerContexts[providerId];
-    const isExpanded = expandedProviders[providerId];
     const isStreaming = state?.status === 'streaming';
     const isError = state?.status === 'error';
 
@@ -188,8 +176,7 @@ const ProviderResponseBlock = ({
         style={{
           minWidth: '380px',
           maxWidth: '380px',
-          // ✅ Enable internal scrolling with constrained height
-          maxHeight: isExpanded ? '400px' : '200px',
+          height: '220px', // Fixed height
           display: isVisible ? 'flex' : 'none',
           flexDirection: 'column',
           background: '#1e293b',
@@ -197,13 +184,11 @@ const ProviderResponseBlock = ({
           borderRadius: '12px',
           padding: '12px',
           flexShrink: 0,
-          transition: isReducedMotion ? 'none' : 'background 0.18s ease, max-height 0.18s ease',
-          overflow: 'hidden', // Container clips content
-          ...(isExpanded && { background: '#293548' })
+          overflow: 'hidden',
         }}
         aria-live="polite"
       >
-        {/* Fixed Header - 24px */}
+        {/* Fixed Header */}
         <div style={{ 
           display: 'flex', 
           alignItems: 'center', 
@@ -221,7 +206,7 @@ const ProviderResponseBlock = ({
           {context && (
             <div style={{ fontSize: '10px', color: '#64748b', marginLeft: '4px' }}>
               {context.rateLimitRemaining && `(${context.rateLimitRemaining} left)`}
-              {context.modelName && `• ${context.modelName}`}
+              {context.modelName && ` • ${context.modelName}`}
             </div>
           )}
           <div style={{ 
@@ -234,109 +219,38 @@ const ProviderResponseBlock = ({
           }} />
         </div>
 
-        {/* Fixed Controls - 32px */}
-        <div style={{ 
-          display: 'flex', 
-          gap: '8px', 
-          marginBottom: '12px',
-          flexShrink: 0,
-          height: '32px'
-        }}>
-          <button
-            onClick={() => toggleExpanded(providerId)}
-            aria-expanded={isExpanded}
-            style={{
-              background: '#334155',
-              border: '1px solid #475569',
-              borderRadius: '6px',
-              padding: '4px 8px',
-              color: '#94a3b8',
-              fontSize: '12px',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '4px'
-            }}
-          >
-            {isExpanded ? <ChevronUpIcon style={{ width: '12px', height: '12px' }} /> : <ChevronDownIcon style={{ width: '12px', height: '12px' }} />}
-            {isExpanded ? 'Collapse' : 'Expand'}
-          </button>
-        </div>
-
-        {/* ✅ CONTENT AREA: Now scrolls internally */}
+        {/* Scrollable Content Area */}
         <div
           style={{
-            flex: '1 1 auto', // Take available space
-            overflowY: 'auto', // ✅ Enable internal scrolling
+            flex: 1,
+            overflowY: 'auto',
             overflowX: 'hidden',
-            padding: isExpanded ? '12px' : '8px 12px',
-            background: isExpanded ? 'rgba(0, 0, 0, 0.18)' : 'rgba(0,0,0,0.04)',
+            padding: '12px',
+            background: 'rgba(0, 0, 0, 0.18)',
             borderRadius: '8px',
+            minHeight: 0
           }}
         >
-          {!isExpanded ? (
-            <>
-              {/* Collapsed preview with visual indicator */}
-              <div style={{ 
-                fontSize: '13px', 
-                lineHeight: '1.5', 
-                color: '#e2e8f0',
-                display: '-webkit-box',
-                WebkitLineClamp: 3,
-                WebkitBoxOrient: 'vertical',
-                overflow: 'hidden',
-                marginBottom: '6px',
-              }}>
-                {displayText}
-                {isStreaming && !state?.text && <span className="streaming-dots" />}
-              </div>
-              
-              {/* Visual "Click to expand" indicator */}
-              {state?.text && state.text.length > 200 && (
-                <div style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: '6px',
-                  padding: '6px',
-                  background: 'rgba(100, 116, 139, 0.1)',
-                  borderRadius: '6px',
-                  fontSize: '11px',
-                  color: '#94a3b8',
-                  cursor: 'pointer',
-                  border: '1px dashed #475569',
-                  marginTop: '8px',
-                }}
-                onClick={() => toggleExpanded(providerId)}
-                >
-                  <ChevronDownIcon style={{ width: '14px', height: '14px' }} />
-                  Click to read full response
-                </div>
-              )}
-            </>
-          ) : (
-            <div className="prose prose-sm max-w-none dark:prose-invert" style={{ 
-              fontSize: '13px', 
-              lineHeight: '1.5', 
-              color: '#e2e8f0' 
-            }}>
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                {String(displayText || '')}
-              </ReactMarkdown>
-              {isStreaming && <span className="streaming-dots" />}
-            </div>
-          )}
+          <div className="prose prose-sm max-w-none dark:prose-invert" style={{ 
+            fontSize: '13px', 
+            lineHeight: '1.5', 
+            color: '#e2e8f0' 
+          }}>
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+              {String(displayText || '')}
+            </ReactMarkdown>
+            {isStreaming && <span className="streaming-dots" />}
+          </div>
         </div>
 
-        {/* Fixed Footer - 32px */}
-        {/* Footer: hide in collapsed preview to avoid empty background space */}
+        {/* Fixed Footer with actions */}
         <div style={{ 
-          marginTop: isExpanded ? '12px' : '8px',
-          display: isExpanded ? 'flex' : 'none', 
+          marginTop: '12px',
+          display: 'flex', 
           justifyContent: 'flex-end', 
           gap: '8px',
           flexShrink: 0,
-          height: isExpanded ? '32px' : '0'
+          height: '32px'
         }}>
           <button
             onClick={(e) => {
@@ -366,12 +280,11 @@ const ProviderResponseBlock = ({
               color: '#ffffff',
               fontSize: '12px',
               cursor: 'pointer',
-              transition: 'all 0.2s ease',
             }}
           >
-            ↘ Send to Canvas
+            ↘ Canvas
           </button>
-          <CopyButton text={state?.text} label={`Copy ${provider?.name || providerId} response`} />
+          <CopyButton text={state?.text} label={`Copy ${provider?.name || providerId}`} />
           <ProviderPill id={providerId as any} />
         </div>
       </div>
@@ -487,44 +400,14 @@ const ProviderResponseBlock = ({
           <div style={{ fontSize: '14px', fontWeight: 500, color: '#94a3b8' }}>
             AI Responses ({allProviderIds.length})
           </div>
-          <div style={{ display: 'flex', gap: '8px' }}>
-            <button
-              onClick={handleExpandAll}
-              style={{
-                background: '#334155',
-                border: '1px solid #475569',
-                borderRadius: '6px',
-                padding: '4px 8px',
-                color: '#94a3b8',
-                fontSize: '12px',
-                cursor: 'pointer',
-              }}
-            >
-              Expand All
-            </button>
-            <button
-              onClick={handleCollapseAll}
-              style={{
-                background: '#334155',
-                border: '1px solid #475569',
-                borderRadius: '6px',
-                padding: '4px 8px',
-                color: '#94a3b8',
-                fontSize: '12px',
-                cursor: 'pointer',
-              }}
-            >
-              Collapse All
-            </button>
-            <CopyButton 
+          <CopyButton 
               text={allProviderIds.map(id => {
                 const state = effectiveProviderStates[id];
                 const provider = getProviderConfig(id);
                 return `${provider?.name || id}:\n${state.text}`;
               }).join('\n\n---\n\n')} 
-              label="Copy all provider responses"
+              label="Copy all responses"
             />
-          </div>
         </div>
 
         {/* CAROUSEL LAYOUT: [Left Indicator] [3 Main Cards] [Right Indicator] */}

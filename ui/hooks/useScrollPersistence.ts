@@ -54,7 +54,6 @@ export function useScrollPersistence() {
 
   useEffect(() => {
     if (!currentSessionId) return;
-    // restore after a small delay to allow rendering
     setTimeout(() => {
       const pos = getScrollPositionLS(String(currentSessionId));
       if (pos !== null && scrollerRef.current) {
