@@ -248,6 +248,8 @@ export class WorkflowEngine {
     this.orchestrator = orchestrator;
     this.sessionManager = sessionManager;
     this.port = port;
+    // Keep track of the most recent finalized turn to align IDs with persistence
+    this._lastFinalizedTurn = null;
   }
 
   async execute(request) {
@@ -337,6 +339,9 @@ export class WorkflowEngine {
         // 3. Signal completion.
     this.port.postMessage({ type: 'WORKFLOW_COMPLETE', sessionId: context.sessionId, workflowId: request.workflowId, finalResults: Object.fromEntries(stepResults) });
     
+    // Emit canonical turn to allow UI to replace optimistic placeholders
+    this._emitTurnFinalized(context, steps, stepResults);
+    
     // ✅ Clean up delta cache
     clearDeltaCache(context.sessionId);
     // Persist the completed turn if applicable
@@ -346,6 +351,145 @@ export class WorkflowEngine {
         console.error(`[WorkflowEngine] Critical workflow execution error:`, error);
         this.port.postMessage({ type: 'WORKFLOW_COMPLETE', sessionId: context.sessionId, workflowId: request.workflowId, error: 'A critical error occurred.' });
 }
+  }
+
+  /**
+   * Emit TURN_FINALIZED message with canonical turn data
+   * This allows UI to replace optimistic placeholders with backend-confirmed data
+   */
+  _emitTurnFinalized(context, steps, stepResults) {
+    // Skip for historical reruns (they don't create new user turns)
+    if (context?.targetUserTurnId) {
+      console.log('[WorkflowEngine] Skipping TURN_FINALIZED for historical rerun');
+      return;
+    }
+
+    const userMessage = context?.userMessage || this.currentUserMessage || '';
+    if (!userMessage) {
+      console.log('[WorkflowEngine] No user message, skipping TURN_FINALIZED');
+      return;
+    }
+
+    try {
+      // Build canonical turn structure
+      const timestamp = Date.now();
+      const userTurnId = this._generateId('user');
+      const aiTurnId = this._generateId('ai');
+
+      const userTurn = {
+        id: userTurnId,
+        type: 'user',
+        text: userMessage,
+        createdAt: timestamp,
+        sessionId: context.sessionId
+      };
+
+      // Collect AI results from step results
+      const batchResponses = {};
+      const synthesisResponses = {};
+      const mappingResponses = {};
+
+      const stepById = new Map((steps || []).map(s => [s.stepId, s]));
+      stepResults.forEach((value, stepId) => {
+        const step = stepById.get(stepId);
+        if (!step || value?.status !== 'completed') return;
+        const result = value.result;
+
+        switch (step.type) {
+          case 'prompt': {
+            const resultsObj = result?.results || {};
+            Object.entries(resultsObj).forEach(([providerId, r]) => {
+              batchResponses[providerId] = {
+                providerId,
+                text: r.text || '',
+                status: r.status || 'completed',
+                createdAt: timestamp,
+                updatedAt: timestamp,
+                meta: r.meta || {}
+              };
+            });
+            break;
+          }
+          case 'synthesis': {
+            const providerId = result?.providerId;
+            if (!providerId) return;
+            if (!synthesisResponses[providerId]) synthesisResponses[providerId] = [];
+            synthesisResponses[providerId].push({
+              providerId,
+              text: result?.text || '',
+              status: result?.status || 'completed',
+              createdAt: timestamp,
+              updatedAt: timestamp,
+              meta: result?.meta || {}
+            });
+            break;
+          }
+          case 'mapping': {
+            const providerId = result?.providerId;
+            if (!providerId) return;
+            if (!mappingResponses[providerId]) mappingResponses[providerId] = [];
+            mappingResponses[providerId].push({
+              providerId,
+              text: result?.text || '',
+              status: result?.status || 'completed',
+              createdAt: timestamp,
+              updatedAt: timestamp,
+              meta: result?.meta || {}
+            });
+            break;
+          }
+        }
+      });
+
+      const hasData = Object.keys(batchResponses).length > 0 || 
+                      Object.keys(synthesisResponses).length > 0 || 
+                      Object.keys(mappingResponses).length > 0;
+
+      if (!hasData) {
+        console.log('[WorkflowEngine] No AI responses to finalize');
+        return;
+      }
+
+      const aiTurn = {
+        id: aiTurnId,
+        type: 'ai',
+        userTurnId: userTurn.id,
+        sessionId: context.sessionId,
+        threadId: 'default-thread',
+        createdAt: timestamp,
+        batchResponses,
+        synthesisResponses,
+        mappingResponses
+      };
+
+      console.log('[WorkflowEngine] Emitting TURN_FINALIZED', {
+        userTurnId: userTurn.id,
+        aiTurnId: aiTurn.id,
+        batchCount: Object.keys(batchResponses).length,
+        synthesisCount: Object.keys(synthesisResponses).length,
+        mappingCount: Object.keys(mappingResponses).length
+      });
+
+      this.port.postMessage({
+        type: 'TURN_FINALIZED',
+        sessionId: context.sessionId,
+        userTurnId: userTurn.id,
+        aiTurnId: aiTurn.id,
+        turn: {
+          user: userTurn,
+          ai: aiTurn
+        }
+      });
+
+      // Store for persistence alignment
+      this._lastFinalizedTurn = {
+        sessionId: context.sessionId,
+        user: userTurn,
+        ai: aiTurn
+      };
+    } catch (error) {
+      console.error('[WorkflowEngine] Failed to emit TURN_FINALIZED:', error);
+    }
   }
 
   /**
@@ -414,6 +558,18 @@ export class WorkflowEngine {
 
     const userMessage = context?.userMessage || this.currentUserMessage || '';
     if (!userMessage) return; // No content to persist
+
+    // If we have a recently finalized turn for this session, persist it directly to keep IDs stable
+    if (this._lastFinalizedTurn && this._lastFinalizedTurn.sessionId === context.sessionId) {
+      try {
+        this.sessionManager.saveTurn(context.sessionId, this._lastFinalizedTurn.user, this._lastFinalizedTurn.ai);
+      } catch (e) {
+        console.warn('[WorkflowEngine] Failed to persist last finalized turn, falling back to rebuild:', e);
+      } finally {
+        this._lastFinalizedTurn = null; // Clear regardless to avoid cross-run leaks
+      }
+      return;
+    }
 
     // Build UserTurn
     const timestamp = Date.now();
@@ -703,7 +859,48 @@ export class WorkflowEngine {
         } catch (_) {}
       }
       if (!aiTurn || aiTurn.type !== 'ai') {
-        throw new Error(`Could not find corresponding AI turn for ${userTurnId}`);
+        // Fallback: try to resolve by matching user text when IDs differ (optimistic vs canonical)
+        const fallbackText = context?.userMessage || this.currentUserMessage || '';
+        if (fallbackText && fallbackText.trim().length > 0) {
+          try {
+            // Search current session first
+            let found = null;
+            const searchInSession = (sess) => {
+              if (!sess || !Array.isArray(sess.turns)) return null;
+              for (let i = 0; i < sess.turns.length; i++) {
+                const t = sess.turns[i];
+                if (t && t.type === 'user' && String(t.text || '') === String(fallbackText)) {
+                  const next = sess.turns[i + 1];
+                  if (next && next.type === 'ai') return next;
+                }
+              }
+              return null;
+            };
+
+            found = searchInSession(session);
+            if (!found) {
+              // Fallback: search across all sessions
+              const allSessions = this.sessionManager.sessions || {};
+              for (const [sid, s] of Object.entries(allSessions)) {
+                found = searchInSession(s);
+                if (found) {
+                  console.warn(`[WorkflowEngine] Historical fallback matched by text in different session ${sid}; proceeding with that context.`);
+                  break;
+                }
+              }
+            }
+
+            if (found) {
+              aiTurn = found;
+            } else {
+              throw new Error(`Could not find corresponding AI turn for ${userTurnId}`);
+            }
+          } catch (e) {
+            throw new Error(`Could not find corresponding AI turn for ${userTurnId}`);
+          }
+        } else {
+          throw new Error(`Could not find corresponding AI turn for ${userTurnId}`);
+        }
       }
       
       let sourceContainer;

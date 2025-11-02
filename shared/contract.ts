@@ -159,11 +159,29 @@ export interface WorkflowCompleteMessage {
   error?: string;
 }
 
+export interface TurnFinalizedMessage {
+  type: "TURN_FINALIZED";
+  sessionId: string;
+  userTurnId: string;
+  aiTurnId: string;
+  turn: {
+    user: {
+      id: string;
+      type: 'user';
+      text: string;
+      createdAt: number;
+      sessionId: string;
+    };
+    ai: AiTurn;
+  };
+}
+
 export type PortMessage =
   | SessionStartedMessage
   | PartialResultMessage
   | WorkflowStepUpdateMessage
-  | WorkflowCompleteMessage;
+  | WorkflowCompleteMessage
+  | TurnFinalizedMessage;
 
 // ============================================================================
 // SECTION 4: PERSISTENT DATA MODELS (FOR UI & SESSION STATE)

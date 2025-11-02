@@ -3,6 +3,7 @@ import { useCallback, useRef, useEffect } from 'react';
 import { useSetAtom, useAtomValue } from 'jotai';
 import { 
   turnsMapAtom,
+  turnIdsAtom,
   currentSessionIdAtom, 
   pendingUserTurnsAtom,
   isLoadingAtom,
@@ -45,6 +46,7 @@ function extractProviderFromStepId(stepId: string, stepType: 'synthesis' | 'mapp
 
 export function usePortMessageHandler() {
   const setTurnsMap = useSetAtom(turnsMapAtom);
+  const setTurnIds = useSetAtom(turnIdsAtom);
   const setCurrentSessionId = useSetAtom(currentSessionIdAtom);
   const currentSessionId = useAtomValue(currentSessionIdAtom);
   const setPendingUserTurns = useSetAtom(pendingUserTurnsAtom);
@@ -92,6 +94,155 @@ export function usePortMessageHandler() {
         });
         
         try { api.setSessionId(newSessionId); } catch {}
+        break;
+      }
+
+      case 'TURN_FINALIZED': {
+        const { userTurnId, aiTurnId, turn, sessionId: msgSessionId } = message;
+        
+        // Ignore cross-session messages
+        if (msgSessionId && currentSessionId && msgSessionId !== currentSessionId) {
+          console.warn(`[Port] Ignoring TURN_FINALIZED from ${msgSessionId} (active ${currentSessionId})`);
+          return;
+        }
+
+        console.log('[Port] Received TURN_FINALIZED', { 
+          userTurnId, 
+          aiTurnId,
+          hasUserData: !!turn?.user,
+          hasAiData: !!turn?.ai,
+          aiHasUserTurnId: !!turn?.ai?.userTurnId
+        });
+
+        // Flush any pending streaming data first
+        streamingBufferRef.current?.flushImmediate?.();
+
+        // Track old optimistic ids for remapping
+        let remappedOldId: string | null = null;
+        let remappedOldUserId: string | null = null;
+
+        // In ui/hooks/usePortMessageHandler.ts, inside the 'TURN_FINALIZED' case:
+
+setTurnsMap((draft: Map<string, TurnMessage>) => {
+  const optimisticAiTurnId = activeAiTurnIdRef.current;
+  let optimisticUserTurnId: string | null = null;
+  
+  // 1. Find the optimistic turns using the active AI turn ID as the anchor
+  if (optimisticAiTurnId) {
+    const optimisticAiTurn = draft.get(optimisticAiTurnId);
+    if (optimisticAiTurn && optimisticAiTurn.type === 'ai') {
+      optimisticUserTurnId = (optimisticAiTurn as AiTurn).userTurnId;
+    }
+  }
+
+  // If we have the IDs for both optimistic turns, perform the swap
+  if (optimisticAiTurnId && optimisticUserTurnId) {
+    console.log('[Port] Performing atomic swap for optimistic turns', { optimisticUserTurnId, optimisticAiTurnId });
+    
+    const existingAi = draft.get(optimisticAiTurnId) as AiTurn | undefined;
+
+    // 2. Delete the old optimistic turns from the map
+    draft.delete(optimisticUserTurnId);
+    draft.delete(optimisticAiTurnId);
+    
+    // Set the remapping IDs for the turnIds update later
+    remappedOldId = optimisticAiTurnId;
+    remappedOldUserId = optimisticUserTurnId;
+
+    // 3. Add the new canonical turns
+    if (turn?.user) {
+      draft.set(turn.user.id, turn.user as UserTurn);
+    }
+    if (turn?.ai) {
+      const updatedAiTurn: AiTurn = {
+        ...(turn.ai as AiTurn),
+        userTurnId: turn.user?.id || turn.ai.userTurnId,
+        // Merge any late-arriving streaming data
+        batchResponses: { ...(existingAi?.batchResponses || {}), ...(turn.ai.batchResponses || {}) },
+        synthesisResponses: { ...(existingAi?.synthesisResponses || {}), ...(turn.ai.synthesisResponses || {}) },
+        mappingResponses: { ...(existingAi?.mappingResponses || {}), ...(turn.ai.mappingResponses || {}) },
+        meta: { ...(existingAi?.meta || {}), ...(turn.ai.meta || {}), isOptimistic: false }
+      };
+      draft.set(aiTurnId, updatedAiTurn);
+    }
+  } else {
+    // Fallback for historical runs or if state is out of sync (should be rare)
+    console.warn('[Port] Could not find optimistic turns for atomic swap. Applying canonical data directly.');
+    if (turn?.user) {
+      draft.set(turn.user.id, turn.user as UserTurn);
+    }
+    if (turn?.ai) {
+      draft.set(aiTurnId, turn.ai as AiTurn);
+    }
+  }
+});
+
+        // ✅ Update turnIds to reflect canonical IDs (moved from SESSION_STARTED)
+        setTurnIds((idsDraft: string[]) => {
+          // Replace old optimistic user id with canonical, if known
+          if (remappedOldUserId && turn?.user?.id) {
+            for (let i = 0; i < idsDraft.length; i++) {
+              if (idsDraft[i] === remappedOldUserId) {
+                idsDraft[i] = turn.user.id;
+                console.log('[Port] 🔁 Remapped user turn ID in turnIds', { 
+                  old: remappedOldUserId, 
+                  new: turn.user.id 
+                });
+              }
+            }
+          }
+          
+          // Replace old optimistic ai id with canonical
+          if (remappedOldId) {
+            for (let i = 0; i < idsDraft.length; i++) {
+              if (idsDraft[i] === remappedOldId) {
+                idsDraft[i] = aiTurnId;
+                console.log('[Port] 🔁 Remapped AI turn ID in turnIds', { 
+                  old: remappedOldId, 
+                  new: aiTurnId 
+                });
+              }
+            }
+          }
+          
+          // Ensure canonical ids exist (in case remapping failed)
+          const ensureId = (id: string | undefined) => {
+            if (!id) return;
+            if (!idsDraft.includes(id)) {
+              idsDraft.push(id);
+              console.log('[Port] 📌 Added missing canonical ID to turnIds:', id);
+            }
+          };
+          ensureId(turn?.user?.id);
+          ensureId(aiTurnId);
+
+          // Deduplicate while preserving first occurrence
+          const seen = new Set<string>();
+          for (let i = idsDraft.length - 1; i >= 0; i--) {
+            const id = idsDraft[i];
+            if (seen.has(id)) {
+              idsDraft.splice(i, 1);
+            } else {
+              seen.add(id);
+            }
+          }
+        });
+
+        // Clear pending user turns after confirmation
+        setPendingUserTurns((draft: Map<string, UserTurn>) => {
+          draft.delete(aiTurnId);
+          if (remappedOldId && draft.has(remappedOldId)) {
+            draft.delete(remappedOldId);
+          } else if (turn?.user?.id) {
+            // Fallback: remove any entry whose user id matches
+            for (const [k, v] of draft.entries()) {
+              if (v?.id === turn.user.id) {
+                draft.delete(k);
+              }
+            }
+          }
+        });
+
         break;
       }
 
@@ -208,6 +359,9 @@ export function usePortMessageHandler() {
         streamingBufferRef.current?.flushImmediate();
         const completedTurnId = activeAiTurnIdRef.current;
 
+        // Fallback finalization is no longer needed.
+// The robust TURN_FINALIZED handler will manage this state change.
+
         setIsLoading(false);
         setUiPhase('awaiting_action');
         setIsContinuationMode(true);
@@ -223,7 +377,8 @@ export function usePortMessageHandler() {
       }
     }
   }, [
-    setTurnsMap, 
+    setTurnsMap,
+    setTurnIds,
     setCurrentSessionId, 
     currentSessionId,
     setPendingUserTurns,

@@ -30,9 +30,10 @@ export function createOptimisticAiTurn(
   shouldUseSynthesis: boolean,
   shouldUseMapping: boolean,
   synthesisProvider?: string,
-  mappingProvider?: string
+  mappingProvider?: string,
+  timestamp?: number
 ): AiTurn {
-  const now = Date.now();
+  const now = timestamp || Date.now();
   
   // Initialize batch responses for all active providers
   const pendingBatch: Record<string, ProviderResponse> = {};
@@ -41,7 +42,8 @@ export function createOptimisticAiTurn(
       providerId: pid,
       text: '',
       status: 'pending',
-      createdAt: now
+      createdAt: now,
+      updatedAt: now
     };
   });
   
@@ -52,7 +54,8 @@ export function createOptimisticAiTurn(
       providerId: synthesisProvider as ProviderKey,
       text: '',
       status: 'pending',
-      createdAt: now
+      createdAt: now,
+      updatedAt: now
     }];
   }
   
@@ -63,7 +66,8 @@ export function createOptimisticAiTurn(
       providerId: mappingProvider as ProviderKey,
       text: '',
       status: 'pending',
-      createdAt: now
+      createdAt: now,
+      updatedAt: now
     }];
   }
   
@@ -76,7 +80,10 @@ export function createOptimisticAiTurn(
     userTurnId: userTurn.id,
     batchResponses: pendingBatch,
     synthesisResponses,
-    mappingResponses
+    mappingResponses,
+    meta: {
+      isOptimistic: true
+    }
   };
 }
 

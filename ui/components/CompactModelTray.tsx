@@ -287,29 +287,49 @@ const CompactModelTray = ({
               role="menu"
               aria-label="Map provider selection"
             >
-              {LLM_PROVIDERS_CONFIG.map((provider) => {
+{LLM_PROVIDERS_CONFIG.map((provider) => {
                 const isSelected = mapProviderId === provider.id;
-                const isDisabled = unifyProviderId === provider.id; // Cannot select same as unify
                 return (
                   <button
                     key={provider.id}
                     onClick={() => {
-                      if (isDisabled || isLoading) return;
-                      // If provider isn't enabled globally, enable it so it's available as a batch provider
+                      if (isLoading) return;
+                      // Ensure provider is enabled globally
                       if (!selectedModels[provider.id]) onToggleModel(provider.id);
-                      if (mapProviderId === provider.id) {
+
+                      const clickedId = provider.id;
+                      // If selecting the same as Unify, auto-switch Unify to a fallback (do not block selection)
+                      if (unifyProviderId && unifyProviderId === clickedId) {
+                        const selectedIds = LLM_PROVIDERS_CONFIG.map(p => p.id).filter(id => selectedModels[id]);
+                        const prefer = clickedId === 'gemini' ? ['qwen'] : clickedId === 'qwen' ? ['gemini'] : ['qwen', 'gemini'];
+                        let fallback: string | null = null;
+                        for (const cand of prefer) {
+                          if (cand !== clickedId && selectedIds.includes(cand)) { fallback = cand; break; }
+                        }
+                        if (!fallback) {
+                          const anyOther = selectedIds.find(id => id !== clickedId) || null;
+                          fallback = anyOther;
+                        }
+                        // Apply fallback for Unify first to maintain constraint
+                        onSetSynthesisProvider?.(fallback);
+                        try {
+                          if (fallback) localStorage.setItem('htos_synthesis_provider', fallback);
+                        } catch {}
+                      }
+
+                      if (mapProviderId === clickedId) {
                         // Toggle off Map when clicking the already selected provider
                         onSetMappingProvider?.(null);
                         onToggleMapping?.(false);
                         try { localStorage.removeItem('htos_mapping_provider'); localStorage.setItem('htos_mapping_enabled', JSON.stringify(false)); } catch (_) {}
                       } else {
-                        onSetMappingProvider?.(provider.id);
+                        onSetMappingProvider?.(clickedId);
                         onToggleMapping?.(true);
-                        try { localStorage.setItem('htos_mapping_provider', provider.id); localStorage.setItem('htos_mapping_enabled', JSON.stringify(true)); } catch (_) {}
+                        try { localStorage.setItem('htos_mapping_provider', clickedId); localStorage.setItem('htos_mapping_enabled', JSON.stringify(true)); } catch (_) {}
                       }
                       setShowMapDropdown(false);
                     }}
-                    disabled={isDisabled || isLoading}
+                    disabled={isLoading}
                     style={{
                       display: 'block',
                       width: '100%',
@@ -319,13 +339,12 @@ const CompactModelTray = ({
                       color: isSelected ? '#22c55e' : '#e2e8f0',
                       border: 'none',
                       borderRadius: '4px',
-                      cursor: isDisabled ? 'not-allowed' : 'pointer',
+                      cursor: 'pointer',
                       transition: 'all 0.12s ease',
-                      opacity: isDisabled ? 0.5 : 1,
                       fontSize: '12px' // increased to match model selector
                     }}
                     onMouseEnter={(e) => {
-                      if (!isDisabled) e.currentTarget.style.background = 'rgba(255,255,255,0.02)';
+                      e.currentTarget.style.background = 'rgba(255,255,255,0.02)';
                     }}
                     onMouseLeave={(e) => {
                       e.currentTarget.style.background = isSelected ? 'rgba(34, 197, 94, 0.12)' : 'transparent';
@@ -371,11 +390,10 @@ const CompactModelTray = ({
               role="menu"
               aria-label="Unify provider selection"
             >
-              {powerUserMode ? (
+{powerUserMode ? (
                 // Multi-select for power user
                 LLM_PROVIDERS_CONFIG.map((provider) => {
                   const isSelected = synthesisProviders.includes(provider.id);
-                  const isDisabled = mapProviderId === provider.id; // Cannot select same as map
                   return (
                     <label
                       key={provider.id}
@@ -384,14 +402,13 @@ const CompactModelTray = ({
                         alignItems: 'center',
                         gap: '8px',
                         padding: '6px 8px',
-                        cursor: isDisabled ? 'not-allowed' : 'pointer',
+                        cursor: 'pointer',
                         borderRadius: '4px',
                         background: isSelected ? 'rgba(251, 191, 36, 0.12)' : 'transparent',
-                        opacity: isDisabled ? 0.5 : 1,
                         transition: 'all 0.12s ease',
                       }}
                       onMouseEnter={(e) => {
-                        if (isSelected && !isDisabled) e.currentTarget.style.boxShadow = '0 0 8px rgba(251, 191, 36, 0.5)';
+                        if (isSelected) e.currentTarget.style.boxShadow = '0 0 8px rgba(251, 191, 36, 0.5)';
                       }}
                       onMouseLeave={(e) => {
                         e.currentTarget.style.boxShadow = 'none';
@@ -401,12 +418,36 @@ const CompactModelTray = ({
                         type="checkbox"
                         checked={isSelected}
                         onChange={() => {
-                          if (isDisabled || isLoading) return;
+                          if (isLoading) return;
                           // enable provider globally if not already
                           if (!selectedModels[provider.id]) onToggleModel(provider.id);
-                          !isLoading && onToggleSynthesisProvider?.(provider.id);
+                          
+                          const clickedId = provider.id;
+                          // If selecting same as Map, auto-switch Map to fallback
+                          if (mapProviderId === clickedId && !isSelected) {
+                            const selectedIds = LLM_PROVIDERS_CONFIG.map(p => p.id).filter(id => selectedModels[id]);
+                            const prefer = clickedId === 'gemini' ? ['qwen'] : clickedId === 'qwen' ? ['gemini'] : ['qwen', 'gemini'];
+                            let fallback: string | null = null;
+                            for (const cand of prefer) {
+                              if (cand !== clickedId && selectedIds.includes(cand)) { fallback = cand; break; }
+                            }
+                            if (!fallback) {
+                              const anyOther = selectedIds.find(id => id !== clickedId) || null;
+                              fallback = anyOther;
+                            }
+                            onSetMappingProvider?.(fallback);
+                            try {
+                              if (fallback) {
+                                localStorage.setItem('htos_mapping_provider', fallback);
+                              } else {
+                                localStorage.removeItem('htos_mapping_provider');
+                              }
+                            } catch {}
+                          }
+
+                          onToggleSynthesisProvider?.(clickedId);
                         }}
-                        disabled={isDisabled || isLoading}
+                        disabled={isLoading}
                         style={{ width: '14px', height: '14px', accentColor: '#fbbf24' }}
                       />
                       <span style={{ fontSize: '12px', color: isSelected ? '#fbbf24' : '#94a3b8' }}>
@@ -416,26 +457,48 @@ const CompactModelTray = ({
                   );
                 })
               ) : (
-                // Single select
+// Single select
                 LLM_PROVIDERS_CONFIG.map((provider) => {
                   const isSelected = unifyProviderId === provider.id;
-                  const isDisabled = mapProviderId === provider.id;
                   return (
                     <button
                       key={provider.id}
                       onClick={() => {
-                        if (isDisabled || isLoading) return;
+                        if (isLoading) return;
                         // enable globally if not selected
                         if (!selectedModels[provider.id]) onToggleModel(provider.id);
-                        if (unifyProviderId === provider.id) {
+                        const clickedId = provider.id;
+                        // If selecting same as Map, auto-switch Map to a fallback
+                        if (mapProviderId && mapProviderId === clickedId) {
+                          const selectedIds = LLM_PROVIDERS_CONFIG.map(p => p.id).filter(id => selectedModels[id]);
+                          const prefer = clickedId === 'gemini' ? ['qwen'] : clickedId === 'qwen' ? ['gemini'] : ['qwen', 'gemini'];
+                          let fallback: string | null = null;
+                          for (const cand of prefer) {
+                            if (cand !== clickedId && selectedIds.includes(cand)) { fallback = cand; break; }
+                          }
+                          if (!fallback) {
+                            const anyOther = selectedIds.find(id => id !== clickedId) || null;
+                            fallback = anyOther;
+                          }
+                          onSetMappingProvider?.(fallback);
+                          try {
+                            if (fallback) {
+                              localStorage.setItem('htos_mapping_provider', fallback);
+                              localStorage.setItem('htos_mapping_enabled', JSON.stringify(true));
+                            }
+                          } catch {}
+                        }
+                        if (unifyProviderId === clickedId) {
                           // Toggle off Unify when clicking the already selected provider
                           onSetSynthesisProvider?.(null);
+                          try { localStorage.removeItem('htos_synthesis_provider'); } catch {}
                         } else {
-                          onSetSynthesisProvider?.(provider.id);
+                          onSetSynthesisProvider?.(clickedId);
+                          try { localStorage.setItem('htos_synthesis_provider', clickedId); } catch {}
                         }
                         setShowUnifyDropdown(false);
                       }}
-                      disabled={isDisabled || isLoading}
+                      disabled={isLoading}
                       style={{
                         display: 'block',
                         width: '100%',
@@ -445,13 +508,12 @@ const CompactModelTray = ({
                         color: isSelected ? '#fbbf24' : '#e2e8f0',
                         border: 'none',
                         borderRadius: '4px',
-                        cursor: isDisabled ? 'not-allowed' : 'pointer',
+                        cursor: 'pointer',
                         transition: 'all 0.12s ease',
-                        opacity: isDisabled ? 0.5 : 1,
                         fontSize: '12px' // increased to match model selector
                       }}
                       onMouseEnter={(e) => {
-                        if (!isDisabled) e.currentTarget.style.background = 'rgba(255,255,255,0.02)';
+                        e.currentTarget.style.background = 'rgba(255,255,255,0.02)';
                       }}
                       onMouseLeave={(e) => {
                         e.currentTarget.style.background = isSelected ? 'rgba(251, 191, 36, 0.12)' : 'transparent';
@@ -683,10 +745,25 @@ const CompactModelTray = ({
                       Map
                     </span>
                   </div>
-                  <select
+<select
                     value={mapProviderId}
                     onChange={(e) => {
                       const val = e.target.value || null;
+                      // If choosing same as unify, auto-switch unify to fallback
+                      if (val && unifyProviderId === val) {
+                        const selectedIds = LLM_PROVIDERS_CONFIG.map(p => p.id).filter(id => selectedModels[id]);
+                        const prefer = val === 'gemini' ? ['qwen'] : val === 'qwen' ? ['gemini'] : ['qwen', 'gemini'];
+                        let fallback: string | null = null;
+                        for (const cand of prefer) {
+                          if (cand !== val && selectedIds.includes(cand)) { fallback = cand; break; }
+                        }
+                        if (!fallback) {
+                          const anyOther = selectedIds.find(id => id !== val) || null;
+                          fallback = anyOther;
+                        }
+                        onSetSynthesisProvider?.(fallback);
+                        try { if (fallback) localStorage.setItem('htos_synthesis_provider', fallback); } catch {}
+                      }
                       onSetMappingProvider?.(val);
                       try {
                         if (val) {
@@ -713,9 +790,7 @@ const CompactModelTray = ({
                      }}
                    >
                     <option value="">Select...</option>
-                    {selectedProviders
-                      .filter(p => unifyProviderId !== p.id) // Exclude current unify
-                      .map(provider => (
+{selectedProviders.map(provider => (
                       <option key={provider.id} value={provider.id}>
                         {provider.name}
                       </option>
@@ -776,7 +851,6 @@ const CompactModelTray = ({
                     // Multi-select checkboxes for power user
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', maxHeight: '100px', overflowY: 'auto' }}>
                       {selectedProviders
-                        .filter(p => mapProviderId !== p.id) // Exclude current map
                         .map(provider => {
                         const isSelected = synthesisProviders.includes(provider.id);
                         return (
@@ -796,7 +870,32 @@ const CompactModelTray = ({
                             <input
                               type="checkbox"
                               checked={isSelected}
-                              onChange={() => !isLoading && onToggleSynthesisProvider?.(provider.id)}
+                              onChange={() => {
+                                if (isLoading) return;
+                                const clickedId = provider.id;
+                                // If selecting same as Map, auto-switch Map to fallback
+                                if (mapProviderId === clickedId && !isSelected) {
+                                  const selectedIds = LLM_PROVIDERS_CONFIG.map(p => p.id).filter(id => selectedModels[id]);
+                                  const prefer = clickedId === 'gemini' ? ['qwen'] : clickedId === 'qwen' ? ['gemini'] : ['qwen', 'gemini'];
+                                  let fallback: string | null = null;
+                                  for (const cand of prefer) {
+                                    if (cand !== clickedId && selectedIds.includes(cand)) { fallback = cand; break; }
+                                  }
+                                  if (!fallback) {
+                                    const anyOther = selectedIds.find(id => id !== clickedId) || null;
+                                    fallback = anyOther;
+                                  }
+                                  onSetMappingProvider?.(fallback);
+                                  try {
+                                    if (fallback) {
+                                      localStorage.setItem('htos_mapping_provider', fallback);
+                                    } else {
+                                      localStorage.removeItem('htos_mapping_provider');
+                                    }
+                                  } catch {}
+                                }
+                                onToggleSynthesisProvider?.(clickedId);
+                              }}
                               disabled={isLoading}
                               style={{ width: '14px', height: '14px', accentColor: '#fbbf24' }}
                             />
@@ -808,9 +907,27 @@ const CompactModelTray = ({
                       })}
                     </div>
                   ) : (
-                    <select
+<select
                       value={unifyProviderId}
-                      onChange={(e) => onSetSynthesisProvider?.(e.target.value || null)}
+                      onChange={(e) => {
+                        const val = e.target.value || null;
+                        // If choosing same as map, auto-switch map to fallback
+                        if (val && mapProviderId === val) {
+                          const selectedIds = LLM_PROVIDERS_CONFIG.map(p => p.id).filter(id => selectedModels[id]);
+                          const prefer = val === 'gemini' ? ['qwen'] : val === 'qwen' ? ['gemini'] : ['qwen', 'gemini'];
+                          let fallback: string | null = null;
+                          for (const cand of prefer) {
+                            if (cand !== val && selectedIds.includes(cand)) { fallback = cand; break; }
+                          }
+                          if (!fallback) {
+                            const anyOther = selectedIds.find(id => id !== val) || null;
+                            fallback = anyOther;
+                          }
+                          onSetMappingProvider?.(fallback);
+                          try { if (fallback) localStorage.setItem('htos_mapping_provider', fallback); } catch {}
+                        }
+                        onSetSynthesisProvider?.(val);
+                      }}
                       disabled={!isUnifyEnabled || !canRefine || isLoading}
                       style={{
                         background: 'rgba(255, 255, 255, 0.1)',
@@ -823,9 +940,7 @@ const CompactModelTray = ({
                       }}
                     >
                       <option value="">Select...</option>
-                      {selectedProviders
-                        .filter(p => mapProviderId !== p.id) // Exclude current map
-                        .map(provider => (
+{selectedProviders.map(provider => (
                         <option key={provider.id} value={provider.id}>
                           {provider.name}
                         </option>
