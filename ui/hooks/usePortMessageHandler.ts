@@ -5,17 +5,21 @@ import {
   turnsMapAtom,
   turnIdsAtom,
   currentSessionIdAtom, 
-  pendingUserTurnsAtom,
   isLoadingAtom,
   uiPhaseAtom,
   activeAiTurnIdAtom,
   isContinuationModeAtom,
-  providerContextsAtom
+  providerContextsAtom,
+  selectedModelsAtom,
+  mappingEnabledAtom,
+  mappingProviderAtom,
+  synthesisProviderAtom
 } from '../state/atoms';
 import { StreamingBuffer } from '../utils/streamingBuffer';
-import { applyStreamingUpdates, applyCompletionUpdate } from '../utils/turn-helpers';
+import { applyStreamingUpdates, applyCompletionUpdate, createOptimisticAiTurn } from '../utils/turn-helpers';
 import api from '../services/extension-api';
-import type { TurnMessage, UserTurn, AiTurn } from '../types';
+import type { TurnMessage, UserTurn, AiTurn, ProviderKey } from '../types';
+import { LLM_PROVIDERS_CONFIG } from '../constants';
 
 /**
  * CRITICAL: Step type detection must match backend stepId patterns
@@ -49,13 +53,17 @@ export function usePortMessageHandler() {
   const setTurnIds = useSetAtom(turnIdsAtom);
   const setCurrentSessionId = useSetAtom(currentSessionIdAtom);
   const currentSessionId = useAtomValue(currentSessionIdAtom);
-  const setPendingUserTurns = useSetAtom(pendingUserTurnsAtom);
   const setIsLoading = useSetAtom(isLoadingAtom);
   const setUiPhase = useSetAtom(uiPhaseAtom);
   const setIsContinuationMode = useSetAtom(isContinuationModeAtom);
   const activeAiTurnId = useAtomValue(activeAiTurnIdAtom);
   const setActiveAiTurnId = useSetAtom(activeAiTurnIdAtom);
   const setProviderContexts = useSetAtom(providerContextsAtom);
+  const turnsMap = useAtomValue(turnsMapAtom);
+  const selectedModels = useAtomValue(selectedModelsAtom);
+  const mappingEnabled = useAtomValue(mappingEnabledAtom);
+  const mappingProvider = useAtomValue(mappingProviderAtom);
+  const synthesisProvider = useAtomValue(synthesisProviderAtom);
   
   const streamingBufferRef = useRef<StreamingBuffer | null>(null);
   const activeAiTurnIdRef = useRef<string | null>(null);
@@ -71,29 +79,62 @@ export function usePortMessageHandler() {
     console.log('[Port Handler]', message.type, message);
 
     switch (message.type) {
-      case 'SESSION_STARTED': {
-        const newSessionId = message.sessionId;
-        setCurrentSessionId(newSessionId);
-        
-        // Backfill session ID in turns map
+      // SESSION_STARTED is deprecated. UI now initializes session from TURN_CREATED.
+
+      case 'TURN_CREATED': {
+        const { userTurnId, aiTurnId, sessionId: msgSessionId } = message;
+
+        // Initialize session for new conversations
+        if (msgSessionId && (!currentSessionId || currentSessionId === '')) {
+          setCurrentSessionId(msgSessionId);
+          try { api.setSessionId(msgSessionId); } catch {}
+        }
+
+        // Ignore cross-session messages
+        if (msgSessionId && currentSessionId && msgSessionId !== currentSessionId) {
+          console.warn(`[Port] Ignoring TURN_CREATED from ${msgSessionId} (active ${currentSessionId})`);
+          return;
+        }
+
+        // Use the hook value, not get(turnsMapAtom)
+        const existingUser = turnsMap.get(userTurnId) as UserTurn | undefined;
+        if (!existingUser) {
+          console.error('[Port] Could not find user turn:', userTurnId);
+          return;
+        }
+
+        // Backfill sessionId on user turn if missing
+        const userTurn: UserTurn = { ...existingUser, sessionId: existingUser.sessionId || msgSessionId || null };
+        if (!existingUser.sessionId && msgSessionId) {
+          setTurnsMap((draft: Map<string, TurnMessage>) => {
+            draft.set(userTurnId, userTurn);
+          });
+        }
+
+        // Use selectedModels hook value to compute active providers
+        const activeProviders = LLM_PROVIDERS_CONFIG
+          .filter(p => selectedModels[p.id])
+          .map(p => p.id as ProviderKey);
+
+        const aiTurn = createOptimisticAiTurn(
+          aiTurnId,
+          userTurn,
+          activeProviders,
+          !!synthesisProvider,
+          !!mappingEnabled && !!mappingProvider,
+          synthesisProvider || undefined,
+          mappingProvider || undefined,
+          Date.now(),
+          userTurn.id
+        );
+
         setTurnsMap((draft: Map<string, TurnMessage>) => {
-          draft.forEach((m: TurnMessage, key: string) => {
-            if (!m.sessionId) {
-              draft.set(key, { ...m, sessionId: newSessionId } as TurnMessage);
-            }
-          });
+          draft.set(aiTurnId, aiTurn);
         });
-        
-        // Backfill session ID in pending user turns
-        setPendingUserTurns((draft: Map<string, UserTurn>) => {
-          draft.forEach((userTurn: UserTurn, aiId: string) => {
-            if (!userTurn.sessionId) {
-              draft.set(aiId, { ...userTurn, sessionId: newSessionId });
-            }
-          });
+        setTurnIds((draft: string[]) => {
+          draft.push(aiTurnId);
         });
-        
-        try { api.setSessionId(newSessionId); } catch {}
+        setActiveAiTurnId(aiTurnId);
         break;
       }
 
@@ -117,106 +158,44 @@ export function usePortMessageHandler() {
         // Flush any pending streaming data first
         streamingBufferRef.current?.flushImmediate?.();
 
-        // Track old optimistic ids for remapping
-        let remappedOldId: string | null = null;
-        let remappedOldUserId: string | null = null;
+        // Merge canonical data into existing turns (no ID remapping needed)
+        setTurnsMap((draft: Map<string, TurnMessage>) => {
+          // Update user turn if provided
+          if (turn?.user) {
+            const existingUser = draft.get(turn.user.id) as UserTurn | undefined;
+            draft.set(turn.user.id, { ...(existingUser || {}), ...(turn.user as UserTurn) });
+          }
 
-        // In ui/hooks/usePortMessageHandler.ts, inside the 'TURN_FINALIZED' case:
+          if (turn?.ai) {
+            const existingAi = draft.get(aiTurnId) as AiTurn | undefined;
+            if (!existingAi) {
+              // Fallback: if the AI turn wasn't created (should be rare), add it directly
+              draft.set(aiTurnId, turn.ai as AiTurn);
+            } else {
+              const mergedAi: AiTurn = {
+                ...existingAi,
+                ...(turn.ai as AiTurn),
+                type: 'ai',
+                userTurnId: turn.user?.id || existingAi.userTurnId,
+                batchResponses: { ...(existingAi.batchResponses || {}), ...((turn.ai as AiTurn)?.batchResponses || {}) },
+                synthesisResponses: { ...(existingAi.synthesisResponses || {}), ...((turn.ai as AiTurn)?.synthesisResponses || {}) },
+                mappingResponses: { ...(existingAi.mappingResponses || {}), ...((turn.ai as AiTurn)?.mappingResponses || {}) },
+                meta: { ...(existingAi.meta || {}), ...((turn.ai as AiTurn)?.meta || {}), isOptimistic: false }
+              };
+              draft.set(aiTurnId, mergedAi);
+            }
+          }
+        });
 
-setTurnsMap((draft: Map<string, TurnMessage>) => {
-  const optimisticAiTurnId = activeAiTurnIdRef.current;
-  let optimisticUserTurnId: string | null = null;
-  
-  // 1. Find the optimistic turns using the active AI turn ID as the anchor
-  if (optimisticAiTurnId) {
-    const optimisticAiTurn = draft.get(optimisticAiTurnId);
-    if (optimisticAiTurn && optimisticAiTurn.type === 'ai') {
-      optimisticUserTurnId = (optimisticAiTurn as AiTurn).userTurnId;
-    }
-  }
-
-  // If we have the IDs for both optimistic turns, perform the swap
-  if (optimisticAiTurnId && optimisticUserTurnId) {
-    console.log('[Port] Performing atomic swap for optimistic turns', { optimisticUserTurnId, optimisticAiTurnId });
-    
-    const existingAi = draft.get(optimisticAiTurnId) as AiTurn | undefined;
-
-    // 2. Delete the old optimistic turns from the map
-    draft.delete(optimisticUserTurnId);
-    draft.delete(optimisticAiTurnId);
-    
-    // Set the remapping IDs for the turnIds update later
-    remappedOldId = optimisticAiTurnId;
-    remappedOldUserId = optimisticUserTurnId;
-
-    // 3. Add the new canonical turns
-    if (turn?.user) {
-      draft.set(turn.user.id, turn.user as UserTurn);
-    }
-    if (turn?.ai) {
-      const updatedAiTurn: AiTurn = {
-        ...(turn.ai as AiTurn),
-        userTurnId: turn.user?.id || turn.ai.userTurnId,
-        // Merge any late-arriving streaming data
-        batchResponses: { ...(existingAi?.batchResponses || {}), ...(turn.ai.batchResponses || {}) },
-        synthesisResponses: { ...(existingAi?.synthesisResponses || {}), ...(turn.ai.synthesisResponses || {}) },
-        mappingResponses: { ...(existingAi?.mappingResponses || {}), ...(turn.ai.mappingResponses || {}) },
-        meta: { ...(existingAi?.meta || {}), ...(turn.ai.meta || {}), isOptimistic: false }
-      };
-      draft.set(aiTurnId, updatedAiTurn);
-    }
-  } else {
-    // Fallback for historical runs or if state is out of sync (should be rare)
-    console.warn('[Port] Could not find optimistic turns for atomic swap. Applying canonical data directly.');
-    if (turn?.user) {
-      draft.set(turn.user.id, turn.user as UserTurn);
-    }
-    if (turn?.ai) {
-      draft.set(aiTurnId, turn.ai as AiTurn);
-    }
-  }
-});
-
-        // ✅ Update turnIds to reflect canonical IDs (moved from SESSION_STARTED)
+        // Ensure canonical IDs exist in turnIds (no remapping)
         setTurnIds((idsDraft: string[]) => {
-          // Replace old optimistic user id with canonical, if known
-          if (remappedOldUserId && turn?.user?.id) {
-            for (let i = 0; i < idsDraft.length; i++) {
-              if (idsDraft[i] === remappedOldUserId) {
-                idsDraft[i] = turn.user.id;
-                console.log('[Port] 🔁 Remapped user turn ID in turnIds', { 
-                  old: remappedOldUserId, 
-                  new: turn.user.id 
-                });
-              }
-            }
-          }
-          
-          // Replace old optimistic ai id with canonical
-          if (remappedOldId) {
-            for (let i = 0; i < idsDraft.length; i++) {
-              if (idsDraft[i] === remappedOldId) {
-                idsDraft[i] = aiTurnId;
-                console.log('[Port] 🔁 Remapped AI turn ID in turnIds', { 
-                  old: remappedOldId, 
-                  new: aiTurnId 
-                });
-              }
-            }
-          }
-          
-          // Ensure canonical ids exist (in case remapping failed)
           const ensureId = (id: string | undefined) => {
             if (!id) return;
-            if (!idsDraft.includes(id)) {
-              idsDraft.push(id);
-              console.log('[Port] 📌 Added missing canonical ID to turnIds:', id);
-            }
+            if (!idsDraft.includes(id)) idsDraft.push(id);
           };
           ensureId(turn?.user?.id);
           ensureId(aiTurnId);
-
-          // Deduplicate while preserving first occurrence
+          // Deduplicate while preserving the first occurrence
           const seen = new Set<string>();
           for (let i = idsDraft.length - 1; i >= 0; i--) {
             const id = idsDraft[i];
@@ -228,20 +207,12 @@ setTurnsMap((draft: Map<string, TurnMessage>) => {
           }
         });
 
-        // Clear pending user turns after confirmation
-        setPendingUserTurns((draft: Map<string, UserTurn>) => {
-          draft.delete(aiTurnId);
-          if (remappedOldId && draft.has(remappedOldId)) {
-            draft.delete(remappedOldId);
-          } else if (turn?.user?.id) {
-            // Fallback: remove any entry whose user id matches
-            for (const [k, v] of draft.entries()) {
-              if (v?.id === turn.user.id) {
-                draft.delete(k);
-              }
-            }
-          }
-        });
+        // Finalization UI state updates
+        setIsLoading(false);
+        setUiPhase('awaiting_action');
+        setIsContinuationMode(true);
+        // Clear active AI turn only after finalization (not in WORKFLOW_COMPLETE)
+        setActiveAiTurnId(null);
 
         break;
       }
@@ -357,22 +328,12 @@ setTurnsMap((draft: Map<string, TurnMessage>) => {
         }
 
         streamingBufferRef.current?.flushImmediate();
-        const completedTurnId = activeAiTurnIdRef.current;
-
         // Fallback finalization is no longer needed.
-// The robust TURN_FINALIZED handler will manage this state change.
-
+        // The robust TURN_FINALIZED handler will manage this state change.
         setIsLoading(false);
         setUiPhase('awaiting_action');
         setIsContinuationMode(true);
-        setActiveAiTurnId(null);
-
-        // Cleanup pending user turns
-        if (completedTurnId) {
-          setPendingUserTurns((draft: Map<string, UserTurn>) => {
-            draft.delete(completedTurnId);
-          });
-        }
+        // Do NOT clear activeAiTurnId here; wait for TURN_FINALIZED
         break;
       }
     }
@@ -381,12 +342,16 @@ setTurnsMap((draft: Map<string, TurnMessage>) => {
     setTurnIds,
     setCurrentSessionId, 
     currentSessionId,
-    setPendingUserTurns,
     setIsLoading,
     setUiPhase,
     setIsContinuationMode,
     setActiveAiTurnId,
-    setProviderContexts
+    setProviderContexts,
+    turnsMap,
+    selectedModels,
+    mappingEnabled,
+    mappingProvider,
+    synthesisProvider
   ]);
 
   // Register handler with API

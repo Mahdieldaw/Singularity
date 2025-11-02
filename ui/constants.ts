@@ -14,3 +14,6 @@ export const OVERALL_SUMMARY_CHUNKS = 15;
 export const EXAMPLE_PROMPT = "Explain the concept of quantum entanglement in simple terms.";
 
 export const STREAMING_PLACEHOLDER = ""; // CSS will handle visual streaming indicators (pulsing dots)
+
+// Preferred streaming providers to prioritize in visible slots when 4+ are selected
+export const PRIMARY_STREAMING_PROVIDER_IDS: string[] = ['chatgpt', 'claude', 'qwen'];

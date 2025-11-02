@@ -16,6 +16,8 @@ export type SynthesisStrategy = "continuation" | "fresh";
  */
 export interface ExecuteWorkflowRequest {
   sessionId: string;
+  // The canonical ID of the user's turn, generated client-side and REQUIRED
+  userTurnId: string;
   threadId: string;
   mode: WorkflowMode; // Global default
   userMessage: string;
@@ -120,10 +122,6 @@ export interface WorkflowRequest {
  * These are the messages sent from the backend to the UI via the persistent port
  * to provide real-time updates on workflow execution.
  */
-export interface SessionStartedMessage {
-  type: "SESSION_STARTED";
-  sessionId: string;
-}
 
 export interface PartialResultMessage {
   type: "PARTIAL_RESULT";
@@ -159,6 +157,16 @@ export interface WorkflowCompleteMessage {
   error?: string;
 }
 
+// Sent immediately after backend receives ExecuteWorkflowRequest and generates
+// the canonical AI turn ID. Establishes canonical IDs up-front to eliminate
+// frontend atomic swap/ID remapping.
+export interface TurnCreatedMessage {
+  type: "TURN_CREATED";
+  sessionId: string;
+  userTurnId: string;
+  aiTurnId: string;
+}
+
 export interface TurnFinalizedMessage {
   type: "TURN_FINALIZED";
   sessionId: string;
@@ -177,11 +185,11 @@ export interface TurnFinalizedMessage {
 }
 
 export type PortMessage =
-  | SessionStartedMessage
   | PartialResultMessage
   | WorkflowStepUpdateMessage
   | WorkflowCompleteMessage
-  | TurnFinalizedMessage;
+  | TurnFinalizedMessage
+  | TurnCreatedMessage;
 
 // ============================================================================
 // SECTION 4: PERSISTENT DATA MODELS (FOR UI & SESSION STATE)

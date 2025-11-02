@@ -261,17 +261,15 @@ export class WorkflowEngine {
     // Cache current user message for persistence usage
     this.currentUserMessage = context?.userMessage || this.currentUserMessage || '';
 
-    // Ensure session exists and notify UI
-    // If the compiler explicitly asked for backend-created session ids
-    // (it sets context.sessionCreated), the compiler already generated the
-    // sessionId and we must notify the UI immediately so it can bind the
-    // optimistic user/ai turns that were created without an id.
-    if (context.sessionCreated) {
-      this.port.postMessage({ type: 'SESSION_STARTED', sessionId: context.sessionId });
-    } else if (!context.sessionId || context.sessionId === 'new-session') {
-      // Backwards-compatible fallback: generate an id and notify.
-      context.sessionId = `sid-${Date.now()}`;
-      this.port.postMessage({ type: 'SESSION_STARTED', sessionId: context.sessionId });
+    // Ensure session exists
+    // Session ID must be provided by the connection handler or compiler.
+    // We no longer emit SESSION_STARTED; TURN_CREATED now carries the authoritative sessionId.
+    if (!context.sessionId || context.sessionId === 'new-session') {
+      // As a conservative fallback, ensure a non-empty sessionId is present.
+      context.sessionId = context.sessionId && context.sessionId !== 'new-session'
+        ? context.sessionId
+        : `sid-${Date.now()}`;
+      // NOTE: Do not post SESSION_STARTED. UI initializes session from TURN_CREATED.
     }
 
     try {
@@ -373,8 +371,9 @@ export class WorkflowEngine {
     try {
       // Build canonical turn structure
       const timestamp = Date.now();
-      const userTurnId = this._generateId('user');
-      const aiTurnId = this._generateId('ai');
+      // Prefer canonical IDs passed from connection-handler
+      const userTurnId = context?.canonicalUserTurnId || this._generateId('user');
+      const aiTurnId = context?.canonicalAiTurnId || this._generateId('ai');
 
       const userTurn = {
         id: userTurnId,
@@ -573,7 +572,7 @@ export class WorkflowEngine {
 
     // Build UserTurn
     const timestamp = Date.now();
-    const userTurnId = this._generateId('user');
+    const userTurnId = context?.canonicalUserTurnId || this._generateId('user');
     const userTurn = {
       type: 'user',
       id: userTurnId,
@@ -639,7 +638,7 @@ export class WorkflowEngine {
     // Build AiTurn
     const aiTurn = {
       type: 'ai',
-      id: this._generateId('ai'),
+      id: context?.canonicalAiTurnId || this._generateId('ai'),
       createdAt: Date.now(),
       userTurnId: userTurn.id,
       batchResponses,

@@ -1,13 +1,12 @@
 // ui/hooks/useChat.ts - MAP-BASED STATE MANAGEMENT
 import { useCallback } from 'react';
-import { useAtom, useAtomValue, useSetAtom } from 'jotai';
+import { useAtomValue, useSetAtom } from 'jotai';
 import api from '../services/extension-api';
 import { 
   turnsMapAtom,
   turnIdsAtom,
   messagesAtom,
   currentSessionIdAtom, 
-  pendingUserTurnsAtom, 
   isLoadingAtom, 
   selectedModelsAtom, 
   mappingEnabledAtom, 
@@ -22,7 +21,7 @@ import {
   isContinuationModeAtom, 
   isHistoryPanelOpenAtom 
 } from '../state/atoms';
-import { createOptimisticAiTurn } from '../utils/turn-helpers';
+// Optimistic AI turn creation is now handled upon TURN_CREATED from backend
 import type { ExecuteWorkflowRequest, ProviderKey } from '../../shared/contract';
 import { LLM_PROVIDERS_CONFIG } from '../constants';
 import { computeThinkFlag } from '../../src/think/lib/think/computeThinkFlag.js';
@@ -52,7 +51,7 @@ export function useChat() {
   const setTurnsMap = useSetAtom(turnsMapAtom);
   const setTurnIds = useSetAtom(turnIdsAtom);
   const setCurrentSessionId = useSetAtom(currentSessionIdAtom);
-  const [pendingUserTurns, setPendingUserTurns] = useAtom(pendingUserTurnsAtom);
+  // pendingUserTurns is no longer used in the new TURN_CREATED flow
   const setIsLoading = useSetAtom(isLoadingAtom);
   const setActiveAiTurnId = useSetAtom(activeAiTurnIdAtom);
   const setCurrentAppStep = useSetAtom(currentAppStepAtom);
@@ -76,18 +75,14 @@ export function useChat() {
     }
 
     const ts = Date.now();
+    const userTurnId = `user-${ts}-${Math.random().toString(36).slice(2,8)}`;
     const userTurn: UserTurn = {
       type: 'user',
-      id: `user-${ts}-${Math.random().toString(36).slice(2,8)}`,
+      id: userTurnId,
       text: prompt,
       createdAt: ts,
       sessionId: currentSessionId || null
     };
-    const aiTurnId = `ai-${Date.now()}-${Math.random().toString(36).slice(2,8)}`;
-
-    setPendingUserTurns((draft: Map<string, UserTurn>) => {
-      draft.set(aiTurnId, userTurn);
-    });
 
     // Write user turn to Map + IDs
     setTurnsMap((draft: Map<string, TurnMessage>) => {
@@ -110,7 +105,8 @@ export function useChat() {
       const requestMode: 'new-conversation' | 'continuation' = (mode === 'new' && (!currentSessionId || turnIds.length === 0)) ? 'new-conversation' : 'continuation';
 
       const request: ExecuteWorkflowRequest = {
-        sessionId: (requestMode === 'new-conversation' ? null : currentSessionId) as any,
+        sessionId: (requestMode === 'new-conversation' ? '' : (currentSessionId || '')),
+        userTurnId: userTurnId,
         threadId: 'default-thread',
         mode: requestMode,
         userMessage: prompt,
@@ -120,25 +116,7 @@ export function useChat() {
         useThinking: computeThinkFlag({ modeThinkButtonOn: thinkOnChatGPT, input: prompt })
       };
 
-      const aiTurn = createOptimisticAiTurn(
-        aiTurnId,
-        userTurn,
-        activeProviders,
-        shouldUseSynthesis,
-        shouldUseMapping,
-        synthesisProvider || undefined,
-        effectiveMappingProvider || undefined
-      );
-
-      // Add AI turn to Map + IDs
-      setTurnsMap((draft: Map<string, TurnMessage>) => {
-        draft.set(aiTurn.id, aiTurn);
-      });
-      setTurnIds((draft: string[]) => {
-        draft.push(aiTurn.id);
-      });
-
-      setActiveAiTurnId(aiTurn.id);
+      // AI turn will be created upon TURN_CREATED from backend
       await api.executeWorkflow(request);
 
       if (request.sessionId) {
@@ -148,14 +126,10 @@ export function useChat() {
       console.error('Failed to execute workflow:', err);
       setIsLoading(false);
       setActiveAiTurnId(null);
-      setPendingUserTurns((draft: Map<string, UserTurn>) => {
-        draft.delete(aiTurnId);
-      });
     }
   }, [
     setTurnsMap,
     setTurnIds,
-    setPendingUserTurns,
     selectedModels,
     currentSessionId,
     setCurrentSessionId,

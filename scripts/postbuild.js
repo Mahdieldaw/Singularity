@@ -4,7 +4,7 @@ const p = require("path");
 // ensure dirs
 fs.mkdirSync("dist/ui", { recursive: true });
 fs.mkdirSync("dist/icons", { recursive: true });
-fs.mkdirSync("dist/content-scripts", { recursive: true });
+
 
 // NOTE: main-world-injector.js is now built by esbuild into dist/main-world-injector.js
 

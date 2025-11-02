@@ -4,6 +4,6 @@
     "types": ["react", "react-dom", "chrome", "node"],
     "baseUrl": ".",
   },
-  "include": ["./**/*.ts", "./**/*.tsx", "./**/*.d.ts", "types/**/*.d.ts", "../shared/docs/persistencev2.ts", "../shared/docs/Appv2.tsx"],
+  "include": ["./**/*.ts", "./**/*.tsx", "./**/*.d.ts", "types/**/*.d.ts", "../shared/docs/persistencev2.ts", "../shared/docs/Appv2.tsx", "../src/utils/logger.js"],
   "exclude": ["../dist", "../node_modules"]
 }

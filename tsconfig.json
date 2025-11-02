@@ -29,6 +29,6 @@
       "node"
     ]
   },
-  "include": ["./**/*.ts", "./**/*.tsx", "./**/*.d.ts" ],
+  "include": ["./**/*.ts", "./**/*.tsx", "./**/*.d.ts", "src/utils/logger.js" ],
   "exclude": ["dist", "node_modules"]
 }

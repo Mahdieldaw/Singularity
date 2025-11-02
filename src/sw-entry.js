@@ -2,8 +2,13 @@
 // UNIFIED SERVICE WORKER ENTRY POINT
 // Combines persistence layer, provider management, and message routing
 // ============================================================================
+// === bg: idempotent listener registration ===
+
 
 // Core Infrastructure Imports
+
+// ...rest of your service worker logic
+
 import {
   NetRulesManager,
   CSPController,

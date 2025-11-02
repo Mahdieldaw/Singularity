@@ -1,7 +1,7 @@
 // ProviderResponseBlock.tsx - COMPLETE FIXED VERSION
 import React from 'react';
 import { LLMProvider, AppStep, ProviderResponse } from '../types';
-import { LLM_PROVIDERS_CONFIG } from '../constants';
+import { LLM_PROVIDERS_CONFIG, PRIMARY_STREAMING_PROVIDER_IDS } from '../constants';
 import { BotIcon } from './Icons';
 import { useState, useCallback, useMemo } from 'react';
 import { ProviderPill } from './ProviderPill';
@@ -101,17 +101,33 @@ const ProviderResponseBlock = ({
     [effectiveProviderStates]
   );
 
-  // Visible slots state (shows 3 providers at a time)
-  const [visibleSlots, setVisibleSlots] = useState<string[]>(() => 
-    allProviderIds.slice(0, Math.min(3, allProviderIds.length))
-  );
+  // Visible slots state (shows 3 providers at a time), favor streaming providers (ChatGPT, Claude, Qwen)
+  const [visibleSlots, setVisibleSlots] = useState<string[]>(() => {
+    if (allProviderIds.length >= 4) {
+      const primaryStreaming = PRIMARY_STREAMING_PROVIDER_IDS.filter(id => allProviderIds.includes(id));
+      let slots = primaryStreaming.slice(0, 3);
+      if (slots.length < 3) {
+        const remaining = allProviderIds.filter(id => !slots.includes(id));
+        // Prefer non-Gemini for remaining visible slots; Gemini/Gemini Pro will be pushed to carousel
+        const nonGemini = remaining.filter(id => id !== 'gemini' && id !== 'gemini-pro');
+        const gemini = remaining.filter(id => id === 'gemini' || id === 'gemini-pro');
+        slots = slots.concat([...nonGemini, ...gemini].slice(0, 3 - slots.length));
+      }
+      return slots;
+    }
+    return allProviderIds.slice(0, Math.min(3, allProviderIds.length));
+  });
 
   // Calculate hidden providers (left and right)
   const hiddenProviders = useMemo(() => {
     const hidden = allProviderIds.filter(id => !visibleSlots.includes(id));
+    // Order hidden so Gemini/Gemini Pro appear first in the carousel
+    const geminiHidden = hidden.filter(id => id === 'gemini' || id === 'gemini-pro');
+    const othersHidden = hidden.filter(id => id !== 'gemini' && id !== 'gemini-pro');
+    const orderedHidden = [...geminiHidden, ...othersHidden];
     return {
-      left: hidden[0] || null,
-      right: hidden[1] || null,
+      left: orderedHidden[0] || null,
+      right: orderedHidden[1] || null,
     };
   }, [allProviderIds, visibleSlots]);
 
@@ -468,8 +484,8 @@ const ProviderResponseBlock = ({
             flexWrap: 'wrap',
             width: '100%',
           }}>
-            {/* Render ALL providers, control visibility via display:none */}
-            {allProviderIds.map(id => renderProviderCard(id, visibleSlots.includes(id)))}
+            {/* Render only visible providers to reduce re-render cost */}
+            {visibleSlots.map(id => renderProviderCard(id, true))}
           </div>
 
           {/* Right Side Indicator */}

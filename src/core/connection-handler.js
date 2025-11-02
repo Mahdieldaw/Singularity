@@ -141,8 +141,82 @@ export class ConnectionHandler {
         return;
       }
 
+      // --- NEW: Validate presence of userTurnId for historical-only runs ---
+      const histUserTurnId = executeRequest?.historicalContext?.userTurnId;
+      const userTurnId = executeRequest?.userTurnId || histUserTurnId;
+      const hasBatch = Array.isArray(executeRequest?.providers) && executeRequest.providers.length > 0;
+      const hasSynthesis = !!(executeRequest?.synthesis?.enabled && Array.isArray(executeRequest?.synthesis?.providers) && executeRequest.synthesis.providers.length > 0);
+      const hasMapping = !!(executeRequest?.mapping?.enabled && Array.isArray(executeRequest?.mapping?.providers) && executeRequest.mapping.providers.length > 0);
+
+      // Only fail if the request is mapping/synthesis-only (no batch providers)
+      // AND no historical userTurnId was provided. New chats or batch prompts don't need a userTurnId.
+      if (!hasBatch && (hasSynthesis || hasMapping) && !userTurnId) {
+        console.error("[Backend] Missing userTurnId in historical-only request");
+        try {
+          this.port.postMessage({
+            type: "WORKFLOW_STEP_UPDATE",
+            sessionId: executeRequest?.sessionId || "unknown",
+            stepId: "validate-user-turn",
+            status: "failed",
+            errorCode: "missing-user-turn-id",
+            error: "Missing userTurnId. Historical runs require a canonical user turn reference.",
+          });
+        } catch (_) {}
+        try {
+          this.port.postMessage({
+            type: "WORKFLOW_COMPLETE",
+            sessionId: executeRequest?.sessionId || "unknown",
+          });
+        } catch (_) {}
+        return;
+      }
+
+      // --- NEW: Pre-generate sessionId for new conversations if missing/empty ---
+      try {
+        const sid = executeRequest?.sessionId;
+        if (!sid || sid === "") {
+          executeRequest.sessionId = `session-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+          console.log("[Backend] Generated new session ID:", executeRequest.sessionId);
+        }
+      } catch (e) {
+        console.warn("[Backend] SessionId pre-generation failed, will rely on compiler:", e);
+      }
+
       // Compile high-level request to detailed workflow
       const workflowRequest = this.services.compiler.compile(executeRequest);
+
+      // Decide if this workflow creates a NEW turn (batch prompt present) or
+      // appends results to an existing historical turn (mapping/synthesis-only)
+      const createsNewTurn = hasBatch;
+
+      if (createsNewTurn) {
+        // Generate canonical AI turn ID and attach canonical IDs to context
+        const aiTurnId = `ai-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        workflowRequest.context = {
+          ...workflowRequest.context,
+          canonicalUserTurnId: userTurnId,
+          canonicalAiTurnId: aiTurnId,
+        };
+
+        // Send immediate TURN_CREATED acknowledgment before starting workflow
+        try {
+          this.port.postMessage({
+            type: "TURN_CREATED",
+            sessionId: executeRequest?.sessionId,
+            userTurnId,
+            aiTurnId,
+          });
+        } catch (e) {
+          console.warn("[ConnectionHandler] Failed to post TURN_CREATED:", e);
+        }
+      } else {
+        // Historical-only run: attach canonical userTurnId, DO NOT create or emit a new AI turn
+        workflowRequest.context = {
+          ...workflowRequest.context,
+          canonicalUserTurnId: userTurnId,
+        };
+        console.log('[ConnectionHandler] Historical-only run: skipping TURN_CREATED');
+      }
 
       // Execute via engine
       await this.workflowEngine.execute(workflowRequest);

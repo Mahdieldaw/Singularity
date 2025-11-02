@@ -1,5 +1,6 @@
 // ui/utils/turn-helpers.ts - ALIGNED VERSION
 import type { AiTurn, ProviderResponse, UserTurn, ProviderKey } from '../types';
+import { PRIMARY_STREAMING_PROVIDER_IDS } from '../constants';
 
 /**
  * Normalize a response value to ProviderResponse[]
@@ -31,7 +32,8 @@ export function createOptimisticAiTurn(
   shouldUseMapping: boolean,
   synthesisProvider?: string,
   mappingProvider?: string,
-  timestamp?: number
+  timestamp?: number,
+  explicitUserTurnId?: string
 ): AiTurn {
   const now = timestamp || Date.now();
   
@@ -41,7 +43,7 @@ export function createOptimisticAiTurn(
     pendingBatch[pid] = {
       providerId: pid,
       text: '',
-      status: 'pending',
+      status: (PRIMARY_STREAMING_PROVIDER_IDS.includes(String(pid)) ? 'streaming' : 'pending'),
       createdAt: now,
       updatedAt: now
     };
@@ -53,7 +55,7 @@ export function createOptimisticAiTurn(
     synthesisResponses[synthesisProvider] = [{
       providerId: synthesisProvider as ProviderKey,
       text: '',
-      status: 'pending',
+      status: (PRIMARY_STREAMING_PROVIDER_IDS.includes(String(synthesisProvider)) ? 'streaming' : 'pending'),
       createdAt: now,
       updatedAt: now
     }];
@@ -65,19 +67,21 @@ export function createOptimisticAiTurn(
     mappingResponses[mappingProvider] = [{
       providerId: mappingProvider as ProviderKey,
       text: '',
-      status: 'pending',
+      status: (PRIMARY_STREAMING_PROVIDER_IDS.includes(String(mappingProvider)) ? 'streaming' : 'pending'),
       createdAt: now,
       updatedAt: now
     }];
   }
   
+  const effectiveUserTurnId = explicitUserTurnId || userTurn.id;
+
   return {
     type: 'ai',
     id: aiTurnId,
     createdAt: now,
     sessionId: userTurn.sessionId,
     threadId: 'default-thread',
-    userTurnId: userTurn.id,
+    userTurnId: effectiveUserTurnId,
     batchResponses: pendingBatch,
     synthesisResponses,
     mappingResponses,
