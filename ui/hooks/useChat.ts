@@ -18,7 +18,6 @@ import {
   activeAiTurnIdAtom, 
   currentAppStepAtom, 
   uiPhaseAtom, 
-  isContinuationModeAtom, 
   isHistoryPanelOpenAtom 
 } from '../state/atoms';
 // Optimistic AI turn creation is now handled upon TURN_CREATED from backend
@@ -56,7 +55,6 @@ export function useChat() {
   const setActiveAiTurnId = useSetAtom(activeAiTurnIdAtom);
   const setCurrentAppStep = useSetAtom(currentAppStepAtom);
   const setUiPhase = useSetAtom(uiPhaseAtom);
-  const setIsContinuationMode = useSetAtom(isContinuationModeAtom);
   const setIsHistoryPanelOpen = useSetAtom(isHistoryPanelOpenAtom);
 
   const sendMessage = useCallback(async (prompt: string, mode: 'new' | 'continuation') => {
@@ -145,10 +143,12 @@ export function useChat() {
   ]);
 
   const newChat = useCallback(() => {
+    // Reset to initial welcome state for a brand-new conversation
     setCurrentSessionId(null);
-    setTurnsMap((draft: Map<string, TurnMessage>) => { draft.clear(); });
-    setTurnIds((draft: string[]) => { draft.length = 0; });
-  }, [setTurnsMap, setTurnIds, setCurrentSessionId]);
+    setTurnsMap(new Map());
+    setTurnIds([]);
+    setActiveAiTurnId(null);
+  }, [setCurrentSessionId, setTurnsMap, setTurnIds, setActiveAiTurnId]);
 
   const selectChat = useCallback(async (session: HistorySessionSummary) => {
     const sessionId = session.sessionId || session.id;

@@ -8,7 +8,6 @@ import {
   isLoadingAtom,
   uiPhaseAtom,
   activeAiTurnIdAtom,
-  isContinuationModeAtom,
   providerContextsAtom,
   selectedModelsAtom,
   mappingEnabledAtom,
@@ -55,7 +54,6 @@ export function usePortMessageHandler() {
   const currentSessionId = useAtomValue(currentSessionIdAtom);
   const setIsLoading = useSetAtom(isLoadingAtom);
   const setUiPhase = useSetAtom(uiPhaseAtom);
-  const setIsContinuationMode = useSetAtom(isContinuationModeAtom);
   const activeAiTurnId = useAtomValue(activeAiTurnIdAtom);
   const setActiveAiTurnId = useSetAtom(activeAiTurnIdAtom);
   const setProviderContexts = useSetAtom(providerContextsAtom);
@@ -210,7 +208,6 @@ export function usePortMessageHandler() {
         // Finalization UI state updates
         setIsLoading(false);
         setUiPhase('awaiting_action');
-        setIsContinuationMode(true);
         // Clear active AI turn only after finalization (not in WORKFLOW_COMPLETE)
         setActiveAiTurnId(null);
 
@@ -332,7 +329,6 @@ export function usePortMessageHandler() {
         // The robust TURN_FINALIZED handler will manage this state change.
         setIsLoading(false);
         setUiPhase('awaiting_action');
-        setIsContinuationMode(true);
         // Do NOT clear activeAiTurnId here; wait for TURN_FINALIZED
         break;
       }
@@ -344,7 +340,6 @@ export function usePortMessageHandler() {
     currentSessionId,
     setIsLoading,
     setUiPhase,
-    setIsContinuationMode,
     setActiveAiTurnId,
     setProviderContexts,
     turnsMap,

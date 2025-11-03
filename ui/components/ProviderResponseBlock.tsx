@@ -278,8 +278,7 @@ const ProviderResponseBlock = ({
             padding: '12px',
             background: 'rgba(0, 0, 0, 0.18)',
             borderRadius: '8px',
-            minHeight: 0,
-            overscrollBehavior: 'contain'
+            minHeight: 0
           }}
         >
           <div className="prose prose-sm max-w-none dark:prose-invert" style={{ 

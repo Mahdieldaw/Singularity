@@ -75,7 +75,14 @@ export const isLoadingAtom = atom<boolean>(false);
 export const uiPhaseAtom = atom<UiPhase>('idle');
 export const activeAiTurnIdAtom = atom<string | null>(null);
 export const currentAppStepAtom = atom<AppStep>('initial');
-export const isContinuationModeAtom = atom<boolean>(false);
+// Derived: continuation mode is true whenever there is an active session and at least one turn
+export const isContinuationModeAtom = atom(
+  (get) => {
+    const sessionId = get(currentSessionIdAtom);
+    const turnIds = get(turnIdsAtom);
+    return sessionId !== null && turnIds.length > 0;
+  }
+);
 
 // -----------------------------
 // UI visibility

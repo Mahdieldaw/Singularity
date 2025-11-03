@@ -381,8 +381,7 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
                         // During streaming, keep inner area scrollable to avoid growing the outer container
                         overflowY: (isLive || isLoading) ? 'auto' : 'visible',
                         maxHeight: (isLive || isLoading) ? '40vh' : 'none',
-                        minHeight: 0,
-                        overscrollBehavior: 'contain'
+                        minHeight: 0
                       }}
                       onWheelCapture={(e: React.WheelEvent<HTMLDivElement>) => {
                         const el = e.currentTarget;
