@@ -1,6 +1,7 @@
 // src/core/connection-handler.js
 
 import { WorkflowEngine } from "./workflow-engine.js";
+// Note: ContextResolver is now available via services; we don't import it directly here
 
 /**
  * ConnectionHandler
@@ -24,6 +25,96 @@ export class ConnectionHandler {
     this.messageHandler = null;
     this.isInitialized = false;
     this.lifecycleManager = services.lifecycleManager;
+  }
+
+  /**
+   * Map new primitive requests into legacy ExecuteWorkflowRequest
+   * so the existing compiler/engine can process them without signature changes.
+   */
+  async _mapPrimitiveToLegacy(primitive) {
+    const now = Date.now();
+    const genId = (prefix) => `${prefix}-${now}-${Math.random().toString(36).slice(2, 8)}`;
+
+    switch (primitive.type) {
+      case 'initialize': {
+        const providers = Array.isArray(primitive.providers) ? primitive.providers : [];
+        const mappingProviders = primitive.includeMapping && primitive.mapper ? [primitive.mapper] : [];
+        const synthesisProviders = primitive.includeSynthesis && primitive.synthesizer ? [primitive.synthesizer] : [];
+        /** @type {any} */
+        const req = {
+          sessionId: '',
+          userTurnId: primitive.clientUserTurnId || genId('user'),
+          threadId: 'default-thread',
+          mode: 'new-conversation',
+          userMessage: primitive.userMessage || '',
+          providers,
+          providerMeta: primitive.providerMeta || {},
+          synthesis: synthesisProviders.length > 0 ? { enabled: true, providers: synthesisProviders } : undefined,
+          mapping: mappingProviders.length > 0 ? { enabled: true, providers: mappingProviders } : undefined,
+          useThinking: !!primitive.useThinking,
+        };
+        return req;
+      }
+      case 'extend': {
+        const providers = Array.isArray(primitive.providers) ? primitive.providers : [];
+        const mappingProviders = primitive.includeMapping && primitive.mapper ? [primitive.mapper] : [];
+        const synthesisProviders = primitive.includeSynthesis && primitive.synthesizer ? [primitive.synthesizer] : [];
+        /** @type {any} */
+        const req = {
+          sessionId: primitive.sessionId,
+          userTurnId: primitive.clientUserTurnId || genId('user'),
+          threadId: 'default-thread',
+          mode: 'continuation',
+          userMessage: primitive.userMessage || '',
+          providers,
+          providerModes: primitive.providerModes || {},
+          providerMeta: primitive.providerMeta || {},
+          synthesis: synthesisProviders.length > 0 ? { enabled: true, providers: synthesisProviders } : undefined,
+          mapping: mappingProviders.length > 0 ? { enabled: true, providers: mappingProviders } : undefined,
+          useThinking: !!primitive.useThinking,
+        };
+        return req;
+      }
+      case 'recompute': {
+        // Historical-only run: use empty providers (no batch), and enable exactly the one requested step
+        // Need to resolve the source user turn id for persistence alignment
+        let sourceUserTurnId = null;
+        try {
+          const sm = this.services.sessionManager;
+          if (sm?.adapter?.isReady()) {
+            const sourceAiTurn = await sm.adapter.get('turns', primitive.sourceTurnId);
+            sourceUserTurnId = sourceAiTurn?.userTurnId || null;
+          } else {
+            // Fallback: scan in-memory cache
+            const sessions = this.services.sessionManager?.sessions || {};
+            for (const s of Object.values(sessions)) {
+              const turns = Array.isArray(s?.turns) ? s.turns : [];
+              const ai = turns.find((t) => t?.id === primitive.sourceTurnId);
+              if (ai) { sourceUserTurnId = ai.userTurnId || null; break; }
+            }
+          }
+        } catch (_) {}
+
+        const mapping = primitive.stepType === 'mapping' ? { enabled: true, providers: [primitive.targetProvider] } : undefined;
+        const synthesis = primitive.stepType === 'synthesis' ? { enabled: true, providers: [primitive.targetProvider] } : undefined;
+        /** @type {any} */
+        const req = {
+          sessionId: primitive.sessionId,
+          userTurnId: undefined, // no new user turn for recompute
+          threadId: 'default-thread',
+          mode: 'continuation',
+          userMessage: '', // compiler/engine will use historical
+          providers: [], // no batch providers for recompute
+          synthesis,
+          mapping,
+          useThinking: !!primitive.useThinking,
+          historicalContext: sourceUserTurnId ? { userTurnId: sourceUserTurnId, sourceType: 'batch' } : undefined,
+        };
+        return req;
+      }
+      default:
+        return primitive;
+    }
   }
 
   /**
@@ -105,7 +196,21 @@ export class ConnectionHandler {
    * Handle EXECUTE_WORKFLOW message
    */
   async _handleExecuteWorkflow(message) {
-    const executeRequest = message.payload;
+    let executeRequest = message.payload;
+
+    // Support new three-primitive union: initialize | extend | recompute
+    // If a primitive request is detected, adapt it into the legacy
+    // ExecuteWorkflowRequest shape expected by the existing compiler/engine.
+    if (executeRequest && typeof executeRequest.type === 'string' && (
+      executeRequest.type === 'initialize' ||
+      executeRequest.type === 'extend' ||
+      executeRequest.type === 'recompute'
+    )) {
+      executeRequest = await this._mapPrimitiveToLegacy(executeRequest).catch((e) => {
+        console.error('[ConnectionHandler] Failed to map primitive request:', e);
+        return message.payload; // fallback to raw payload
+      });
+    }
 
     // Record activity for lifecycle manager when workflows are executed
     try {
@@ -194,6 +299,7 @@ export class ConnectionHandler {
         const aiTurnId = `ai-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
         workflowRequest.context = {
           ...workflowRequest.context,
+          // Prefer client-provided provisional id if present in request
           canonicalUserTurnId: userTurnId,
           canonicalAiTurnId: aiTurnId,
         };

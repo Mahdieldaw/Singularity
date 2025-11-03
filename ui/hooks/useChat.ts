@@ -21,7 +21,7 @@ import {
   isHistoryPanelOpenAtom 
 } from '../state/atoms';
 // Optimistic AI turn creation is now handled upon TURN_CREATED from backend
-import type { ExecuteWorkflowRequest, ProviderKey } from '../../shared/contract';
+import type { ExecuteWorkflowRequest, ProviderKey, PrimitiveWorkflowRequest } from '../../shared/contract';
 import { LLM_PROVIDERS_CONFIG } from '../constants';
 import { computeThinkFlag } from '../../src/think/lib/think/computeThinkFlag.js';
 
@@ -100,26 +100,40 @@ export function useChat() {
       const effectiveMappingProvider = mappingProvider || fallbackMapping || null;
       const shouldUseMapping = !!(mappingEnabled && effectiveMappingProvider && activeProviders.length > 1 && activeProviders.includes(effectiveMappingProvider as ProviderKey));
 
-      const requestMode: 'new-conversation' | 'continuation' = (mode === 'new' && (!currentSessionId || turnIds.length === 0)) ? 'new-conversation' : 'continuation';
+      const isInitialize = (mode === 'new' && (!currentSessionId || turnIds.length === 0));
 
-      const request: ExecuteWorkflowRequest = {
-        sessionId: (requestMode === 'new-conversation' ? '' : (currentSessionId || '')),
-        userTurnId: userTurnId,
-        threadId: 'default-thread',
-        mode: requestMode,
-        userMessage: prompt,
-        providers: activeProviders,
-        synthesis: shouldUseSynthesis ? { enabled: true, providers: [synthesisProvider as ProviderKey] } : undefined,
-        mapping: shouldUseMapping ? { enabled: true, providers: [effectiveMappingProvider as ProviderKey] } : undefined,
-        useThinking: computeThinkFlag({ modeThinkButtonOn: thinkOnChatGPT, input: prompt })
-      };
+      // Build NEW primitive request shape
+      const primitive: PrimitiveWorkflowRequest = isInitialize
+        ? {
+            type: 'initialize',
+            userMessage: prompt,
+            providers: activeProviders,
+            includeMapping: shouldUseMapping,
+            includeSynthesis: shouldUseSynthesis,
+            synthesizer: shouldUseSynthesis ? (synthesisProvider as ProviderKey) : undefined,
+            mapper: shouldUseMapping ? (effectiveMappingProvider as ProviderKey) : undefined,
+            useThinking: computeThinkFlag({ modeThinkButtonOn: thinkOnChatGPT, input: prompt }),
+            providerMeta: {},
+            clientUserTurnId: userTurnId,
+          }
+        : {
+            type: 'extend',
+            sessionId: (currentSessionId as string),
+            userMessage: prompt,
+            providers: activeProviders,
+            includeMapping: shouldUseMapping,
+            includeSynthesis: shouldUseSynthesis,
+            synthesizer: shouldUseSynthesis ? (synthesisProvider as ProviderKey) : undefined,
+            mapper: shouldUseMapping ? (effectiveMappingProvider as ProviderKey) : undefined,
+            useThinking: computeThinkFlag({ modeThinkButtonOn: thinkOnChatGPT, input: prompt }),
+            providerModes: {},
+            providerMeta: {},
+            clientUserTurnId: userTurnId,
+          };
 
       // AI turn will be created upon TURN_CREATED from backend
-      await api.executeWorkflow(request);
-
-      if (request.sessionId) {
-        setCurrentSessionId(request.sessionId as string);
-      }
+      await api.executeWorkflow(primitive);
+      // For initialize, sessionId will be set by TURN_CREATED handler; do not set here
     } catch (err) {
       console.error('Failed to execute workflow:', err);
       setIsLoading(false);

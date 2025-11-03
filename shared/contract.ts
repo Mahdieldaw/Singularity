@@ -55,6 +55,55 @@ export interface ExecuteWorkflowResponse {
 }
 
 // ============================================================================
+// SECTION 1b: THREE PRIMITIVES (initialize | extend | recompute)
+// Introduced for the turn-based model. ExecuteWorkflowRequest remains for
+// backward-compat in legacy surfaces, but the system should migrate to this
+// union over time.
+// ============================================================================
+
+export type PrimitiveWorkflowRequest = InitializeRequest | ExtendRequest | RecomputeRequest;
+
+export interface InitializeRequest {
+  type: 'initialize';
+  userMessage: string;
+  providers: ProviderKey[];
+  includeMapping: boolean;
+  includeSynthesis: boolean;
+  synthesizer?: ProviderKey;
+  mapper?: ProviderKey;
+  useThinking?: boolean;
+  // Optional per-provider metadata
+  providerMeta?: Partial<Record<ProviderKey, any>>;
+  // Optional: client-side provisional user turn id so TURN_CREATED can reference it
+  clientUserTurnId?: string;
+}
+
+export interface ExtendRequest {
+  type: 'extend';
+  sessionId: string;
+  userMessage: string;
+  providers: ProviderKey[];
+  includeMapping: boolean;
+  includeSynthesis: boolean;
+  synthesizer?: ProviderKey;
+  mapper?: ProviderKey;
+  useThinking?: boolean;
+  providerModes?: Partial<Record<ProviderKey, WorkflowMode>>;
+  providerMeta?: Partial<Record<ProviderKey, any>>;
+  // Optional: client-side provisional user turn id so TURN_CREATED can reference it
+  clientUserTurnId?: string;
+}
+
+export interface RecomputeRequest {
+  type: 'recompute';
+  sessionId: string;
+  sourceTurnId: string;
+  stepType: 'synthesis' | 'mapping';
+  targetProvider: ProviderKey;
+  useThinking?: boolean;
+}
+
+// ============================================================================
 // SECTION 2: COMPILED WORKFLOW (BACKEND-INTERNAL)
 // SOURCE: This is from your "New Contract." It's essential for the backend's internal logic.
 // ============================================================================
@@ -112,6 +161,35 @@ export interface WorkflowRequest {
   workflowId: string;
   context: WorkflowContext;
   steps: WorkflowStep[];
+}
+
+// ============================================================================
+// SECTION 2b: RESOLVED CONTEXT (output of ContextResolver)
+// ============================================================================
+
+export type ResolvedContext = InitializeContext | ExtendContext | RecomputeContext;
+
+export interface InitializeContext {
+  type: 'initialize';
+  providers: ProviderKey[];
+}
+
+export interface ExtendContext {
+  type: 'extend';
+  sessionId: string;
+  lastTurnId: string;
+  providerContexts: Record<ProviderKey, { meta: any; continueThread: boolean }>;
+}
+
+export interface RecomputeContext {
+  type: 'recompute';
+  sessionId: string;
+  sourceTurnId: string;
+  frozenBatchOutputs: Record<ProviderKey, ProviderResponse>;
+  providerContextsAtSourceTurn: Record<ProviderKey, { meta: any }>;
+  stepType: 'synthesis' | 'mapping';
+  targetProvider: ProviderKey;
+  sourceUserMessage: string;
 }
 
 // ============================================================================

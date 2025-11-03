@@ -20,6 +20,7 @@ import {
   utils,
 } from "./core/vendor-exports.js";
 import { WorkflowCompiler } from "./core/workflow-compiler.js";
+import { ContextResolver } from "./core/context-resolver.js";
 import { SWBootstrap } from "./HTOS/ServiceWorkerBootstrap.js";
 import { ClaudeAdapter } from "./providers/claude-adapter.js";
 import { GeminiAdapter } from "./providers/gemini-adapter.js";
@@ -412,14 +413,16 @@ async function initializeGlobalServices() {
     // 5. Initialize orchestrator
     await initializeOrchestrator();
     
-    // 6. Create compiler
+    // 6. Create compiler and context resolver
     const compiler = new WorkflowCompiler(sessionManager);
+    const contextResolver = new ContextResolver(sessionManager);
     
     console.log("[SW] ✅ Global services ready");
     return {
       orchestrator: self.faultTolerantOrchestrator,
       sessionManager: sessionManager,
       compiler,
+      contextResolver,
       persistenceLayer: pl, // Expose persistence layer to other modules
     };
   })();

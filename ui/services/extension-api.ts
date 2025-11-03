@@ -10,7 +10,7 @@ import {
 } from "../../shared/messaging";
 
 import type { HistorySessionSummary, HistoryApiResponse } from "../types";
-import type { ExecuteWorkflowRequest } from "../../shared/contract";
+import type { ExecuteWorkflowRequest, PrimitiveWorkflowRequest } from "../../shared/contract";
 import { PortHealthManager } from './port-health-manager';
 import type { DocumentRecord } from '../types';
 
@@ -115,8 +115,9 @@ class ExtensionAPI {
     console.log("[API] Port message handler registered.");
   }
 
-  async executeWorkflow(request: ExecuteWorkflowRequest): Promise<void> {
-    const port = await this.ensurePort({ sessionId: request.sessionId });
+  async executeWorkflow(request: ExecuteWorkflowRequest | PrimitiveWorkflowRequest): Promise<void> {
+    const sid = (request as any)?.sessionId as (string | undefined);
+    const port = await this.ensurePort({ sessionId: typeof sid === 'string' ? sid : undefined });
     this.portHealthManager?.checkHealth();
     return new Promise((resolve, reject) => {
       try {

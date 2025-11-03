@@ -18,7 +18,7 @@ import {
 } from '../state/atoms';
 import api from '../services/extension-api';
 import { PRIMARY_STREAMING_PROVIDER_IDS } from '../constants';
-import type { ProviderKey } from '../../shared/contract';
+import type { ProviderKey, PrimitiveWorkflowRequest } from '../../shared/contract';
 import type { TurnMessage, UserTurn, AiTurn, ProviderResponse } from '../types';
 
 export function useRoundActions() {
@@ -130,47 +130,21 @@ export function useRoundActions() {
       setCurrentAppStep('synthesis');
 
       try {
-        const fallbackMapping = (() => {
-          try {
-            return localStorage.getItem('htos_mapping_provider');
-          } catch {
-            return null;
-          }
-        })();
-        const effectiveMappingProvider = perRoundMapping || fallbackMapping || null;
-
-        const historicalContext: any = {
-          userTurnId,
-          sourceType: 'batch',
-        };
-        if (isHistoricalRerun && preferredMappingProvider) {
-          historicalContext.preferredMappingProvider = preferredMappingProvider as ProviderKey;
+        // Recompute synthesis from the existing AI turn outputs, one provider at a time
+        for (const pid of selected) {
+          const primitive: PrimitiveWorkflowRequest = {
+            type: 'recompute',
+            sessionId: currentSessionId as string,
+            sourceTurnId: ai.id,
+            stepType: 'synthesis',
+            targetProvider: pid as ProviderKey,
+            useThinking: !!thinkSynthByRound[userTurnId],
+          };
+          await api.executeWorkflow(primitive);
         }
-
-        const request: any = {
-          sessionId: currentSessionId,
-          threadId: 'default-thread',
-          mode: 'continuation',
-          userMessage: (user as UserTurn).text || '',
-          providers: [],
-          synthesis: {
-            enabled: true,
-            providers: selected as ProviderKey[],
-          },
-          mapping: !isHistoricalRerun && effectiveMappingProvider
-            ? { enabled: true, providers: [effectiveMappingProvider as ProviderKey] }
-            : undefined,
-          useThinking: !!thinkSynthByRound[userTurnId],
-          historicalContext,
-        };
-
         if (selected.length === 1) {
-          try {
-            localStorage.setItem('htos_last_synthesis_model', selected[0]);
-          } catch {}
+          try { localStorage.setItem('htos_last_synthesis_model', selected[0]); } catch {}
         }
-
-        await api.executeWorkflow(request);
       } catch (err) {
         console.error('Synthesis run failed:', err);
         setIsLoading(false);
@@ -261,24 +235,15 @@ export function useRoundActions() {
       setCurrentAppStep('synthesis');
 
       try {
-        const request: any = {
-          sessionId: currentSessionId,
-          threadId: 'default-thread',
-          mode: 'continuation',
-          userMessage: userTurn.text || '',
-          providers: [],
-          mapping: {
-            enabled: true,
-            providers: [effectiveMappingProvider as ProviderKey],
-          },
+        const primitive: PrimitiveWorkflowRequest = {
+          type: 'recompute',
+          sessionId: currentSessionId as string,
+          sourceTurnId: ai.id,
+          stepType: 'mapping',
+          targetProvider: effectiveMappingProvider as ProviderKey,
           useThinking: effectiveMappingProvider === 'chatgpt' ? !!thinkMappingByRound[userTurnId] : false,
-          historicalContext: {
-            userTurnId,
-            sourceType: 'batch',
-          },
         };
-
-        await api.executeWorkflow(request);
+        await api.executeWorkflow(primitive);
       } catch (err) {
         console.error('Mapping run failed:', err);
         setIsLoading(false);
