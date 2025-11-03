@@ -8,9 +8,11 @@ interface HistoryPanelProps {
   onNewChat: () => void;
   onSelectChat: (session: HistorySessionSummary) => void;
   onDeleteChat: (sessionId: string) => void;
+  // IDs currently being deleted (optimistic UI feedback)
+  deletingIds?: Set<string>;
 }
 
-const HistoryPanel = ({ isOpen, sessions, isLoading, onNewChat, onSelectChat, onDeleteChat }: HistoryPanelProps) => {
+const HistoryPanel = ({ isOpen, sessions, isLoading, onNewChat, onSelectChat, onDeleteChat, deletingIds }: HistoryPanelProps) => {
 
   const panelStyle: any = {
     position: 'relative',
@@ -90,14 +92,23 @@ const HistoryPanel = ({ isOpen, sessions, isLoading, onNewChat, onSelectChat, on
                 .map((session: HistorySessionSummary) => (
                 <div
                   key={session.id}
-                  onClick={() => onSelectChat(session)}
-                  style={itemStyle}
+                  onClick={() => {
+                    const isDeleting = !!deletingIds && (deletingIds as Set<string>).has(session.sessionId);
+                    if (isDeleting) return; // disable selection while deletion is pending
+                    onSelectChat(session);
+                  }}
+                  style={{
+                    ...itemStyle,
+                    opacity: (!!deletingIds && (deletingIds as Set<string>).has(session.sessionId)) ? 0.6 : 1,
+                    pointerEvents: (!!deletingIds && (deletingIds as Set<string>).has(session.sessionId)) ? 'none' : 'auto',
+                  }}
                   role="button"
                   tabIndex={0}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter' || e.key === ' ') {
                       e.preventDefault();
-                      onSelectChat(session);
+                      const isDeleting = !!deletingIds && (deletingIds as Set<string>).has(session.sessionId);
+                      if (!isDeleting) onSelectChat(session);
                     }
                   }}
                   title={session.title}
@@ -108,13 +119,17 @@ const HistoryPanel = ({ isOpen, sessions, isLoading, onNewChat, onSelectChat, on
                   <button
                     aria-label={`Delete chat ${session.title}`}
                     title="Delete chat"
-                    style={deleteBtnStyle}
+                    style={{
+                      ...deleteBtnStyle,
+                      cursor: (!!deletingIds && (deletingIds as Set<string>).has(session.sessionId)) ? 'not-allowed' : 'pointer',
+                    }}
                     onClick={(e) => {
                       e.stopPropagation();
                       onDeleteChat(session.sessionId);
                     }}
+                    disabled={!!deletingIds && (deletingIds as Set<string>).has(session.sessionId)}
                   >
-                    🗑️
+                    { !!deletingIds && (deletingIds as Set<string>).has(session.sessionId) ? 'Deleting…' : '🗑️' }
                   </button>
                 </div>
               ))

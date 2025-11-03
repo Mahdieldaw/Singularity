@@ -259,13 +259,25 @@ export function useChat() {
     }
   }, [setTurnsMap, setTurnIds, setCurrentSessionId, setIsLoading, setIsHistoryPanelOpen]);
 
-  const deleteChat = useCallback(async (sessionId: string) => {
+  const deleteChat = useCallback(async (sessionId: string): Promise<boolean> => {
     try {
-      await api.deleteBackgroundSession(sessionId);
+      const result = await api.deleteBackgroundSession(sessionId);
+      const removed = !!result?.removed;
+
+      // If the deleted session is currently active, clear chat state
+      if (removed && currentSessionId && (currentSessionId === sessionId)) {
+        setCurrentSessionId(null);
+        setTurnsMap(new Map());
+        setTurnIds([]);
+        setActiveAiTurnId(null);
+      }
+
+      return removed;
     } catch (err) {
       console.error('Failed to delete session', err);
+      return false;
     }
-  }, []);
+  }, [currentSessionId, setCurrentSessionId, setTurnsMap, setTurnIds, setActiveAiTurnId]);
 
   // Backward-compat: derive messages for consumers still expecting it
   const messages = useAtomValue(messagesAtom);

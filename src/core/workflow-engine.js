@@ -334,16 +334,30 @@ export class WorkflowEngine {
         }
     }
     
-        // 3. Signal completion.
-    this.port.postMessage({ type: 'WORKFLOW_COMPLETE', sessionId: context.sessionId, workflowId: request.workflowId, finalResults: Object.fromEntries(stepResults) });
-    
-    // Emit canonical turn to allow UI to replace optimistic placeholders
-    this._emitTurnFinalized(context, steps, stepResults);
-    
-    // ✅ Clean up delta cache
-    clearDeltaCache(context.sessionId);
-    // Persist the completed turn if applicable
-    try { this._persistCompletedTurn(context, steps, stepResults); } catch (e) { console.warn('[WorkflowEngine] Persist turn failed:', e); }
+        // --- NEW HYBRID APPROACH ---
+        // 1) Persist CRITICAL data immediately and await it (user/ai turn + batch responses only for new/continued conversations)
+        try {
+          await this._persistCriticalTurnData(context, steps, stepResults);
+        } catch (e) {
+          console.error('[WorkflowEngine] CRITICAL persistence failed:', e);
+          // We will still notify the UI to avoid hanging, but state may be inconsistent for historical features
+        }
+
+        // 2) Signal completion to the UI (unchanged message shape)
+        this.port.postMessage({ type: 'WORKFLOW_COMPLETE', sessionId: context.sessionId, workflowId: request.workflowId, finalResults: Object.fromEntries(stepResults) });
+        
+        // Emit canonical turn to allow UI to replace optimistic placeholders
+        this._emitTurnFinalized(context, steps, stepResults);
+        
+        // ✅ Clean up delta cache
+        clearDeltaCache(context.sessionId);
+
+        // 3) Defer NON-CRITICAL persistence (mapping/synthesis responses, secondary context updates)
+        setTimeout(() => {
+          this._persistNonCriticalData(context, steps, stepResults).catch(e => {
+            console.warn('[WorkflowEngine] Deferred non-critical persistence failed:', e);
+          });
+        }, 0);
         
 } catch (error) {
         console.error(`[WorkflowEngine] Critical workflow execution error:`, error);
@@ -489,6 +503,124 @@ export class WorkflowEngine {
     } catch (error) {
       console.error('[WorkflowEngine] Failed to emit TURN_FINALIZED:', error);
     }
+  }
+
+  /**
+   * Persist only CRITICAL data needed for historical reruns and stable turn IDs.
+   * - For new/continued conversations: persist user turn + AI turn with batch responses only
+   * - For historical reruns: do nothing here (non-critical path will append responses)
+   */
+  async _persistCriticalTurnData(context, steps, stepResults) {
+    // Historical rerun: critical path does nothing (we will append responses later)
+    if (context?.targetUserTurnId) return;
+
+    const userMessage = context?.userMessage || this.currentUserMessage || '';
+    if (!userMessage) return; // No content to persist
+
+    // Ensure canonical IDs exist BEFORE TURN_FINALIZED so UI and persistence align
+    const timestamp = Date.now();
+    const userTurnId = context?.canonicalUserTurnId || this._generateId('user');
+    const aiTurnId = context?.canonicalAiTurnId || this._generateId('ai');
+    context.canonicalUserTurnId = userTurnId;
+    context.canonicalAiTurnId = aiTurnId;
+
+    // Build user turn
+    const userTurn = {
+      id: userTurnId,
+      type: 'user',
+      text: userMessage,
+      createdAt: timestamp,
+      sessionId: context.sessionId
+    };
+
+    // Collect ONLY batch responses from prompt steps
+    const batchResponses = {};
+    try {
+      const stepById = new Map((steps || []).map(s => [s.stepId, s]));
+      stepResults.forEach((value, stepId) => {
+        const step = stepById.get(stepId);
+        if (!step || value?.status !== 'completed') return;
+        if (step.type === 'prompt') {
+          const resultsObj = value.result?.results || {};
+          Object.entries(resultsObj).forEach(([providerId, r]) => {
+            batchResponses[providerId] = {
+              providerId,
+              text: r.text || '',
+              status: r.status || 'completed',
+              meta: r.meta || {}
+            };
+          });
+        }
+      });
+    } catch (_) {}
+
+    const aiTurn = {
+      id: aiTurnId,
+      type: 'ai',
+      userTurnId: userTurn.id,
+      sessionId: context.sessionId,
+      threadId: 'default-thread',
+      createdAt: timestamp,
+      batchResponses,
+      synthesisResponses: {},
+      mappingResponses: {}
+    };
+
+    // Persist minimal turn state; await to guarantee availability for follow-up actions
+    await this.sessionManager.saveTurn(context.sessionId, userTurn, aiTurn);
+  }
+
+  /**
+   * Persist NON-CRITICAL data in the background:
+   * - Append synthesis/mapping responses to the persisted AI turn
+   * - Optionally update session metadata
+   */
+  async _persistNonCriticalData(context, steps, stepResults) {
+    // Build additions from synthesis/mapping step results
+    const synthesisResponses = {};
+    const mappingResponses = {};
+    try {
+      const stepById = new Map((steps || []).map(s => [s.stepId, s]));
+      stepResults.forEach((value, stepId) => {
+        const step = stepById.get(stepId);
+        if (!step || value?.status !== 'completed') return;
+        const result = value.result;
+        if (step.type === 'synthesis') {
+          const providerId = result?.providerId;
+          if (!providerId) return;
+          const entry = { providerId, text: result?.text || '', status: result?.status || 'completed', meta: result?.meta || {} };
+          if (!synthesisResponses[providerId]) synthesisResponses[providerId] = [];
+          synthesisResponses[providerId].push(entry);
+        } else if (step.type === 'mapping') {
+          const providerId = result?.providerId;
+          if (!providerId) return;
+          const entry = { providerId, text: result?.text || '', status: result?.status || 'completed', meta: result?.meta || {} };
+          if (!mappingResponses[providerId]) mappingResponses[providerId] = [];
+          mappingResponses[providerId].push(entry);
+        }
+      });
+    } catch (_) {}
+
+    const additions = {};
+    if (Object.keys(synthesisResponses).length > 0) additions.synthesisResponses = synthesisResponses;
+    if (Object.keys(mappingResponses).length > 0) additions.mappingResponses = mappingResponses;
+    if (Object.keys(additions).length === 0) return; // Nothing to do
+
+    // Historical reruns append to the existing AI turn following targetUserTurnId
+    if (context?.targetUserTurnId) {
+      await this.sessionManager.appendProviderResponses(context.sessionId, context.targetUserTurnId, additions);
+      await this.sessionManager.saveSession(context.sessionId);
+      return;
+    }
+
+    // New/continued conversation: append to the AI turn saved in critical phase
+    const userTurnId = context?.canonicalUserTurnId;
+    if (!userTurnId) {
+      console.warn('[WorkflowEngine] No canonicalUserTurnId present; cannot append non-critical responses');
+      return;
+    }
+    await this.sessionManager.appendProviderResponses(context.sessionId, userTurnId, additions);
+    await this.sessionManager.saveSession(context.sessionId);
   }
 
   /**

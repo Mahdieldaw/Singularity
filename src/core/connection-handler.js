@@ -386,6 +386,7 @@ export class ConnectionHandler {
         ) || {};
       const providerModes = { ...(executeRequest?.providerModes || {}) };
 
+      const debug = { hasCtx: {}, before: { ...providerModes } };
       for (const pid of providers) {
         // Respect explicit UI overrides
         if (providerModes[pid]) continue;
@@ -395,9 +396,18 @@ export class ConnectionHandler {
           contexts?.[pid]?.meta && Object.keys(contexts[pid].meta).length > 0
         );
         providerModes[pid] = hasCtx ? "continuation" : "new-conversation";
+        debug.hasCtx[pid] = hasCtx;
       }
 
       executeRequest.providerModes = providerModes;
+      console.log(
+        `[ConnectionHandler] normalizeProviderModes: session=${sessionId}, mode=${mode}`,
+        {
+          providers,
+          hasCtx: debug.hasCtx,
+          after: providerModes,
+        }
+      );
     } catch (_) {
       // Best-effort; compiler will handle defaults
     }

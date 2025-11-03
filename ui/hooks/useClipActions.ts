@@ -3,6 +3,7 @@ import { useAtomValue, useSetAtom } from 'jotai';
 import { activeClipsAtom, alertTextAtom, turnsMapAtom } from '../state/atoms';
 import { useRoundActions } from './useRoundActions';
 import type { AiTurn } from '../types';
+import { PRIMARY_STREAMING_PROVIDER_IDS } from '../constants';
 
 export function useClipActions() {
   const turnsMap = useAtomValue(turnsMapAtom);
@@ -44,7 +45,7 @@ export function useClipActions() {
         },
       }));
 
-      // If the selected provider is not present in the AI turn's batchResponses, add an optimistic pending
+      // If the selected provider is not present in the AI turn's batchResponses, add an optimistic
       // batch response so the batch count increases and the model shows up in the batch area.
       if (!aiTurn.batchResponses || !aiTurn.batchResponses[providerId]) {
         setTurnsMap((draft) => {
@@ -52,10 +53,11 @@ export function useClipActions() {
           if (!turn || turn.type !== 'ai') return;
           turn.batchResponses = (turn.batchResponses || {}) as any;
           if (!turn.batchResponses[providerId]) {
+            const initialStatus: 'streaming' | 'pending' = PRIMARY_STREAMING_PROVIDER_IDS.includes(providerId) ? 'streaming' : 'pending';
             (turn.batchResponses as any)[providerId] = {
               providerId,
               text: '',
-              status: 'pending',
+              status: initialStatus,
               createdAt: Date.now(),
               updatedAt: Date.now(),
             } as any;

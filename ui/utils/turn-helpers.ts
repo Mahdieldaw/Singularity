@@ -105,7 +105,7 @@ export function applyStreamingUpdates(
       const existing = aiTurn.batchResponses[providerId] || {
         providerId,
         text: '',
-        status: 'pending',
+        status: (PRIMARY_STREAMING_PROVIDER_IDS.includes(String(providerId)) ? 'streaming' : 'pending'),
         createdAt: Date.now()
       };
       aiTurn.batchResponses[providerId] = {

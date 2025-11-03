@@ -17,6 +17,7 @@ import {
   thinkMappingByRoundAtom,
 } from '../state/atoms';
 import api from '../services/extension-api';
+import { PRIMARY_STREAMING_PROVIDER_IDS } from '../constants';
 import type { ProviderKey } from '../../shared/contract';
 import type { TurnMessage, UserTurn, AiTurn, ProviderResponse } from '../types';
 
@@ -110,10 +111,11 @@ export function useRoundActions() {
         const next: Record<string, ProviderResponse[]> = { ...aiTurn.synthesisResponses };
         selected.forEach((pid) => {
           const arr = Array.isArray(next[pid]) ? [...next[pid]] : [];
+          const initialStatus: 'streaming' | 'pending' = PRIMARY_STREAMING_PROVIDER_IDS.includes(pid) ? 'streaming' : 'pending';
           arr.push({
             providerId: pid as ProviderKey,
             text: '',
-            status: 'pending',
+            status: initialStatus,
             createdAt: Date.now(),
           });
           next[pid] = arr;
@@ -242,10 +244,11 @@ export function useRoundActions() {
         const prev = aiTurn.mappingResponses || {};
         const next: Record<string, ProviderResponse[]> = { ...prev };
         const arr = Array.isArray(next[effectiveMappingProvider]) ? [...next[effectiveMappingProvider]] : [];
+        const initialStatus: 'streaming' | 'pending' = PRIMARY_STREAMING_PROVIDER_IDS.includes(effectiveMappingProvider) ? 'streaming' : 'pending';
         arr.push({
           providerId: effectiveMappingProvider as ProviderKey,
           text: '',
-          status: 'pending',
+          status: initialStatus,
           createdAt: Date.now(),
         });
         next[effectiveMappingProvider] = arr;

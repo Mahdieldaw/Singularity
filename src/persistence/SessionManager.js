@@ -162,6 +162,13 @@ export class SessionManager {
    */
   async getOrCreateSession(sessionId) {
     if (!sessionId) throw new Error('sessionId required');
+    // 1. Check cache first to avoid redundant DB reads
+    if (this.sessions && this.sessions[sessionId]) {
+      console.log(`[SessionManager] Cache hit for session: ${sessionId}`);
+      return this.sessions[sessionId];
+    }
+    // 2. Fallback to persistence-backed retrieval/creation
+    console.log(`[SessionManager] Cache miss for session: ${sessionId}. Fetching from DB...`);
     return this.getOrCreateSessionWithPersistence(sessionId);
   }
 
@@ -170,6 +177,11 @@ export class SessionManager {
    */
   async getOrCreateSessionWithPersistence(sessionId) {
     try {
+      // Prefer cached session if present
+      if (this.sessions && this.sessions[sessionId]) {
+        console.log(`[SessionManager] (WithPersistence) Cache hit for session: ${sessionId}`);
+        return this.sessions[sessionId];
+      }
       // Try to get existing session
       let sessionRecord = await this.adapter.get('sessions', sessionId);
       
@@ -204,7 +216,10 @@ export class SessionManager {
       
       // Build legacy-compatible session object for backward compatibility
       const legacySession = await this.buildLegacySessionObject(sessionId);
-      this.sessions[sessionId] = legacySession;
+      // 3. Store in cache for next time
+      if (legacySession) {
+        this.sessions[sessionId] = legacySession;
+      }
       
       return legacySession;
     } catch (error) {
@@ -332,11 +347,28 @@ export class SessionManager {
       const allContexts = await this.adapter.getAll('provider_contexts');
       const contexts = allContexts.filter(context => context.sessionId === sessionId);
       const providersObj = {};
-      contexts.forEach(context => {
-        providersObj[context.providerId] = {
-          ...context.contextData,
-          lastUpdated: context.updatedAt
+      // Group contexts by providerId and select the newest record per provider
+      const grouped = contexts.reduce((acc, ctx) => {
+        const pid = ctx.providerId;
+        if (!acc[pid]) acc[pid] = [];
+        acc[pid].push(ctx);
+        return acc;
+      }, {});
+
+      Object.entries(grouped).forEach(([pid, arr]) => {
+        const sorted = arr.sort((a, b) => {
+          const ta = (a.updatedAt ?? a.createdAt ?? 0);
+          const tb = (b.updatedAt ?? b.createdAt ?? 0);
+          return tb - ta; // newest first
+        });
+        const selected = sorted[0];
+        providersObj[pid] = {
+          ...selected.contextData,
+          lastUpdated: selected.updatedAt
         };
+        if (arr.length > 1) {
+          console.log(`[SessionManager] buildLegacySessionObject: resolved ${arr.length} contexts for provider ${pid}, selected ${selected.id} (updatedAt=${selected.updatedAt})`);
+        }
       });
 
       const legacySession = {
@@ -560,7 +592,22 @@ export class SessionManager {
       const contexts = allContexts.filter(context => 
         context.providerId === providerId && context.sessionId === sessionId
       );
-      let contextRecord = contexts[0]; // Get the most recent one
+      // Select the most recent context by updatedAt (fallback createdAt)
+      let contextRecord = null;
+      if (contexts.length > 0) {
+        const sorted = contexts.sort((a, b) => {
+          const ta = (a.updatedAt ?? a.createdAt ?? 0);
+          const tb = (b.updatedAt ?? b.createdAt ?? 0);
+          return tb - ta; // newest first
+        });
+        contextRecord = sorted[0];
+        console.log(`[SessionManager] updateProviderContext: selected latest context for ${providerId} in ${sessionId}`, {
+          candidates: contexts.length,
+          selectedId: contextRecord.id,
+          selectedUpdatedAt: contextRecord.updatedAt,
+          selectedCreatedAt: contextRecord.createdAt
+        });
+      }
       
       if (!contextRecord) {
         // Create new context

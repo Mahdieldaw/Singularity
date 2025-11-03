@@ -36,6 +36,22 @@ class ExtensionAPI {
       onUnhealthy: () => this.notifyConnectionState(false),
       onReconnect: () => this.notifyConnectionState(true),
     });
+
+    // Ensure we cleanly disconnect the port when the UI unloads (tab closed, navigate away)
+    try {
+      window.addEventListener('beforeunload', () => {
+        try { this.portHealthManager?.disconnect(); } catch {}
+        try { this.port?.disconnect(); } catch {}
+        this.port = null;
+      });
+      window.addEventListener('unload', () => {
+        try { this.portHealthManager?.disconnect(); } catch {}
+        try { this.port?.disconnect(); } catch {}
+        this.port = null;
+      });
+    } catch (e) {
+      console.warn('[ExtensionAPI] Failed to attach unload handlers', e);
+    }
   }
 
   onConnectionStateChange(callback: (connected: boolean) => void): () => void {
