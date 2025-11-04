@@ -363,13 +363,14 @@ export class WorkflowEngine {
         }
     }
     
-        // --- NEW HYBRID APPROACH ---
-        // 1) Persist CRITICAL data immediately and await it (user/ai turn + batch responses only for new/continued conversations)
+        // ========================================================================
+        // Persistence: Call new primitive-based method
+        // ========================================================================
         try {
-          await this._persistCriticalTurnData(context, steps, stepResults);
+          await this._persistCriticalTurnData(context, steps, stepResults, resolvedContext);
         } catch (e) {
           console.error('[WorkflowEngine] CRITICAL persistence failed:', e);
-          // We will still notify the UI to avoid hanging, but state may be inconsistent for historical features
+          // Still notify UI to avoid hanging
         }
 
         // 2) Signal completion to the UI (unchanged message shape)
@@ -383,7 +384,7 @@ export class WorkflowEngine {
 
         // 3) Defer NON-CRITICAL persistence (mapping/synthesis responses, secondary context updates)
         setTimeout(() => {
-          this._persistNonCriticalData(context, steps, stepResults).catch(e => {
+          this._persistNonCriticalData(context, steps, stepResults, resolvedContext).catch(e => {
             console.warn('[WorkflowEngine] Deferred non-critical persistence failed:', e);
           });
         }, 0);
@@ -538,64 +539,80 @@ export class WorkflowEngine {
    * - For new/continued conversations: persist user turn + AI turn with batch responses only
    * - For historical reruns: do nothing here (non-critical path will append responses)
    */
-  async _persistCriticalTurnData(context, steps, stepResults) {
-    // Historical rerun: critical path does nothing (we will append responses later)
-    if (context?.targetUserTurnId) return;
+  async _persistCriticalTurnData(context, steps, stepResults, resolvedContext) {
+    // Skip for historical reruns (no new turn created)
+    if (context?.targetUserTurnId) {
+      console.log('[WorkflowEngine] Skipping critical persistence (historical rerun)');
+      return;
+    }
 
     const userMessage = context?.userMessage || this.currentUserMessage || '';
-    if (!userMessage) return; // No content to persist
+    if (!userMessage) {
+      console.log('[WorkflowEngine] Skipping persistence (no user message)');
+      return;
+    }
 
-    // Ensure canonical IDs exist BEFORE TURN_FINALIZED so UI and persistence align
-    const timestamp = Date.now();
-    const userTurnId = context?.canonicalUserTurnId || this._generateId('user');
-    const aiTurnId = context?.canonicalAiTurnId || this._generateId('ai');
-    context.canonicalUserTurnId = userTurnId;
-    context.canonicalAiTurnId = aiTurnId;
-
-    // Build user turn
-    const userTurn = {
-      id: userTurnId,
-      type: 'user',
-      text: userMessage,
-      createdAt: timestamp,
-      sessionId: context.sessionId
-    };
-
-    // Collect ONLY batch responses from prompt steps
-    const batchResponses = {};
     try {
+      // ========================================================================
+      // Extract results from step execution
+      // ========================================================================
+      const result = {
+        batchOutputs: {},
+        synthesisOutputs: {},
+        mappingOutputs: {}
+      };
       const stepById = new Map((steps || []).map(s => [s.stepId, s]));
-      stepResults.forEach((value, stepId) => {
+      stepResults.forEach((stepResult, stepId) => {
+        if (stepResult.status !== 'completed') return;
         const step = stepById.get(stepId);
-        if (!step || value?.status !== 'completed') return;
+        if (!step) return;
         if (step.type === 'prompt') {
-          const resultsObj = value.result?.results || {};
-          Object.entries(resultsObj).forEach(([providerId, r]) => {
-            batchResponses[providerId] = {
-              providerId,
-              text: r.text || '',
-              status: r.status || 'completed',
-              meta: r.meta || {}
-            };
-          });
+          result.batchOutputs = stepResult.result?.results || {};
+        } else if (step.type === 'synthesis') {
+          const providerId = step.payload.synthesisProvider;
+          if (providerId) result.synthesisOutputs[providerId] = stepResult.result;
+        } else if (step.type === 'mapping') {
+          const providerId = step.payload.mappingProvider;
+          if (providerId) result.mappingOutputs[providerId] = stepResult.result;
         }
       });
-    } catch (_) {}
 
-    const aiTurn = {
-      id: aiTurnId,
-      type: 'ai',
-      userTurnId: userTurn.id,
-      sessionId: context.sessionId,
-      threadId: 'default-thread',
-      createdAt: timestamp,
-      batchResponses,
-      synthesisResponses: {},
-      mappingResponses: {}
-    };
+      // ========================================================================
+      // Construct request object for persistence
+      // ========================================================================
+      const request = {
+        type: resolvedContext?.type || 'unknown',
+        sessionId: context.sessionId,
+        userMessage
+      };
+      if (resolvedContext?.type === 'recompute') {
+        request.sourceTurnId = resolvedContext.sourceTurnId;
+        request.stepType = resolvedContext.stepType;
+        request.targetProvider = resolvedContext.targetProvider;
+      }
 
-    // Persist minimal turn state; await to guarantee availability for follow-up actions
-    await this.sessionManager.saveTurn(context.sessionId, userTurn, aiTurn);
+      // Prefer the canonical IDs chosen by connection-handler if present
+      if (context?.canonicalUserTurnId) request.canonicalUserTurnId = context.canonicalUserTurnId;
+      if (context?.canonicalAiTurnId) request.canonicalAiTurnId = context.canonicalAiTurnId;
+
+      console.log(`[WorkflowEngine] Persisting ${request.type} workflow to SessionManager`);
+
+      // Call new primitive-based persist method
+      const persistResult = await this.sessionManager.persist(request, resolvedContext, result);
+
+      // Update workflow context with canonical IDs (and sessionId for initialize)
+      if (persistResult) {
+        if (persistResult.userTurnId) context.canonicalUserTurnId = persistResult.userTurnId;
+        if (persistResult.aiTurnId) context.canonicalAiTurnId = persistResult.aiTurnId;
+        if (resolvedContext?.type === 'initialize' && persistResult.sessionId) {
+          context.sessionId = persistResult.sessionId;
+          console.log(`[WorkflowEngine] Initialize complete: session=${persistResult.sessionId}`);
+        }
+      }
+    } catch (error) {
+      console.error('[WorkflowEngine] Critical persistence failed:', error);
+      throw error;
+    }
   }
 
   /**
@@ -603,7 +620,7 @@ export class WorkflowEngine {
    * - Append synthesis/mapping responses to the persisted AI turn
    * - Optionally update session metadata
    */
-  async _persistNonCriticalData(context, steps, stepResults) {
+  async _persistNonCriticalData(context, steps, stepResults, resolvedContext) {
     // Build additions from synthesis/mapping step results
     const synthesisResponses = {};
     const mappingResponses = {};

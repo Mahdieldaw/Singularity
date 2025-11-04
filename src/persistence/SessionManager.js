@@ -19,6 +19,337 @@ export class SessionManager {
   }
 
   /**
+   * NEW: Primary persistence entry point (Phase 4)
+   * Routes to appropriate primitive-specific handler
+   * @param {Object} request - { type, sessionId, userMessage, sourceTurnId?, stepType?, targetProvider? }
+   * @param {Object} context - ResolvedContext from ContextResolver
+   * @param {Object} result - { batchOutputs, synthesisOutputs, mappingOutputs }
+   * @returns {Promise<{sessionId, userTurnId?, aiTurnId?}>}
+   */
+  async persist(request, context, result) {
+    if (!request?.type) throw new Error('[SessionManager] persist() requires request.type');
+    switch (request.type) {
+      case 'initialize':
+        return this._persistInitialize(request, result);
+      case 'extend':
+        return this._persistExtend(request, context, result);
+      case 'recompute':
+        return this._persistRecompute(request, context, result);
+      default:
+        throw new Error(`[SessionManager] Unknown request type: ${request.type}`);
+    }
+  }
+
+  /**
+   * Initialize: Create new session + first turn
+   */
+  async _persistInitialize(request, result) {
+    const sessionId = `session-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const now = Date.now();
+
+    // 1) Create session
+    const sessionRecord = {
+      id: sessionId,
+      title: String(request.userMessage || '').slice(0, 50),
+      createdAt: now,
+      lastActivity: now,
+      defaultThreadId: 'default-thread',
+      activeThreadId: 'default-thread',
+      turnCount: 2,
+      isActive: true,
+      lastTurnId: null,
+      updatedAt: now,
+      userId: 'default-user',
+      provider: 'multi'
+    };
+    await this.adapter.put('sessions', sessionRecord);
+
+    // 2) Default thread
+    const defaultThread = {
+      id: 'default-thread',
+      sessionId,
+      parentThreadId: null,
+      branchPointTurnId: null,
+      title: 'Main Thread',
+      name: 'Main Thread',
+      color: '#6366f1',
+      isActive: true,
+      createdAt: now,
+      lastActivity: now,
+      updatedAt: now
+    };
+    await this.adapter.put('threads', defaultThread);
+
+    // 3) User turn
+    const userTurnId = request.canonicalUserTurnId || `user-${now}`;
+    const userTurnRecord = {
+      id: userTurnId,
+      type: 'user',
+      role: 'user',
+      sessionId,
+      threadId: 'default-thread',
+      createdAt: now,
+      updatedAt: now,
+      content: request.userMessage || '',
+      sequence: 0
+    };
+    await this.adapter.put('turns', userTurnRecord);
+
+    // 4) AI turn with contexts
+    const aiTurnId = request.canonicalAiTurnId || `ai-${now}`;
+    const providerContexts = this._extractContextsFromResult(result);
+    const aiTurnRecord = {
+      id: aiTurnId,
+      type: 'ai',
+      role: 'assistant',
+      sessionId,
+      threadId: 'default-thread',
+      userTurnId,
+      createdAt: now,
+      updatedAt: now,
+      providerContexts,
+      sequence: 1,
+      batchResponseCount: this.countResponses(result.batchOutputs),
+      synthesisResponseCount: this.countResponses(result.synthesisOutputs),
+      mappingResponseCount: this.countResponses(result.mappingOutputs)
+    };
+    await this.adapter.put('turns', aiTurnRecord);
+
+    // 5) Provider responses
+    await this._persistProviderResponses(sessionId, aiTurnId, result, now);
+
+    // 6) Update session lastTurnId
+    sessionRecord.lastTurnId = aiTurnId;
+    sessionRecord.updatedAt = now;
+    await this.adapter.put('sessions', sessionRecord);
+
+    // 7) Update legacy cache
+    const legacySession = await this.buildLegacySessionObject(sessionId);
+    if (legacySession) this.sessions[sessionId] = legacySession;
+
+    return { sessionId, userTurnId, aiTurnId };
+  }
+
+  /**
+   * Extend: Append turn to existing session
+   */
+  async _persistExtend(request, context, result) {
+    const { sessionId } = request;
+    const now = Date.now();
+
+    // Validate last turn
+    if (!context?.lastTurnId) {
+      throw new Error('[SessionManager] Extend requires context.lastTurnId');
+    }
+    const lastTurn = await this.adapter.get('turns', context.lastTurnId);
+    if (!lastTurn) throw new Error(`[SessionManager] Last turn ${context.lastTurnId} not found`);
+
+    // Determine next sequence
+    const allTurns = await this.adapter.getAll('turns');
+    const sessionTurns = allTurns.filter(t => t.sessionId === sessionId);
+    const nextSequence = sessionTurns.length;
+
+    // 1) User turn
+    const userTurnId = request.canonicalUserTurnId || `user-${now}`;
+    const userTurnRecord = {
+      id: userTurnId,
+      type: 'user',
+      role: 'user',
+      sessionId,
+      threadId: 'default-thread',
+      createdAt: now,
+      updatedAt: now,
+      content: request.userMessage || '',
+      sequence: nextSequence
+    };
+    await this.adapter.put('turns', userTurnRecord);
+
+    // 2) Merge contexts
+    const newContexts = this._extractContextsFromResult(result);
+    const mergedContexts = { ...(lastTurn.providerContexts || {}), ...newContexts };
+
+    // 3) AI turn
+    const aiTurnId = request.canonicalAiTurnId || `ai-${now}`;
+    const aiTurnRecord = {
+      id: aiTurnId,
+      type: 'ai',
+      role: 'assistant',
+      sessionId,
+      threadId: 'default-thread',
+      userTurnId,
+      createdAt: now,
+      updatedAt: now,
+      providerContexts: mergedContexts,
+      sequence: nextSequence + 1,
+      batchResponseCount: this.countResponses(result.batchOutputs),
+      synthesisResponseCount: this.countResponses(result.synthesisOutputs),
+      mappingResponseCount: this.countResponses(result.mappingOutputs)
+    };
+    await this.adapter.put('turns', aiTurnRecord);
+
+    // 4) Provider responses
+    await this._persistProviderResponses(sessionId, aiTurnId, result, now);
+
+    // 5) Update session
+    const session = await this.adapter.get('sessions', sessionId);
+    if (session) {
+      session.lastTurnId = aiTurnId;
+      session.lastActivity = now;
+      session.turnCount = (session.turnCount || 0) + 2;
+      session.updatedAt = now;
+      await this.adapter.put('sessions', session);
+    }
+
+    // 6) Update legacy cache
+    const legacySession = await this.buildLegacySessionObject(sessionId);
+    if (legacySession) this.sessions[sessionId] = legacySession;
+
+    return { sessionId, userTurnId, aiTurnId };
+  }
+
+  /**
+   * Recompute: Create derived turn (timeline branch)
+   */
+  async _persistRecompute(request, context, result) {
+    const { sessionId, sourceTurnId, stepType, targetProvider } = request;
+    const now = Date.now();
+
+    // 1) Source turn exists?
+    const sourceTurn = await this.adapter.get('turns', sourceTurnId);
+    if (!sourceTurn) throw new Error(`[SessionManager] Source turn ${sourceTurnId} not found`);
+
+    // 2) Derived AI turn (off-timeline)
+    const aiTurnId = request.canonicalAiTurnId || `ai-recompute-${now}`;
+    const aiTurnRecord = {
+      id: aiTurnId,
+      type: 'ai',
+      role: 'assistant',
+      sessionId,
+      threadId: 'default-thread',
+      userTurnId: sourceTurn.userTurnId || sourceTurnId,
+      createdAt: now,
+      updatedAt: now,
+      providerContexts: context?.providerContextsAtSourceTurn || {},
+      sequence: -1,
+      batchResponseCount: 0,
+      synthesisResponseCount: stepType === 'synthesis' ? 1 : 0,
+      mappingResponseCount: stepType === 'mapping' ? 1 : 0,
+      meta: { isHistoricalRerun: true, recomputeMetadata: { stepType, targetProvider } }
+    };
+    await this.adapter.put('turns', aiTurnRecord);
+
+    // 3) Persist only recomputed response
+    const responseData = stepType === 'synthesis' ? (result.synthesisOutputs?.[targetProvider]) : (result.mappingOutputs?.[targetProvider]);
+    if (responseData) {
+      const respId = `pr-${sessionId}-${aiTurnId}-${targetProvider}-${stepType}-0-${now}`;
+      await this.adapter.put('provider_responses', {
+        id: respId,
+        sessionId,
+        aiTurnId,
+        providerId: targetProvider,
+        responseType: stepType,
+        responseIndex: 0,
+        text: responseData?.text || '',
+        status: responseData?.status || 'completed',
+        meta: responseData?.meta || {},
+        createdAt: now,
+        updatedAt: now,
+        completedAt: now
+      });
+    } else {
+      console.warn(`[SessionManager] No ${stepType} output found for ${targetProvider}`);
+    }
+
+    // 4) Do NOT update session.lastTurnId (branch)
+
+    // 5) Update legacy cache
+    const legacySession = await this.buildLegacySessionObject(sessionId);
+    if (legacySession) this.sessions[sessionId] = legacySession;
+
+    return { sessionId, aiTurnId };
+  }
+
+  /**
+   * Extract provider contexts from workflow result
+   */
+  _extractContextsFromResult(result) {
+    const contexts = {};
+    try {
+      Object.entries(result?.batchOutputs || {}).forEach(([pid, output]) => {
+        if (output?.meta && Object.keys(output.meta).length > 0) contexts[pid] = output.meta;
+      });
+      Object.entries(result?.synthesisOutputs || {}).forEach(([pid, output]) => {
+        if (output?.meta && Object.keys(output.meta).length > 0) contexts[pid] = output.meta;
+      });
+      Object.entries(result?.mappingOutputs || {}).forEach(([pid, output]) => {
+        if (output?.meta && Object.keys(output.meta).length > 0) contexts[pid] = output.meta;
+      });
+    } catch (_) {}
+    return contexts;
+  }
+
+  /**
+   * Helper: Persist provider responses for a turn
+   */
+  async _persistProviderResponses(sessionId, aiTurnId, result, now) {
+    let count = 0;
+    // Batch
+    for (const [providerId, output] of Object.entries(result?.batchOutputs || {})) {
+      const respId = `pr-${sessionId}-${aiTurnId}-${providerId}-batch-0-${now}-${count++}`;
+      await this.adapter.put('provider_responses', {
+        id: respId,
+        sessionId,
+        aiTurnId,
+        providerId,
+        responseType: 'batch',
+        responseIndex: 0,
+        text: output?.text || '',
+        status: output?.status || 'completed',
+        meta: output?.meta || {},
+        createdAt: now,
+        updatedAt: now,
+        completedAt: now
+      });
+    }
+    // Synthesis
+    for (const [providerId, output] of Object.entries(result?.synthesisOutputs || {})) {
+      const respId = `pr-${sessionId}-${aiTurnId}-${providerId}-synthesis-0-${now}-${count++}`;
+      await this.adapter.put('provider_responses', {
+        id: respId,
+        sessionId,
+        aiTurnId,
+        providerId,
+        responseType: 'synthesis',
+        responseIndex: 0,
+        text: output?.text || '',
+        status: output?.status || 'completed',
+        meta: output?.meta || {},
+        createdAt: now,
+        updatedAt: now,
+        completedAt: now
+      });
+    }
+    // Mapping
+    for (const [providerId, output] of Object.entries(result?.mappingOutputs || {})) {
+      const respId = `pr-${sessionId}-${aiTurnId}-${providerId}-mapping-0-${now}-${count++}`;
+      await this.adapter.put('provider_responses', {
+        id: respId,
+        sessionId,
+        aiTurnId,
+        providerId,
+        responseType: 'mapping',
+        responseIndex: 0,
+        text: output?.text || '',
+        status: output?.status || 'completed',
+        meta: output?.meta || {},
+        createdAt: now,
+        updatedAt: now,
+        completedAt: now
+      });
+    }
+  }
+
+  /**
    * Append provider responses (mapping/synthesis/batch) to an existing AI turn
    * that follows the given historical user turn. Used to persist historical reruns
    * without creating a new user/ai turn pair.
@@ -872,7 +1203,53 @@ export class SessionManager {
    * Save turn (legacy compatibility method)
    */
   async saveTurn(sessionId, userTurn, aiTurn) {
-    return this.saveTurnWithPersistence(sessionId, userTurn, aiTurn);
+    // Save turn (legacy compatibility wrapper)
+    // Routes to new persist() method when possible
+    try {
+      const hasNewContexts = aiTurn?.providerContexts && Object.keys(aiTurn.providerContexts).length > 0;
+      const result = {
+        batchOutputs: aiTurn?.batchResponses || {},
+        synthesisOutputs: aiTurn?.synthesisResponses || {},
+        mappingOutputs: aiTurn?.mappingResponses || {}
+      };
+      // Determine primitive type based on session state
+      let requestType = 'extend';
+      try {
+        const s = await this.adapter.get('sessions', sessionId);
+        if (!s || !s.lastTurnId) requestType = 'initialize';
+      } catch (_) {
+        requestType = 'initialize';
+      }
+
+      if (hasNewContexts) {
+        console.log('[SessionManager] saveTurn: Detected new format, routing to persist()');
+        const request = { type: requestType, sessionId, userMessage: userTurn?.text || '' };
+        let context = null;
+        if (requestType === 'extend') {
+          // Resolve lastTurnId from persistence if possible
+          let lastTurnId = null;
+          try {
+            const allTurns = await this.adapter.getAll('turns');
+            const turns = allTurns
+              .filter(t => t.sessionId === sessionId)
+              .sort((a,b) => (a.sequence ?? a.createdAt) - (b.sequence ?? b.createdAt));
+            const latestAi = [...turns].reverse().find(t => (t.type === 'ai' || t.role === 'assistant'));
+            lastTurnId = latestAi?.id || null;
+          } catch (_) {}
+          context = { type: 'extend', sessionId, lastTurnId, providerContexts: aiTurn.providerContexts };
+        } else {
+          context = { type: 'initialize', providers: Object.keys(result.batchOutputs || {}) };
+        }
+        return await this.persist(request, context, result);
+      }
+
+      // Fall back to legacy method
+      console.log('[SessionManager] saveTurn: Using legacy persistence path');
+      return this.saveTurnWithPersistence(sessionId, userTurn, aiTurn);
+    } catch (e) {
+      console.warn('[SessionManager] saveTurn routing failed, falling back:', e);
+      return this.saveTurnWithPersistence(sessionId, userTurn, aiTurn);
+    }
   }
 
 
@@ -880,6 +1257,7 @@ export class SessionManager {
    * Persist a complete user+AI turn and all provider responses
    */
   async saveTurnWithPersistence(sessionId, userTurn, aiTurn) {
+    console.warn('[SessionManager] DEPRECATED: saveTurnWithPersistence() called. Migrate to persist().');
     try {
       // Ensure session exists and is hydrated into legacy cache
       const session = await this.getOrCreateSession(sessionId);
