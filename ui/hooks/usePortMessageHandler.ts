@@ -16,7 +16,7 @@ import {
 } from '../state/atoms';
 import { activeRecomputeStateAtom } from '../state/atoms';
 import { StreamingBuffer } from '../utils/streamingBuffer';
-import { applyStreamingUpdates, applyCompletionUpdate, createOptimisticAiTurn } from '../utils/turn-helpers';
+import { applyStreamingUpdates, createOptimisticAiTurn } from '../utils/turn-helpers';
 import api from '../services/extension-api';
 import type { TurnMessage, UserTurn, AiTurn, ProviderKey } from '../types';
 import { LLM_PROVIDERS_CONFIG } from '../constants';
@@ -309,16 +309,6 @@ export function usePortMessageHandler() {
               status: data?.status
             });
 
-            setTurnsMap((draft: Map<string, TurnMessage>) => {
-              const existing = draft.get(targetId);
-              if (!existing || existing.type !== 'ai') {
-                console.warn(`[Port] No AI turn found for completion: ${targetId}`);
-                return;
-              }
-              const aiTurn = existing as AiTurn;
-              // Apply completion using helper with correct routing
-              applyCompletionUpdate(aiTurn, providerId, data, stepType);
-            });
           });
 
           // Clear recompute targeting after successful completion (only for recompute flows)

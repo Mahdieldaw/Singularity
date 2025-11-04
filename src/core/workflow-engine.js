@@ -163,20 +163,22 @@ function makeDelta(sessionId, providerId, fullText = "") {
 
 // CASE 4: Text got shorter - smart detection with warnings instead of errors
 if (fullText.length < prev.length) {
-  const regression = prev.length - fullText.length;
-  const regressionPercent = (regression / prev.length) * 100;
-  
-  // ✅ Tighten thresholds: allow up to 500 chars OR 10% (tunes for LLM edits)
-  const isSmallRegression = regression <= 500 || regressionPercent <= 10;
-  
-  if (isSmallRegression) {
-    logger.stream(`Acceptable regression for ${providerId}:`, { 
-      chars: regression, 
-      percent: regressionPercent.toFixed(1) + '%' 
-    });
-    lastStreamState.set(key, fullText);
-    return "";
-  }
+    const regression = prev.length - fullText.length;
+    
+    // Calculate regression percentage
+    const regressionPercent = (regression / prev.length) * 100;
+    
+    // ✅ Allow small absolute regressions OR small percentage regressions
+    const isSmallRegression = regression <= 200 || regressionPercent <= 5;
+    
+    if (isSmallRegression) {
+      logger.stream(`Acceptable regression for ${providerId}:`, { 
+        chars: regression, 
+        percent: regressionPercent.toFixed(1) + '%' 
+      });
+      lastStreamState.set(key, fullText);
+      return "";
+    }
   
   // Flag & throttle: only warn if DEBUG_STREAMING=true, or log once per provider/session
   if (process.env.DEBUG_STREAMING === 'true') {  // Or your global DEBUG_WORKFLOW
@@ -252,7 +254,7 @@ export class WorkflowEngine {
     this._lastFinalizedTurn = null;
   }
 
-  async execute(request) {
+  async execute(request, resolvedContext) {
     const { context, steps } = request;
     const stepResults = new Map();
     // In-memory per-workflow cache of provider contexts created by batch steps
@@ -273,9 +275,36 @@ export class WorkflowEngine {
     }
 
     try {
+      // ========================================================================
+      // NEW: Seed frozen outputs for recompute
+      // ========================================================================
+      if (resolvedContext && resolvedContext.type === 'recompute') {
+        console.log('[WorkflowEngine] Seeding frozen batch outputs for recompute');
+        try {
+          // Seed a synthetic batch step result so downstream mapping/synthesis can reference it
+          stepResults.set('batch', {
+            status: 'completed',
+            result: { results: resolvedContext.frozenBatchOutputs }
+          });
+        } catch (e) {
+          console.warn('[WorkflowEngine] Failed to seed frozen batch outputs:', e);
+        }
+
+        // Cache historical contexts for providers at the source turn
+        try {
+          Object.entries(resolvedContext.providerContextsAtSourceTurn || {}).forEach(([pid, ctx]) => {
+            if (ctx && typeof ctx === 'object') {
+              workflowContexts[pid] = ctx;
+            }
+          });
+        } catch (e) {
+          console.warn('[WorkflowEngine] Failed to cache historical provider contexts:', e);
+        }
+      }
+
       const promptSteps = steps.filter(step => step.type === 'prompt');
-    const synthesisSteps = steps.filter(step => step.type === 'synthesis');
-    const mappingSteps = steps.filter(step => step.type === 'mapping');
+      const synthesisSteps = steps.filter(step => step.type === 'synthesis');
+      const mappingSteps = steps.filter(step => step.type === 'mapping');
 
         // 1. Execute all batch prompt steps first, as they are dependencies.
     for (const step of promptSteps) {
@@ -309,7 +338,7 @@ export class WorkflowEngine {
         // 2. Execute mapping steps first (they must complete before synthesis)
     for (const step of mappingSteps) {
         try {
-            const result = await this.executeMappingStep(step, context, stepResults, workflowContexts);
+            const result = await this.executeMappingStep(step, context, stepResults, workflowContexts, resolvedContext);
             stepResults.set(step.stepId, { status: 'completed', result });
             this.port.postMessage({ type: 'WORKFLOW_STEP_UPDATE', sessionId: context.sessionId, stepId: step.stepId, status: 'completed', result });
         } catch (error) {
@@ -323,7 +352,7 @@ export class WorkflowEngine {
         // 3. Execute synthesis steps (now they can access completed mapping results)
     for (const step of synthesisSteps) {
         try {
-            const result = await this.executeSynthesisStep(step, context, stepResults, workflowContexts);
+            const result = await this.executeSynthesisStep(step, context, stepResults, workflowContexts, resolvedContext);
             stepResults.set(step.stepId, { status: 'completed', result });
             this.port.postMessage({ type: 'WORKFLOW_STEP_UPDATE', sessionId: context.sessionId, stepId: step.stepId, status: 'completed', result });
         } catch (error) {
@@ -790,7 +819,7 @@ export class WorkflowEngine {
    * 2. Batch step context (medium priority)
    * 3. Persisted context (fallback)
    */
-  _resolveProviderContext(providerId, context, payload, workflowContexts, previousResults, stepType = 'step') {
+  _resolveProviderContext(providerId, context, payload, workflowContexts, previousResults, resolvedContext, stepType = 'step') {
     const providerContexts = {};
 
     // Tier 1: Prefer workflow cache context produced within this workflow run
@@ -803,6 +832,21 @@ export class WorkflowEngine {
         console.log(`[WorkflowEngine] ${stepType} using workflow-cached context for ${providerId}: ${Object.keys(workflowContexts[providerId]).join(',')}`);
       } catch (_) {}
       return providerContexts;
+    }
+
+    // Tier 2: ResolvedContext (for recompute - historical contexts)
+    if (resolvedContext && resolvedContext.type === 'recompute') {
+      const historicalContext = resolvedContext.providerContextsAtSourceTurn?.[providerId];
+      if (historicalContext) {
+        providerContexts[providerId] = {
+          meta: historicalContext,
+          continueThread: true
+        };
+        try {
+          console.log(`[WorkflowEngine] ${stepType} using historical context from ResolvedContext for ${providerId}`);
+        } catch (_) {}
+        return providerContexts;
+      }
     }
 
     // Tier 2: Fallback to batch step context for backwards compatibility
@@ -1087,7 +1131,7 @@ export class WorkflowEngine {
   /**
    * Execute synthesis step - FIXED error messages
    */
-  async executeSynthesisStep(step, context, previousResults, workflowContexts = {}) {
+  async executeSynthesisStep(step, context, previousResults, workflowContexts = {}, resolvedContext) {
     const payload = step.payload;
     const sourceData = await this.resolveSourceData(payload, context, previousResults);
     
@@ -1234,6 +1278,7 @@ export class WorkflowEngine {
       payload, 
       workflowContexts, 
       previousResults, 
+      resolvedContext,
       'Synthesis'
     );
 
@@ -1310,7 +1355,7 @@ export class WorkflowEngine {
   /**
    * Execute mapping step - FIXED
    */
-  async executeMappingStep(step, context, previousResults, workflowContexts = {}) {
+  async executeMappingStep(step, context, previousResults, workflowContexts = {}, resolvedContext) {
     const payload = step.payload;
     const sourceData = await this.resolveSourceData(payload, context, previousResults);
     
@@ -1330,6 +1375,7 @@ export class WorkflowEngine {
       payload, 
       workflowContexts, 
       previousResults, 
+      resolvedContext,
       'Mapping'
     );
 

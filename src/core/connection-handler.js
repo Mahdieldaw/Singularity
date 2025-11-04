@@ -199,28 +199,7 @@ export class ConnectionHandler {
     let executeRequest = message.payload;
     let resolvedContext = null;
 
-    // Support new three-primitive union: initialize | extend | recompute
-    // If a primitive request is detected, adapt it into the legacy
-    // ExecuteWorkflowRequest shape expected by the existing compiler/engine.
-    if (executeRequest && typeof executeRequest.type === 'string' && (
-      executeRequest.type === 'initialize' ||
-      executeRequest.type === 'extend' ||
-      executeRequest.type === 'recompute'
-    )) {
-      // Phase 2: Resolve → Compile → Execute
-      try {
-        resolvedContext = await this.services.contextResolver.resolve(message.payload);
-      } catch (e) {
-        console.error('[ConnectionHandler] ContextResolver failed:', e);
-      }
-
-      executeRequest = await this._mapPrimitiveToLegacy(executeRequest).catch((e) => {
-        console.error('[ConnectionHandler] Failed to map primitive request:', e);
-        return message.payload; // fallback to raw payload
-      });
-    }
-
-    // Record activity for lifecycle manager when workflows are executed
+    // Record activity
     try {
       if (this.lifecycleManager && typeof this.lifecycleManager.recordActivity === 'function') {
         this.lifecycleManager.recordActivity();
@@ -228,111 +207,130 @@ export class ConnectionHandler {
     } catch (e) { }
 
     try {
-      // Activate lifecycle manager before workflow
       this.lifecycleManager?.activateWorkflowMode();
 
-      // Phase 2 flow: Resolve → Compile → Execute
-      // When resolvedContext is present (i.e., UI sent primitives), skip legacy hydration and prechecks
-      if (!resolvedContext) {
-        // Auto-relocate sessionId if needed (after reconnects or UI drift)
+      // ========================================================================
+      // PHASE 3: Always use primitive-based flow
+      // ========================================================================
+      const isPrimitive = executeRequest && typeof executeRequest.type === 'string' && ['initialize', 'extend', 'recompute'].includes(executeRequest.type);
+
+      if (isPrimitive) {
+        // Phase 3 path: Resolve → Compile → Execute
+        console.log(`[ConnectionHandler] Processing ${executeRequest.type} primitive`);
+
+        // Step 1: Resolve context
+        try {
+          resolvedContext = await this.services.contextResolver.resolve(executeRequest);
+          console.log(`[ConnectionHandler] Context resolved: ${resolvedContext.type}`);
+        } catch (e) {
+          console.error('[ConnectionHandler] Context resolution failed:', e);
+          throw e;
+        }
+
+        // Step 2: Map primitive to legacy request format
+        try {
+          executeRequest = await this._mapPrimitiveToLegacy(executeRequest);
+        } catch (e) {
+          console.error('[ConnectionHandler] Failed to map primitive request:', e);
+          throw e;
+        }
+      } else {
+        // Legacy path: Fall back to hydration (Phase 4 will remove this)
+        console.warn('[ConnectionHandler] Legacy request detected - using hydration path');
+
         await this._relocateSessionId(executeRequest);
-
-        // CRITICAL: Aggressive session hydration for continuation/historical requests
         await this._ensureSessionHydration(executeRequest);
-
-        // Step 1: Normalize per-provider modes (allows new providers to start fresh)
         this._normalizeProviderModesForContinuation(executeRequest);
 
-        // Step 2: Validate that providers explicitly marked for continuation have context
         const precheck = this._precheckContinuation(executeRequest);
-        if (
-          precheck &&
-          precheck.missingProviders &&
-          precheck.missingProviders.length > 0
-        ) {
-          this._emitContinuationPrecheckFailure(
-            executeRequest,
-            precheck.missingProviders
-          );
+        if (precheck && precheck.missingProviders && precheck.missingProviders.length > 0) {
+          this._emitContinuationPrecheckFailure(executeRequest, precheck.missingProviders);
           return;
         }
       }
 
-      // --- NEW: Validate presence of userTurnId for historical-only runs ---
+      // ========================================================================
+      // Validation
+      // ========================================================================
       const histUserTurnId = executeRequest?.historicalContext?.userTurnId;
       const userTurnId = executeRequest?.userTurnId || histUserTurnId;
       const hasBatch = Array.isArray(executeRequest?.providers) && executeRequest.providers.length > 0;
-      const hasSynthesis = !!(executeRequest?.synthesis?.enabled && Array.isArray(executeRequest?.synthesis?.providers) && executeRequest.synthesis.providers.length > 0);
-      const hasMapping = !!(executeRequest?.mapping?.enabled && Array.isArray(executeRequest?.mapping?.providers) && executeRequest.mapping.providers.length > 0);
+      const hasSynthesis = !!(executeRequest?.synthesis?.enabled && executeRequest.synthesis.providers?.length > 0);
+      const hasMapping = !!(executeRequest?.mapping?.enabled && executeRequest.mapping.providers?.length > 0);
 
-      // Only fail if the request is mapping/synthesis-only (no batch providers)
-      // AND no historical userTurnId was provided. New chats or batch prompts don't need a userTurnId.
       if (!hasBatch && (hasSynthesis || hasMapping) && !userTurnId) {
-        console.error("[Backend] Missing userTurnId in historical-only request");
-        try {
-          this.port.postMessage({
-            type: "WORKFLOW_STEP_UPDATE",
-            sessionId: executeRequest?.sessionId || "unknown",
-            stepId: "validate-user-turn",
-            status: "failed",
-            errorCode: "missing-user-turn-id",
-            error: "Missing userTurnId. Historical runs require a canonical user turn reference.",
-          });
-        } catch (_) {}
-        try {
-          this.port.postMessage({
-            type: "WORKFLOW_COMPLETE",
-            sessionId: executeRequest?.sessionId || "unknown",
-          });
-        } catch (_) {}
+        console.error('[ConnectionHandler] Missing userTurnId in historical-only request');
+        this.port.postMessage({
+          type: 'WORKFLOW_STEP_UPDATE',
+          sessionId: executeRequest?.sessionId || 'unknown',
+          stepId: 'validate-user-turn',
+          status: 'failed',
+          error: 'Missing userTurnId for historical run'
+        });
+        this.port.postMessage({
+          type: 'WORKFLOW_COMPLETE',
+          sessionId: executeRequest?.sessionId || 'unknown'
+        });
         return;
       }
 
-      // --- NEW: Pre-generate sessionId for new conversations if missing/empty ---
-      try {
-        const sid = executeRequest?.sessionId;
-        if (!sid || sid === "") {
-          executeRequest.sessionId = `session-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-          console.log("[Backend] Generated new session ID:", executeRequest.sessionId);
-        }
-      } catch (e) {
-        console.warn("[Backend] SessionId pre-generation failed, will rely on compiler:", e);
+      // Generate session ID if needed
+      if (!executeRequest?.sessionId || executeRequest.sessionId === '') {
+        executeRequest.sessionId = `session-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        console.log('[ConnectionHandler] Generated session ID:', executeRequest.sessionId);
       }
 
-      // Compile high-level request to detailed workflow (pass resolvedContext when available)
+      // ========================================================================
+      // Compile
+      // ========================================================================
       const workflowRequest = this.services.compiler.compile(executeRequest, resolvedContext);
 
-      // Decide if this workflow creates a NEW turn (batch prompt present) or
-      // appends results to an existing historical turn (mapping/synthesis-only)
+      // ========================================================================
+      // TURN_CREATED message
+      // ========================================================================
       const createsNewTurn = hasBatch;
-
       if (createsNewTurn) {
-        // Generate canonical AI turn ID and attach canonical IDs to context
         const aiTurnId = `ai-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
         workflowRequest.context = {
           ...workflowRequest.context,
-          // Prefer client-provided provisional id if present in request
           canonicalUserTurnId: userTurnId,
-          canonicalAiTurnId: aiTurnId,
+          canonicalAiTurnId: aiTurnId
         };
 
-        // Send immediate TURN_CREATED acknowledgment before starting workflow
         try {
           this.port.postMessage({
-            type: "TURN_CREATED",
-            sessionId: workflowRequest?.context?.sessionId || executeRequest?.sessionId,
+            type: 'TURN_CREATED',
+            sessionId: workflowRequest.context.sessionId || executeRequest.sessionId,
             userTurnId,
-            aiTurnId,
+            aiTurnId
           });
         } catch (_) {}
-      } else {
-        console.log('[ConnectionHandler] Historical-only run: skipping TURN_CREATED');
       }
 
-      // Execute via engine
-      await this.workflowEngine.execute(workflowRequest);
+      // ========================================================================
+      // Execute
+      // ========================================================================
+      await this.workflowEngine.execute(workflowRequest, resolvedContext);
+
+    } catch (error) {
+      console.error('[ConnectionHandler] Workflow failed:', error);
+      try {
+        this.port.postMessage({
+          type: 'WORKFLOW_STEP_UPDATE',
+          sessionId: executeRequest?.sessionId || 'unknown',
+          stepId: 'handler-error',
+          status: 'failed',
+          error: error.message || String(error)
+        });
+        this.port.postMessage({
+          type: 'WORKFLOW_COMPLETE',
+          sessionId: executeRequest?.sessionId || 'unknown',
+          error: error.message || String(error)
+        });
+      } catch (e) {
+        console.error('[ConnectionHandler] Failed to send error message:', e);
+      }
     } finally {
-      // Deactivate lifecycle manager after workflow
       this.lifecycleManager?.deactivateWorkflowMode();
     }
   }

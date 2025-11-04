@@ -1,86 +1,402 @@
-The Goal: Achieving Surgical Precision for Recompute UI
+# Phase 3 Completion:  Context-Aware Engine
 
-  Right now, our recompute feature has two UI bugs that create a confusing experience:
+## 1. compiler done
 
-   1. When a recompute finishes, the result doesn't appear until the page is
-      refreshed.
-   2. When a recompute starts, all the mapping and synthesis boxes in that turn
-      incorrectly show a "generating" state, not just the one being worked on.
+**File: `src/core/compiler.js`** (already done)
+---
 
-  We are going to fix both issues by implementing a smarter, more precise real-time
-  update flow. The goal is that when a user clicks to recompute a single box, only
-  that box shows a loading state, and the result appears in that same box the moment
-  it's ready, without affecting any other part of the UI.
+## 2. WorkflowEngine (Context-Aware)
 
-  Here is how we will accomplish this, from click to final result:
+**File: `src/core/workflow-engine.js`**
 
-  Step 1: Create a Specific "Target" for the Loading State
+**Critical Changes from Doc 25:**
+1. Add `resolvedContext` parameter to `execute()`
+2. Seed frozen outputs for recompute
+3. Update context resolution to use `resolvedContext`
 
-  First, we need to stop using a generic, global "loading" flag. We will create a new,
-   highly specific state atom that knows exactly what is being recomputed.
+**PATCH for existing file** (apply to Doc 25):
 
-  In our state file (ui/state/atoms.ts), we will add a new atom called
-  activeRecomputeStateAtom. This atom will hold an object that describes the exact
-  task in progress—which turn it's for, whether it's a 'synthesis' or 'mapping' step,
-  and which provider is running—or it will be null if no recompute is happening.
+```javascript
+// At line ~480, UPDATE execute() signature:
+async execute(request, resolvedContext) {  // ← ADD resolvedContext parameter
+  const { context, steps } = request;
+  const stepResults = new Map();
+  const workflowContexts = {};
 
-  Step 2: "Aim" the Target When the User Clicks
+  this.currentUserMessage = context?.userMessage || this.currentUserMessage || '';
 
-  Next, when the user initiates the recompute, we'll immediately set this new state.
+  if (!context.sessionId || context.sessionId === 'new-session') {
+    context.sessionId = context.sessionId && context.sessionId !== 'new-session'
+      ? context.sessionId
+      : `sid-${Date.now()}`;
+  }
 
-  In the hook that handles the user's click when the
-  runSynthesisForRound (or mapping) function is called, we will now do two things in
-  order:
-   1. Set the activeRecomputeStateAtom with the details of the job: the sourceTurnId,
-      the stepType, and the targetProvider.
-   2. Then, send the RecomputeRequest message to the backend as usual.
+  try {
+    // ========================================================================
+    // NEW: Seed frozen outputs for recompute
+    // ========================================================================
+    if (resolvedContext && resolvedContext.type === 'recompute') {
+      console.log('[WorkflowEngine] Seeding frozen batch outputs for recompute');
+      stepResults.set('batch', { 
+        status: 'completed', 
+        result: { results: resolvedContext.frozenBatchOutputs } 
+      });
+      
+      // Cache historical contexts
+      Object.entries(resolvedContext.providerContextsAtSourceTurn || {}).forEach(([pid, ctx]) => {
+        workflowContexts[pid] = ctx;
+      });
+    }
+    
+    // ========================================================================
+    // Execute steps (rest unchanged)
+    // ========================================================================
+    const promptSteps = steps.filter(step => step.type === 'prompt');
+    const synthesisSteps = steps.filter(step => step.type === 'synthesis');
+    const mappingSteps = steps.filter(step => step.type === 'mapping');
 
-  This action is like "aiming" our loading state at a specific target on the screen
-  the moment the user clicks the button.
+    // ... rest of execution logic unchanged ...
+  }
+}
+```
 
-  Step 3: Teach Each Box to Recognize if It's the Target
+**At line ~890, UPDATE _resolveProviderContext() to use resolvedContext:**
 
-  This is how we'll solve the "all boxes are generating" bug. We will make each
-  individual result box component "self-aware."
+```javascript
+_resolveProviderContext(providerId, context, payload, workflowContexts, previousResults, resolvedContext, stepType = 'step') {
+  const providerContexts = {};
 
-  The component that renders a single result box
-   will now read the
-  activeRecomputeStateAtom. It will then compare the contents of that atom to its own
-  identity (the props it receives, like its turn.id, stepType, and providerId).
+  // Tier 1: Workflow cache
+  if (workflowContexts && workflowContexts[providerId]) {
+    providerContexts[providerId] = {
+      meta: workflowContexts[providerId],
+      continueThread: true
+    };
+    console.log(`[WorkflowEngine] ${stepType} using workflow-cached context for ${providerId}`);
+    return providerContexts;
+  }
 
-  The component's logic will be simple: "If the details in the
-  activeRecomputeStateAtom perfectly match my own identity, then I am the one being
-  recomputed, and I will show a loading spinner. If they don't match, I will do
-  nothing and continue to display my current, 'frozen' content."
+  // Tier 2: ResolvedContext (for recompute - historical contexts)
+  if (resolvedContext && resolvedContext.type === 'recompute') {
+    const historicalContext = resolvedContext.providerContextsAtSourceTurn?.[providerId];
+    if (historicalContext) {
+      providerContexts[providerId] = {
+        meta: historicalContext,
+        continueThread: true
+      };
+      console.log(`[WorkflowEngine] ${stepType} using historical context from ResolvedContext for ${providerId}`);
+      return providerContexts;
+    }
+  }
 
-  This ensures that only the single, targeted box ever enters a loading state.
+  // Tier 3: Batch step context
+  if (payload.continueFromBatchStep) {
+    const batchResult = previousResults.get(payload.continueFromBatchStep);
+    if (batchResult?.status === 'completed' && batchResult.result?.results) {
+      const providerResult = batchResult.result.results[providerId];
+      if (providerResult?.meta) {
+        providerContexts[providerId] = {
+          meta: providerResult.meta,
+          continueThread: true
+        };
+        console.log(`[WorkflowEngine] ${stepType} using batch step context for ${providerId}`);
+        return providerContexts;
+      }
+    }
+  }
 
-  Step 4: Add the Missing "Address" to the Backend's Response
+  // Tier 4: Persisted context (last resort)
+  try {
+    const persisted = this.sessionManager.getProviderContexts(context.sessionId, context.threadId || 'default-thread');
+    const persistedMeta = persisted?.[providerId]?.meta;
+    if (persistedMeta && Object.keys(persistedMeta).length > 0) {
+      providerContexts[providerId] = {
+        meta: persistedMeta,
+        continueThread: true
+      };
+      console.log(`[WorkflowEngine] ${stepType} using persisted context for ${providerId}`);
+      return providerContexts;
+    }
+  } catch (_) {}
 
-  To solve the "result doesn't appear until refresh" bug, the backend's response needs
-   to include the "return address" for the result.
+  return providerContexts;
+}
+```
 
-  In the WorkflowEngine, when a recompute step finishes, we will modify the
-  WORKFLOW_STEP_UPDATE message it sends back to the UI. We will add two new properties
-   to this message: isRecompute: true and, most importantly, sourceTurnId. This
-  sourceTurnId tells the UI exactly which historical turn this new result belongs to.
+**At line ~1120, UPDATE executeSynthesisStep() signature:**
 
-  Step 5: Deliver the Result to the Correct "Address"
+```javascript
+async executeSynthesisStep(step, context, previousResults, workflowContexts = {}, resolvedContext) {  // ← ADD parameter
+  const payload = step.payload;
+  const sourceData = await this.resolveSourceData(payload, context, previousResults);
+  
+  // ... existing logic ...
 
-  Finally, we'll teach the UI's message handler how to read this new, smarter message.
+  // UPDATE context resolution call:
+  const providerContexts = this._resolveProviderContext(
+    payload.synthesisProvider, 
+    context, 
+    payload, 
+    workflowContexts, 
+    previousResults,
+    resolvedContext,  // ← PASS resolvedContext
+    'Synthesis'
+  );
 
-  In ui/hooks/usePortMessageHandler.ts, when a WORKFLOW_STEP_UPDATE message arrives,
-  it will first check if message.isRecompute is true.
+  // ... rest unchanged ...
+}
+```
 
-  If it is, instead of looking for a generic "active" turn, it will use the
-  message.sourceTurnId to find the exact historical turn in its state map. It will
-  then update that specific turn's mappingResponses or synthesisResponses with the new
-   result from the message.
+**At line ~1200, UPDATE executeMappingStep() signature:**
 
-  After it has successfully delivered the result to the correct turn, it will perform
-  one final action: it will reset the activeRecomputeStateAtom back to null. This
-  tells the UI that the recompute task is finished, which in turn causes the loading
-  spinner on the targeted box to disappear, revealing the new content.
+```javascript
+async executeMappingStep(step, context, previousResults, workflowContexts = {}, resolvedContext) {  // ← ADD parameter
+  const payload = step.payload;
+  const sourceData = await this.resolveSourceData(payload, context, previousResults);
+  
+  // ... existing logic ...
 
-  By implementing this full flow, we create a seamless and intuitive experience that
-  perfectly aligns with our new, precise backend architecture.
+  // UPDATE context resolution call:
+  const providerContexts = this._resolveProviderContext(
+    payload.mappingProvider, 
+    context, 
+    payload, 
+    workflowContexts, 
+    previousResults,
+    resolvedContext,  // ← PASS resolvedContext
+    'Mapping'
+  );
+
+  // ... rest unchanged ...
+}
+```
+
+**At line ~530, UPDATE step executor calls:**
+
+```javascript
+// In execute(), update mapping loop:
+for (const step of mappingSteps) {
+  try {
+    const result = await this.executeMappingStep(step, context, stepResults, workflowContexts, resolvedContext);  // ← ADD resolvedContext
+    // ... rest unchanged ...
+  }
+}
+
+// Update synthesis loop:
+for (const step of synthesisSteps) {
+  try {
+    const result = await this.executeSynthesisStep(step, context, stepResults, workflowContexts, resolvedContext);  // ← ADD resolvedContext
+    // ... rest unchanged ...
+  }
+}
+```
+
+---
+
+## 3. ConnectionHandler (Cleaned)
+
+**File: `src/core/connection-handler.js`**
+
+Replace Doc 23's `_handleExecuteWorkflow` method:
+
+```javascript
+async _handleExecuteWorkflow(message) {
+  let executeRequest = message.payload;
+  let resolvedContext = null;
+
+  // Record activity
+  try {
+    if (this.lifecycleManager && typeof this.lifecycleManager.recordActivity === 'function') {
+      this.lifecycleManager.recordActivity();
+    }
+  } catch (e) { }
+
+  try {
+    this.lifecycleManager?.activateWorkflowMode();
+
+    // ========================================================================
+    // PHASE 3: Always use primitive-based flow
+    // ========================================================================
+    
+    // Detect primitives
+    const isPrimitive = executeRequest && 
+      typeof executeRequest.type === 'string' && 
+      ['initialize', 'extend', 'recompute'].includes(executeRequest.type);
+
+    if (isPrimitive) {
+      // Phase 3 path: Resolve → Compile → Execute
+      console.log(`[ConnectionHandler] Processing ${executeRequest.type} primitive`);
+
+      // Step 1: Resolve context
+      try {
+        resolvedContext = await this.services.contextResolver.resolve(executeRequest);
+        console.log(`[ConnectionHandler] Context resolved: ${resolvedContext.type}`);
+      } catch (e) {
+        console.error('[ConnectionHandler] Context resolution failed:', e);
+        throw e;
+      }
+
+      // Step 2: Map primitive to legacy request format
+      executeRequest = await this._mapPrimitiveToLegacy(executeRequest);
+    } else {
+      // Legacy path: Fall back to hydration (Phase 4 will remove this)
+      console.warn('[ConnectionHandler] Legacy request detected - using hydration path');
+      
+      await this._relocateSessionId(executeRequest);
+      await this._ensureSessionHydration(executeRequest);
+      this._normalizeProviderModesForContinuation(executeRequest);
+      
+      const precheck = this._precheckContinuation(executeRequest);
+      if (precheck && precheck.missingProviders && precheck.missingProviders.length > 0) {
+        this._emitContinuationPrecheckFailure(executeRequest, precheck.missingProviders);
+        return;
+      }
+    }
+
+    // ========================================================================
+    // Validation
+    // ========================================================================
+    const histUserTurnId = executeRequest?.historicalContext?.userTurnId;
+    const userTurnId = executeRequest?.userTurnId || histUserTurnId;
+    const hasBatch = Array.isArray(executeRequest?.providers) && executeRequest.providers.length > 0;
+    const hasSynthesis = !!(executeRequest?.synthesis?.enabled && executeRequest.synthesis.providers?.length > 0);
+    const hasMapping = !!(executeRequest?.mapping?.enabled && executeRequest.mapping.providers?.length > 0);
+
+    if (!hasBatch && (hasSynthesis || hasMapping) && !userTurnId) {
+      console.error('[ConnectionHandler] Missing userTurnId in historical-only request');
+      this.port.postMessage({
+        type: 'WORKFLOW_STEP_UPDATE',
+        sessionId: executeRequest?.sessionId || 'unknown',
+        stepId: 'validate-user-turn',
+        status: 'failed',
+        error: 'Missing userTurnId for historical run'
+      });
+      this.port.postMessage({
+        type: 'WORKFLOW_COMPLETE',
+        sessionId: executeRequest?.sessionId || 'unknown'
+      });
+      return;
+    }
+
+    // Generate session ID if needed
+    if (!executeRequest?.sessionId || executeRequest.sessionId === '') {
+      executeRequest.sessionId = `session-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      console.log('[ConnectionHandler] Generated session ID:', executeRequest.sessionId);
+    }
+
+    // ========================================================================
+    // Compile
+    // ========================================================================
+    const workflowRequest = this.services.compiler.compile(executeRequest, resolvedContext);
+
+    // ========================================================================
+    // TURN_CREATED message
+    // ========================================================================
+    const createsNewTurn = hasBatch;
+    if (createsNewTurn) {
+      const aiTurnId = `ai-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      workflowRequest.context = {
+        ...workflowRequest.context,
+        canonicalUserTurnId: userTurnId,
+        canonicalAiTurnId: aiTurnId
+      };
+
+      try {
+        this.port.postMessage({
+          type: 'TURN_CREATED',
+          sessionId: workflowRequest.context.sessionId || executeRequest.sessionId,
+          userTurnId,
+          aiTurnId
+        });
+      } catch (_) {}
+    }
+
+    // ========================================================================
+    // Execute
+    // ========================================================================
+    await this.workflowEngine.execute(workflowRequest, resolvedContext);
+
+  } catch (error) {
+    console.error('[ConnectionHandler] Workflow failed:', error);
+    
+    try {
+      this.port.postMessage({
+        type: 'WORKFLOW_STEP_UPDATE',
+        sessionId: executeRequest?.sessionId || 'unknown',
+        stepId: 'handler-error',
+        status: 'failed',
+        error: error.message || String(error)
+      });
+      
+      this.port.postMessage({
+        type: 'WORKFLOW_COMPLETE',
+        sessionId: executeRequest?.sessionId || 'unknown',
+        error: error.message || String(error)
+      });
+    } catch (e) {
+      console.error('[ConnectionHandler] Failed to send error message:', e);
+    }
+  } finally {
+    this.lifecycleManager?.deactivateWorkflowMode();
+  }
+}
+```
+
+**Keep all helper methods** (`_mapPrimitiveToLegacy`, `_ensureSessionHydration`, etc.) - they're used for legacy fallback until Phase 4.
+
+---
+
+## 4. Integration Checklist
+
+**After applying these changes:**
+
+```bash
+# 1. Verify compilation
+npm run build
+
+# 2. Test primitive flow
+# - Send InitializeRequest from UI
+# - Check logs for "[ConnectionHandler] Processing initialize primitive"
+# - Verify "[Compiler] Compiling initialize workflow"
+# - Verify "[WorkflowEngine] Seeding frozen batch outputs" (for recompute)
+
+# 3. Test legacy fallback
+# - Trigger old-style request (if any exist)
+# - Verify "[ConnectionHandler] Legacy request detected - using hydration path"
+
+# 4. Verify no regressions
+# - New chats work
+# - Continued chats work
+# - Historical reruns work
+```
+
+**Key Success Indicators:**
+- ✅ Compiler has ZERO `async` keywords
+- ✅ Compiler has ZERO `sessionManager` calls
+- ✅ Engine logs "Seeding frozen outputs" for recompute
+- ✅ Context resolution uses tier system (workflow → historical → batch → persisted)
+
+---
+
+## 5. What Remains (Phases 4-6)
+
+**Phase 4** (SessionManager refactor):
+- Implement `persist(request, context, result)` router
+- Add `_persistInitialize/Extend/Recompute` methods
+- Remove legacy session-level context support
+
+**Phase 5** (UI cleanup):
+- Already done by agent! ✅
+
+**Phase 6** (Polish):
+- Adapter unification (optional)
+- Complete migration script
+
+**Current architecture is now:**
+- ✅ Pure compiler (Phase 3 ✓)
+- ✅ Context-aware engine (Phase 3 ✓)
+- ✅ Primitive-based UI (Phase 2 ✓)
+- ⚠️ Hybrid ConnectionHandler (Phase 3 complete, legacy path remains for Phase 4)
+- ⚠️ SessionManager has turn-scoped persistence but needs full primitive-based refactor (Phase 4)
+
+You now have a **working Phase 3 implementation** that's ready for Phase 4's full SessionManager refactor.
