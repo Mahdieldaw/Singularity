@@ -154,6 +154,7 @@ interface AiTurnBlockProps {
   isLive?: boolean;
   isReducedMotion?: boolean;
   isLoading?: boolean;
+  activeRecomputeState?: { aiTurnId: string; stepType: 'synthesis' | 'mapping'; providerId: string } | null;
   currentAppStep?: AppStep;
   showSourceOutputs?: boolean;
   onToggleSourceOutputs?: () => void;
@@ -173,6 +174,7 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
   isLoading = false,
   isLive = false,
   currentAppStep,
+  activeRecomputeState = null,
   activeSynthesisClipProviderId,
   activeMappingClipProviderId,
   onClipClick,
@@ -248,6 +250,9 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
 
   const activeSynthPid = computeActiveProvider(activeSynthesisClipProviderId, synthesisResponses);
   const activeMappingPid = computeActiveProvider(activeMappingClipProviderId, mappingResponses);
+
+  const isSynthesisTarget = !!(activeRecomputeState && activeRecomputeState.aiTurnId === aiTurn.id && activeRecomputeState.stepType === 'synthesis' && (!activeSynthPid || activeRecomputeState.providerId === activeSynthPid));
+  const isMappingTarget = !!(activeRecomputeState && activeRecomputeState.aiTurnId === aiTurn.id && activeRecomputeState.stepType === 'mapping' && (!activeMappingPid || activeRecomputeState.providerId === activeMappingPid));
 
   const getSynthesisAndOptions = useCallback((take: ProviderResponse | undefined) => {
     if (!take?.text) return { synthesis: '', options: null };
@@ -340,25 +345,7 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
                   </button>
                 </div>
                 
-                {!hasSynthesis && (
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, height: '100%', color: '#94a3b8' }}>
-                    {(() => {
-                      const latest = activeSynthPid ? getLatestResponse(synthesisResponses[activeSynthPid]) : undefined;
-                      const isGenerating = (latest && (latest.status === 'streaming' || latest.status === 'pending')) || isLive || isLoading;
-                      if (isGenerating) {
-                        return (
-                          <>
-                            <span style={{ fontStyle: 'italic' }}>Synthesis generating</span>
-                            <span className="streaming-dots" />
-                          </>
-                        );
-                      }
-                      return <span style={{ fontStyle: 'italic', color: '#64748b' }}>No synthesis yet</span>;
-                    })()}
-                  </div>
-                )}
-                
-                {isSynthesisExpanded && hasSynthesis && (
+                {isSynthesisExpanded && (
                   <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, overflow: synthTruncated && !synthExpanded ? 'hidden' : 'visible' }}>
                     <div style={{ flexShrink: 0 }}>
                       <ClipsCarousel
@@ -366,6 +353,7 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
                         responsesMap={synthesisResponses}
                         activeProviderId={activeSynthPid}
                         onClipClick={(pid) => onClipClick?.('synthesis', pid)}
+                        type="synthesis"
                       />
                     </div>
 
@@ -411,16 +399,26 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
                         }
                       }}
                     >
-                      {activeSynthPid ? (
-                        (() => {
+                      {(() => {
+                        const latest = activeSynthPid ? getLatestResponse(synthesisResponses[activeSynthPid]) : undefined;
+                        const isGenerating = ((latest && (latest.status === 'streaming' || latest.status === 'pending'))) || isSynthesisTarget;
+                        if (isGenerating) {
+                          return (
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, color: '#94a3b8' }}>
+                              <span style={{ fontStyle: 'italic' }}>Synthesis generating</span>
+                              <span className="streaming-dots" />
+                            </div>
+                          );
+                        }
+                        if (activeSynthPid) {
                           const take = displayedSynthesisTake;
-                          if (!take) return <div style={{ color: '#64748b' }}>No synthesis yet for this model.</div>;
-
+                          if (!take) {
+                            return <div style={{ color: '#64748b' }}>No synthesis yet for this model.</div>;
+                          }
                           const handleCopy = async (e: React.MouseEvent) => {
                             e.stopPropagation();
                             try { await navigator.clipboard.writeText(displayedSynthesisText); } catch (err) { console.error('Copy failed', err); }
                           };
-
                           return (
                             <div>
                               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 8 }}>
@@ -434,10 +432,11 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
                               </div>
                             </div>
                           );
-                        })()
-                      ) : (
-                        <div style={{ color: '#64748b', display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontStyle: 'italic' }}>Choose a model to synthesize.</div>
-                      )}
+                        }
+                        return (
+                          <div style={{ color: '#64748b', display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontStyle: 'italic' }}>Choose a model to synthesize.</div>
+                        );
+                      })()}
                     </div>
 
                     {/* Expand button for truncated content */}
@@ -547,25 +546,7 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
                   </div>
                 </div>
                 
-                {!hasMapping && (
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, height: '100%', color: '#94a3b8' }}>
-                    {(() => {
-                      const latest = activeMappingPid ? getLatestResponse(mappingResponses[activeMappingPid]) : undefined;
-                      const isGenerating = (latest && (latest.status === 'streaming' || latest.status === 'pending')) || isLive || isLoading;
-                      if (isGenerating) {
-                        return (
-                          <>
-                            <span style={{ fontStyle: 'italic' }}>Conflict map generating</span>
-                            <span className="streaming-dots" />
-                          </>
-                        );
-                      }
-                      return <span style={{ fontStyle: 'italic', color: '#64748b' }}>No mapping yet</span>;
-                    })()}
-                  </div>
-                )}
-                
-                {isMappingExpanded && hasMapping && (
+                {isMappingExpanded && (
                   <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: mapTruncated && !mapExpanded ? 'hidden' : 'visible', minHeight: 0 }}>
                     {mappingTab === 'map' && (
                       <ClipsCarousel
@@ -573,6 +554,7 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
                         responsesMap={mappingResponses}
                         activeProviderId={activeMappingPid}
                         onClipClick={(pid) => onClipClick?.('mapping', pid)}
+                        type="mapping"
                       />
                     )}
                     
@@ -615,30 +597,43 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
                             </div>
                           );
                         })()
-                      ) : activeMappingPid ? (
+                      ) : (
                         (() => {
-                          const take = getLatestResponse(mappingResponses[activeMappingPid]);
-                          if (!take) return <div style={{ color: '#64748b' }}>No mapping yet for this model.</div>;
-                          const handleCopy = async (e: React.MouseEvent) => {
-                            e.stopPropagation();
-                            try { await navigator.clipboard.writeText(String(take.text || '')); } catch (err) { console.error('Copy failed', err); }
-                          };
+                          const latest = activeMappingPid ? getLatestResponse(mappingResponses[activeMappingPid]) : undefined;
+                          const isGenerating = ((latest && (latest.status === 'streaming' || latest.status === 'pending'))) || isMappingTarget;
+                          if (isGenerating) {
+                            return (
+                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, color: '#94a3b8' }}>
+                                <span style={{ fontStyle: 'italic' }}>Conflict map generating</span>
+                                <span className="streaming-dots" />
+                              </div>
+                            );
+                          }
+                          if (activeMappingPid) {
+                            const take = getLatestResponse(mappingResponses[activeMappingPid]);
+                            if (!take) return <div style={{ color: '#64748b' }}>No mapping yet for this model.</div>;
+                            const handleCopy = async (e: React.MouseEvent) => {
+                              e.stopPropagation();
+                              try { await navigator.clipboard.writeText(String(take.text || '')); } catch (err) { console.error('Copy failed', err); }
+                            };
+                            return (
+                              <div>
+                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 8 }}>
+                                  <div style={{ fontSize: 12, color: '#94a3b8' }}>{activeMappingPid} · {take.status}</div>
+                                  <button onClick={handleCopy} style={{ background: '#334155', border: '1px solid #475569', borderRadius: 6, padding: '4px 8px', color: '#94a3b8', fontSize: 12, cursor: 'pointer' }}>📋 Copy</button>
+                                </div>
+                                <div className="prose prose-sm max-w-none dark:prose-invert" style={{ lineHeight: 1.7, fontSize: 16 }}>
+                                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                                    {String(take.text || '')}
+                                  </ReactMarkdown>
+                                </div>
+                              </div>
+                            );
+                          }
                           return (
-                            <div>
-                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 8 }}>
-                                <div style={{ fontSize: 12, color: '#94a3b8' }}>{activeMappingPid} · {take.status}</div>
-                                <button onClick={handleCopy} style={{ background: '#334155', border: '1px solid #475569', borderRadius: 6, padding: '4px 8px', color: '#94a3b8', fontSize: 12, cursor: 'pointer' }}>📋 Copy</button>
-                              </div>
-                              <div className="prose prose-sm max-w-none dark:prose-invert" style={{ lineHeight: 1.7, fontSize: 16 }}>
-                                <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                                  {String(take.text || '')}
-                                </ReactMarkdown>
-                              </div>
-                            </div>
+                            <div style={{ color: '#64748b', display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontStyle: 'italic' }}>Choose a model to map.</div>
                           );
                         })()
-                      ) : (
-                        <div style={{ color: '#64748b', display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontStyle: 'italic' }}>Choose a model to map.</div>
                       )}
                     </div>
 

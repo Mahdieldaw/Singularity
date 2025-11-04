@@ -46,6 +46,7 @@ const HistoryPanel = ({ isOpen, sessions, isLoading, onNewChat, onSelectChat, on
     border: '1px solid rgba(255, 255, 255, 0.08)',
     background: 'rgba(255, 255, 255, 0.02)',
     color: '#e2e8f0',
+    fontSize: '15px',
     cursor: 'pointer',
     marginBottom: '8px',
     overflow: 'hidden',

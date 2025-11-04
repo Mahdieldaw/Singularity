@@ -14,6 +14,7 @@ import {
   mappingProviderAtom,
   synthesisProviderAtom
 } from '../state/atoms';
+import { activeRecomputeStateAtom } from '../state/atoms';
 import { StreamingBuffer } from '../utils/streamingBuffer';
 import { applyStreamingUpdates, applyCompletionUpdate, createOptimisticAiTurn } from '../utils/turn-helpers';
 import api from '../services/extension-api';
@@ -65,11 +66,18 @@ export function usePortMessageHandler() {
   
   const streamingBufferRef = useRef<StreamingBuffer | null>(null);
   const activeAiTurnIdRef = useRef<string | null>(null);
+  const activeRecomputeRef = useRef<{ aiTurnId: string; stepType: 'synthesis' | 'mapping'; providerId: string } | null>(null);
 
   // Keep ref in sync with atom
   useEffect(() => {
     activeAiTurnIdRef.current = activeAiTurnId;
   }, [activeAiTurnId]);
+
+  const activeRecomputeState = useAtomValue(activeRecomputeStateAtom);
+  const setActiveRecomputeState = useSetAtom(activeRecomputeStateAtom);
+  useEffect(() => {
+    activeRecomputeRef.current = activeRecomputeState;
+  }, [activeRecomputeState]);
 
   const handler = useCallback((message: any) => {
     if (!message || !message.type) return;
@@ -243,7 +251,7 @@ export function usePortMessageHandler() {
         // Initialize buffer if needed
         if (!streamingBufferRef.current) {
           streamingBufferRef.current = new StreamingBuffer((updates) => {
-            const activeId = activeAiTurnIdRef.current;
+            const activeId = activeRecomputeRef.current?.aiTurnId || activeAiTurnIdRef.current;
             if (!activeId || !updates || updates.length === 0) return;
 
             setTurnsMap((draft: Map<string, TurnMessage>) => {
@@ -292,8 +300,9 @@ export function usePortMessageHandler() {
           const resultsMap = result.results || (result.providerId ? { [result.providerId]: result } : {});
           
           Object.entries(resultsMap).forEach(([providerId, data]: [string, any]) => {
-            const activeId = activeAiTurnIdRef.current;
-            if (!activeId) return;
+            // Route recompute completions to the exact historical turn
+            const targetId = (message.isRecompute && message.sourceTurnId) ? message.sourceTurnId : activeAiTurnIdRef.current;
+            if (!targetId) return;
 
             console.log(`[Port] Completing ${stepType}/${providerId}:`, {
               textLength: data?.text?.length,
@@ -301,9 +310,9 @@ export function usePortMessageHandler() {
             });
 
             setTurnsMap((draft: Map<string, TurnMessage>) => {
-              const existing = draft.get(activeId);
+              const existing = draft.get(targetId);
               if (!existing || existing.type !== 'ai') {
-                console.warn(`[Port] No active AI turn found for completion: ${activeId}`);
+                console.warn(`[Port] No AI turn found for completion: ${targetId}`);
                 return;
               }
               const aiTurn = existing as AiTurn;
@@ -311,8 +320,17 @@ export function usePortMessageHandler() {
               applyCompletionUpdate(aiTurn, providerId, data, stepType);
             });
           });
+
+          // Clear recompute targeting after successful completion (only for recompute flows)
+          if (message.isRecompute) {
+            setActiveRecomputeState(null);
+          }
         } else if (status === 'failed') {
           console.error(`[Port] Step failed: ${stepId}`, error);
+          // On failure, clear recompute target so UI stops indicating loading
+          if (message.isRecompute) {
+            setActiveRecomputeState(null);
+          }
         }
         break;
       }

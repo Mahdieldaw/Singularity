@@ -115,6 +115,18 @@ export const isReducedMotionAtom = atomWithStorage<boolean>('htos_reduced_motion
 export const providerContextsAtom = atomWithImmer<Record<string, any>>({});
 
 // -----------------------------
+// Precise recompute targeting
+// -----------------------------
+export const activeRecomputeStateAtom = atom<
+  | {
+      aiTurnId: string;
+      stepType: 'synthesis' | 'mapping';
+      providerId: string;
+    }
+  | null
+>(null);
+
+// -----------------------------
 // Round-level selections
 // -----------------------------
 export const synthSelectionsByRoundAtom = atomWithImmer<Record<string, Record<string, boolean>>>({});

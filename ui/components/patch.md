@@ -1,121 +1,86 @@
-You're right, that's much cleaner! Here are just the diffs:
+The Goal: Achieving Surgical Precision for Recompute UI
 
-## Diff 1: Collapsed Unify Dropdown - Power User Mode (around line 280)
+  Right now, our recompute feature has two UI bugs that create a confusing experience:
 
-**REMOVE these lines:**
-```typescript
-const isDisabled = mapProviderId === provider.id; // Keep gating for multi-select
-```
-```typescript
-cursor: isDisabled ? 'not-allowed' : 'pointer',
-opacity: isDisabled ? 0.5 : 1,4
-```typescript
-if (isDisabled || isLoading) return;
-```
-```typescript
-disabled={isDisabled || isLoading}
-```
+   1. When a recompute finishes, the result doesn't appear until the page is
+      refreshed.
+   2. When a recompute starts, all the mapping and synthesis boxes in that turn
+      incorrectly show a "generating" state, not just the one being worked on.
 
-**ADD after `if (isLoading) return;`:**
-```typescript
-const clickedId = provider.id;
-// If selecting same as Map, auto-switch Map to fallback
-if (mapProviderId === clickedId && !isSelected) {
-  const selectedIds = LLM_PROVIDERS_CONFIG.map(p => p.id).filter(id => selectedModels[id]);
-  const prefer = clickedId === 'gemini' ? ['qwen'] : clickedId === 'qwen' ? ['gemini'] : ['qwen', 'gemini'];
-  let fallback: string | null = null;
-  for (const cand of prefer) {
-    if (cand !== clickedId && selectedIds.includes(cand)) { fallback = cand; break; }
-  }
-  if (!fallback) {
-    const anyOther = selectedIds.find(id => id !== clickedId) || null;
-    fallback = anyOther;
-  }
-  onSetMappingProvider?.(fallback);
-  try {
-    if (fallback) {
-      localStorage.setItem('htos_mapping_provider', fallback);
-    } else {
-      localStorage.removeItem('htos_mapping_provider');
-    }
-  } catch {}
-}
+  We are going to fix both issues by implementing a smarter, more precise real-time
+  update flow. The goal is that when a user clicks to recompute a single box, only
+  that box shows a loading state, and the result appears in that same box the moment
+  it's ready, without affecting any other part of the UI.
 
-onToggleSynthesisProvider?.(clickedId);
-```
+  Here is how we will accomplish this, from click to final result:
 
-**REPLACE:**
-```typescript
-!isLoading && onToggleSynthesisProvider?.(provider.id);
-```
+  Step 1: Create a Specific "Target" for the Loading State
 
----
+  First, we need to stop using a generic, global "loading" flag. We will create a new,
+   highly specific state atom that knows exactly what is being recomputed.
 
-## Diff 2: Collapsed Unify Dropdown - Single Select Mode (around line 340)
+  In our state file (ui/state/atoms.ts), we will add a new atom called
+  activeRecomputeStateAtom. This atom will hold an object that describes the exact
+  task in progress—which turn it's for, whether it's a 'synthesis' or 'mapping' step,
+  and which provider is running—or it will be null if no recompute is happening.
 
-**REMOVE these lines:**
-```typescript
-const isDisabled = mapProviderId === provider.id;
-```
-```typescript
-cursor: isDisabled ? 'not-allowed' : 'pointer',
-opacity: isDisabled ? 0.5 : 1,
-```
-```typescript
-onMouseEnter={(e) => {
-  if (!isDisabled) e.currentTarget.style.background = 'rgba(255,255,255,0.02)';
-}}
-```
+  Step 2: "Aim" the Target When the User Clicks
 
-**REPLACE with:**
-```typescript
-onMouseEnter={(e) => {
-  e.currentTarget.style.background = 'rgba(255,255,255,0.02)';
-}}
-```
+  Next, when the user initiates the recompute, we'll immediately set this new state.
 
----
+  In the hook that handles the user's click when the
+  runSynthesisForRound (or mapping) function is called, we will now do two things in
+  order:
+   1. Set the activeRecomputeStateAtom with the details of the job: the sourceTurnId,
+      the stepType, and the targetProvider.
+   2. Then, send the RecomputeRequest message to the backend as usual.
 
-## Diff 3: Expanded Unify Section - Power User Mode (around line 650)
+  This action is like "aiming" our loading state at a specific target on the screen
+  the moment the user clicks the button.
 
-**REMOVE this line:**
-```typescript
-.filter(p => mapProviderId !== p.id) // Exclude current map
-```
+  Step 3: Teach Each Box to Recognize if It's the Target
 
-**REPLACE:**
-```typescript
-onChange={() => !isLoading && onToggleSynthesisProvider?.(provider.id)}
-```
+  This is how we'll solve the "all boxes are generating" bug. We will make each
+  individual result box component "self-aware."
 
-**WITH:**
-```typescript
-onChange={() => {
-  if (isLoading) return;
-  const clickedId = provider.id;
-  // If selecting same as Map, auto-switch Map to fallback
-  if (mapProviderId === clickedId && !isSelected) {
-    const selectedIds = LLM_PROVIDERS_CONFIG.map(p => p.id).filter(id => selectedModels[id]);
-    const prefer = clickedId === 'gemini' ? ['qwen'] : clickedId === 'qwen' ? ['gemini'] : ['qwen', 'gemini'];
-    let fallback: string | null = null;
-    for (const cand of prefer) {
-      if (cand !== clickedId && selectedIds.includes(cand)) { fallback = cand; break; }
-    }
-    if (!fallback) {
-      const anyOther = selectedIds.find(id => id !== clickedId) || null;
-      fallback = anyOther;
-    }
-    onSetMappingProvider?.(fallback);
-    try {
-      if (fallback) {
-        localStorage.setItem('htos_mapping_provider', fallback);
-      } else {
-        localStorage.removeItem('htos_mapping_provider');
-      }
-    } catch {}
-  }
-  onToggleSynthesisProvider?.(clickedId);
-}}
-```
+  The component that renders a single result box
+   will now read the
+  activeRecomputeStateAtom. It will then compare the contents of that atom to its own
+  identity (the props it receives, like its turn.id, stepType, and providerId).
 
-That's it! These 3 sets of changes remove all the gating logic and add the smart auto-switching behavior.
+  The component's logic will be simple: "If the details in the
+  activeRecomputeStateAtom perfectly match my own identity, then I am the one being
+  recomputed, and I will show a loading spinner. If they don't match, I will do
+  nothing and continue to display my current, 'frozen' content."
+
+  This ensures that only the single, targeted box ever enters a loading state.
+
+  Step 4: Add the Missing "Address" to the Backend's Response
+
+  To solve the "result doesn't appear until refresh" bug, the backend's response needs
+   to include the "return address" for the result.
+
+  In the WorkflowEngine, when a recompute step finishes, we will modify the
+  WORKFLOW_STEP_UPDATE message it sends back to the UI. We will add two new properties
+   to this message: isRecompute: true and, most importantly, sourceTurnId. This
+  sourceTurnId tells the UI exactly which historical turn this new result belongs to.
+
+  Step 5: Deliver the Result to the Correct "Address"
+
+  Finally, we'll teach the UI's message handler how to read this new, smarter message.
+
+  In ui/hooks/usePortMessageHandler.ts, when a WORKFLOW_STEP_UPDATE message arrives,
+  it will first check if message.isRecompute is true.
+
+  If it is, instead of looking for a generic "active" turn, it will use the
+  message.sourceTurnId to find the exact historical turn in its state map. It will
+  then update that specific turn's mappingResponses or synthesisResponses with the new
+   result from the message.
+
+  After it has successfully delivered the result to the correct turn, it will perform
+  one final action: it will reset the activeRecomputeStateAtom back to null. This
+  tells the UI that the recompute task is finished, which in turn causes the loading
+  spinner on the targeted box to disappear, revealing the new content.
+
+  By implementing this full flow, we create a seamless and intuitive experience that
+  perfectly aligns with our new, precise backend architecture.

@@ -11,7 +11,8 @@ import {
   showSourceOutputsAtom, 
   activeClipsAtom, 
   activeAiTurnIdAtom, 
-  viewModeAtom 
+  viewModeAtom,
+  activeRecomputeStateAtom,
 } from '../state/atoms';
 import { useClipActions } from '../hooks/useClipActions';
 import { useEligibility } from '../hooks/useEligibility';
@@ -32,6 +33,7 @@ export default function AiTurnBlockConnected({ aiTurn }: AiTurnBlockConnectedPro
   const setViewMode = useSetAtom(viewModeAtom);
   const { handleClipClick } = useClipActions();
   const { eligibilityMaps } = useEligibility();
+  const [activeRecomputeState] = useAtom(activeRecomputeStateAtom);
 
   const isLive = !!activeAiTurnId && activeAiTurnId === aiTurn.id;
 
@@ -43,6 +45,7 @@ export default function AiTurnBlockConnected({ aiTurn }: AiTurnBlockConnectedPro
       isLive={isLive}
       isReducedMotion={isReducedMotion}
       isLoading={isLoading}
+      activeRecomputeState={activeRecomputeState}
       currentAppStep={currentAppStep}
       showSourceOutputs={showSourceOutputs}
       onToggleSourceOutputs={useCallback(() => setShowSourceOutputs(prev => !prev), [setShowSourceOutputs])}

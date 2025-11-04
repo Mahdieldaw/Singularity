@@ -15,6 +15,7 @@ import {
   activeAiTurnIdAtom,
   thinkSynthByRoundAtom,
   thinkMappingByRoundAtom,
+  activeRecomputeStateAtom,
 } from '../state/atoms';
 import api from '../services/extension-api';
 import { PRIMARY_STREAMING_PROVIDER_IDS } from '../constants';
@@ -36,6 +37,7 @@ export function useRoundActions() {
   const setActiveAiTurnId = useSetAtom(activeAiTurnIdAtom);
   const [thinkSynthByRound] = useAtom(thinkSynthByRoundAtom);
   const [thinkMappingByRound] = useAtom(thinkMappingByRoundAtom);
+  const setActiveRecomputeState = useSetAtom(activeRecomputeStateAtom);
 
   const isSynthRunningRef = useRef(false);
 
@@ -132,6 +134,8 @@ export function useRoundActions() {
       try {
         // Recompute synthesis from the existing AI turn outputs, one provider at a time
         for (const pid of selected) {
+          // Aim recompute state precisely at the current provider/turn
+          setActiveRecomputeState({ aiTurnId: ai.id, stepType: 'synthesis', providerId: pid });
           const primitive: PrimitiveWorkflowRequest = {
             type: 'recompute',
             sessionId: currentSessionId as string,
@@ -150,6 +154,7 @@ export function useRoundActions() {
         setIsLoading(false);
         setUiPhase('awaiting_action');
         setActiveAiTurnId(null);
+        setActiveRecomputeState(null);
       } finally {
         isSynthRunningRef.current = false;
       }
@@ -235,6 +240,8 @@ export function useRoundActions() {
       setCurrentAppStep('synthesis');
 
       try {
+        // Aim recompute state precisely at the mapping provider
+        setActiveRecomputeState({ aiTurnId: ai.id, stepType: 'mapping', providerId: effectiveMappingProvider });
         const primitive: PrimitiveWorkflowRequest = {
           type: 'recompute',
           sessionId: currentSessionId as string,
@@ -249,6 +256,7 @@ export function useRoundActions() {
         setIsLoading(false);
         setUiPhase('awaiting_action');
         setActiveAiTurnId(null);
+        setActiveRecomputeState(null);
       }
     },
     [

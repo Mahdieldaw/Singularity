@@ -6,9 +6,10 @@ interface ClipsCarouselProps {
   responsesMap: Record<string, ProviderResponse[]>;
   activeProviderId?: string;
   onClipClick: (providerId: string) => void;
+  type?: 'synthesis' | 'mapping';
 }
 
-const ClipsCarousel: React.FC<ClipsCarouselProps> = ({ providers, responsesMap, activeProviderId, onClipClick }) => {
+const ClipsCarousel: React.FC<ClipsCarouselProps> = ({ providers, responsesMap, activeProviderId, onClipClick, type = 'synthesis' }) => {
   // In ClipsCarousel.tsx - Simplified for historical-only usage
   const getProviderState = (providerId: string): 'never-run' | 'available' | 'loading' => {
     const responses = responsesMap[providerId];
@@ -48,9 +49,11 @@ const ClipsCarousel: React.FC<ClipsCarouselProps> = ({ providers, responsesMap, 
             onClick={() => !isDisabled && onClipClick(String(p.id))}
             disabled={isDisabled}
             title={
-              isNeverRun ? `Run ${p.name} synthesis` : 
-              state === 'loading' ? `${p.name} (running...)` : 
-              `View ${p.name} synthesis`
+              isNeverRun 
+                ? `Run ${p.name} ${type}` 
+                : state === 'loading' 
+                  ? `${p.name} (${type} running...)` 
+                  : `View ${p.name} ${type}`
             }
             style={{
               display: 'inline-flex',
