@@ -123,9 +123,15 @@ export class SessionManager {
     sessionRecord.updatedAt = now;
     await this.adapter.put('sessions', sessionRecord);
 
-    // 7) Update legacy cache
-    const legacySession = await this.buildLegacySessionObject(sessionId);
-    if (legacySession) this.sessions[sessionId] = legacySession;
+    // 7) Update lightweight session cache (metadata only)
+    this.sessions[sessionId] = {
+      id: sessionRecord.id,
+      title: sessionRecord.title,
+      createdAt: sessionRecord.createdAt,
+      updatedAt: sessionRecord.updatedAt,
+      lastTurnId: sessionRecord.lastTurnId,
+      lastActivity: sessionRecord.updatedAt || now
+    };
 
     return { sessionId, userTurnId, aiTurnId };
   }
@@ -200,9 +206,15 @@ export class SessionManager {
       await this.adapter.put('sessions', session);
     }
 
-    // 6) Update legacy cache
-    const legacySession = await this.buildLegacySessionObject(sessionId);
-    if (legacySession) this.sessions[sessionId] = legacySession;
+    // 6) Update lightweight session cache (metadata only)
+    this.sessions[sessionId] = {
+      id: session.id,
+      title: session.title,
+      createdAt: session.createdAt,
+      updatedAt: session.updatedAt,
+      lastTurnId: session.lastTurnId,
+      lastActivity: session.lastActivity
+    };
 
     return { sessionId, userTurnId, aiTurnId };
   }
@@ -262,9 +274,7 @@ export class SessionManager {
 
     // 4) Do NOT update session.lastTurnId (branch)
 
-    // 5) Update legacy cache
-    const legacySession = await this.buildLegacySessionObject(sessionId);
-    if (legacySession) this.sessions[sessionId] = legacySession;
+    // 5) No legacy cache updates for recompute; do not change session cache
 
     return { sessionId, aiTurnId };
   }
@@ -1152,16 +1162,57 @@ export class SessionManager {
    */
 
   /**
-   * Get provider contexts (backward compatible)
+   * Get provider contexts (persistence-backed, backward compatible shape)
+   * Returns an object: { [providerId]: { meta: <contextMeta> } }
    */
-  getProviderContexts(sessionId, threadId = 'default-thread') {
-    const session = this.sessions[sessionId];
-    if (!session) return {};
-    const contexts = {};
-    for (const [providerId, data] of Object.entries(session.providers || {})) {
-      if (data?.meta) contexts[providerId] = { meta: data.meta };
+  async getProviderContexts(sessionId, threadId = 'default-thread') {
+    try {
+      if (!sessionId) return {};
+      const adapterReady = !!(this.adapter && typeof this.adapter.isReady === 'function' && this.adapter.isReady());
+      if (!adapterReady) {
+        // Fallback to whatever the cache has (may be empty in new architecture)
+        const cached = this.sessions?.[sessionId]?.providers || {};
+        const contexts = {};
+        for (const [pid, data] of Object.entries(cached)) {
+          if (data?.meta) contexts[pid] = { meta: data.meta };
+        }
+        return contexts;
+      }
+
+      // Prefer the lastTurnId from the lightweight cache
+      const lastTurnId = this.sessions?.[sessionId]?.lastTurnId || null;
+      let aiTurn = null;
+      if (lastTurnId) {
+        const lastTurn = await this.adapter.get('turns', lastTurnId);
+        if (lastTurn && (lastTurn.type === 'ai' || lastTurn.role === 'assistant')) {
+          aiTurn = lastTurn;
+        }
+      }
+
+      // If not found, scan turns for latest AI turn in this session
+      if (!aiTurn) {
+        const allTurns = await this.adapter.getAll('turns');
+        const sessionTurns = (allTurns || []).filter(t => t && t.sessionId === sessionId);
+        const aiTurns = sessionTurns.filter(t => (t.type === 'ai' || t.role === 'assistant'));
+        aiTurns.sort((a, b) => {
+          const sa = (a.sequence ?? a.createdAt ?? 0);
+          const sb = (b.sequence ?? b.createdAt ?? 0);
+          return sb - sa; // newest first
+        });
+        aiTurn = aiTurns[0] || null;
+      }
+
+      const contexts = {};
+      const metaMap = aiTurn?.providerContexts || {};
+      for (const [pid, meta] of Object.entries(metaMap)) {
+        if (meta && typeof meta === 'object') contexts[pid] = { meta };
+      }
+      return contexts;
+    } catch (e) {
+      // Non-fatal; return empty
+      console.warn('[SessionManager] getProviderContexts failed, returning empty:', e);
+      return {};
     }
-    return contexts;
   }
 
   /**

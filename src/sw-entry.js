@@ -493,55 +493,34 @@ async function handleUnifiedMessage(message, sender, sendResponse) {
             return true;
           }
 
-          let session = sm.sessions?.[sessionId];
-          if (!session && sm.getPersistenceStatus?.().usePersistenceAdapter && sm.adapter?.isReady()) {
-            // Hydrate from persistence
-            session = await sm.buildLegacySessionObject(sessionId);
-            if (session) {
-              sm.sessions[sessionId] = session;
-            }
+          // New persistence-first logic: return raw records for UI assembly
+          const useAdapter = sm.getPersistenceStatus?.().usePersistenceAdapter && sm.adapter?.isReady();
+          if (!useAdapter) {
+            console.warn('[SW] Persistence adapter not ready; returning empty record sets for GET_HISTORY_SESSION');
           }
 
-          if (session) {
-            // Build "rounds" the UI expects: { createdAt, userTurnId, aiTurnId, user: {id?, text, createdAt}, providers: {...}, completedAt }
-            const turns = Array.isArray(session.turns) ? session.turns : [];
-            const rounds = [];
-            for (let i = 0; i < turns.length; i++) {
-              const t = turns[i];
-              if (t && t.type === 'user') {
-                const u = t;
-                const ai = turns[i + 1] && turns[i + 1].type === 'ai' ? turns[i + 1] : null;
-                const providers = (ai && (ai.batchResponses || ai.providerResponses)) ? (ai.batchResponses || ai.providerResponses) : {};
-                rounds.push({
-                  createdAt: Number(u.createdAt || Date.now()),
-                  userTurnId: String(u.id || ''),
-                  aiTurnId: String((ai && ai.id) || ''),
-                  user: {
-                    id: String(u.id || ''),
-                    text: String(u.text || ''),
-                    createdAt: Number(u.createdAt || Date.now())
-                  },
-                  providers,
-                  synthesisResponses: ai?.synthesisResponses || {},
-                  mappingResponses: ai?.mappingResponses || {},
-                  completedAt: Number((ai && ai.createdAt) || (u.createdAt ? (Number(u.createdAt) + 1) : Date.now()))
-                });
-              }
-            }
+          let sessionRecord = null;
+          let turns = [];
+          let providerResponses = [];
 
-            const transformed = {
-              id: session.sessionId,
-              sessionId: session.sessionId,
-              title: session.title,
-              createdAt: session.createdAt,
-              lastActivity: session.lastActivity,
-              turns: rounds,
-              providerContexts: session.providers || {}
-            };
-            sendResponse({ success: true, data: transformed });
-          } else {
-            sendResponse({ success: false, error: 'Session not found' });
+          if (useAdapter) {
+            sessionRecord = await sm.adapter.get('sessions', sessionId);
+            const allTurns = await sm.adapter.getAll('turns');
+            turns = allTurns.filter(t => t && t.sessionId === sessionId)
+                            .sort((a, b) => (a.sequence ?? a.createdAt) - (b.sequence ?? b.createdAt));
+            const allResponses = await sm.adapter.getAll('provider_responses');
+            providerResponses = allResponses.filter(r => r && r.sessionId === sessionId);
           }
+
+          // Respond with the new, normalized payload
+          sendResponse({ 
+            success: true, 
+            data: {
+              session: sessionRecord,
+              turns,
+              providerResponses
+            }
+          });
         } catch (e) {
           console.error('[SW] GET_HISTORY_SESSION error:', e);
           sendResponse({ success: false, error: 'Failed to load session' });

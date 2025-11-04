@@ -1220,26 +1220,7 @@ export class WorkflowEngine {
           }
           if (aiTurn && aiTurn.type === 'ai') {
             let maps = aiTurn.mappingResponses || {};
-            // Fallback: if maps look empty, rehydrate session from persistence and retry
-            if (!maps || Object.keys(maps).length === 0) {
-              try {
-                if (this.sessionManager.adapter?.isReady && this.sessionManager.adapter.isReady()) {
-                  const rebuilt = await this.sessionManager.buildLegacySessionObject(session.sessionId || context.sessionId);
-                  if (rebuilt) {
-                    this.sessionManager.sessions[rebuilt.sessionId] = rebuilt;
-                    const refreshedTurns = Array.isArray(rebuilt.turns) ? rebuilt.turns : [];
-                    const idx2 = refreshedTurns.findIndex(t => t && t.id === userTurnId && (t.type === 'user' || t.role === 'user'));
-                    if (idx2 !== -1 && refreshedTurns[idx2 + 1] && (refreshedTurns[idx2 + 1].type === 'ai' || refreshedTurns[idx2 + 1].role === 'assistant')) {
-                      const refreshedAi = refreshedTurns[idx2 + 1];
-                      maps = refreshedAi.mappingResponses || {};
-                      console.log('[WorkflowEngine] Rehydrated session from persistence for historical mapping lookup');
-                    }
-                  }
-                }
-              } catch (rehydrateErr) {
-                console.warn('[WorkflowEngine] Rehydrate attempt failed:', rehydrateErr);
-              }
-            }
+            // Legacy fallback removed: engine trusts ResolvedContext and current session data
             // Pick the most recent mapping entry across providers (fallback: first available)
             let candidate = null;
             let candidatePid = null;
