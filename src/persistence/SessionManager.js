@@ -118,6 +118,79 @@ export class SessionManager {
   }
 
   /**
+   * Run pending data migrations in a lazy manner after adapter is initialized.
+   * - Ensure sessions have lastTurnId set to latest AI turn
+   * - Migrate provider contexts from provider_contexts store to latest AI turn's providerContexts if missing
+   */
+  async _runPendingMigrations() {
+    try {
+      if (!this.adapter?.isReady || !this.adapter.isReady()) return;
+
+      // Check metadata flag; if absent, create and proceed; if 'done', skip
+      let mig = null;
+      try { mig = await this.adapter.get('metadata', 'migration_1_turn_scoped_contexts'); } catch (_) {}
+      const now = Date.now();
+      if (!mig) {
+        mig = { key: 'migration_1_turn_scoped_contexts', id: 'migration_1_turn_scoped_contexts', value: 'pending', createdAt: now, updatedAt: now };
+        try { await this.adapter.put('metadata', mig); } catch (_) {}
+      }
+      if (mig && mig.value === 'done') return;
+
+      const sessions = await this.adapter.getAll('sessions');
+      const allTurns = await this.adapter.getAll('turns');
+      const allContexts = await this.adapter.getAll('provider_contexts');
+
+      for (const s of sessions) {
+        const sid = s.id;
+        const turns = allTurns.filter(t => t.sessionId === sid).sort((a,b) => (a.sequence ?? a.createdAt) - (b.sequence ?? b.createdAt));
+        const latestAi = [...turns].reverse().find(t => (t.type === 'ai' || t.role === 'assistant'));
+        if (!latestAi) continue;
+
+        let updated = false;
+
+        if (!s.lastTurnId || s.lastTurnId !== latestAi.id) {
+          s.lastTurnId = latestAi.id;
+          s.lastActivity = latestAi.updatedAt || latestAi.createdAt || s.lastActivity || now;
+          s.updatedAt = now;
+          updated = true;
+        }
+
+        // Ensure providerContexts on latest AI turn
+        if (!latestAi.providerContexts || Object.keys(latestAi.providerContexts || {}).length === 0) {
+          const ctxRecords = allContexts.filter(c => c.sessionId === sid);
+          if (ctxRecords.length > 0) {
+            const byProvider = {};
+            ctxRecords.forEach(c => {
+              const pid = c.providerId;
+              const existing = byProvider[pid];
+              const ts = (c.updatedAt ?? c.createdAt ?? 0);
+              if (!existing || ts > existing._ts) {
+                byProvider[pid] = { _ts: ts, data: c.contextData || c.meta || {} };
+              }
+            });
+            const providerContexts = {};
+            Object.entries(byProvider).forEach(([pid, rec]) => { providerContexts[pid] = rec.data; });
+            if (Object.keys(providerContexts).length > 0) {
+              latestAi.providerContexts = providerContexts;
+              await this.adapter.put('turns', latestAi);
+            }
+          }
+        }
+
+        if (updated) {
+          await this.adapter.put('sessions', s);
+        }
+      }
+
+      mig.value = 'done';
+      mig.updatedAt = Date.now();
+      await this.adapter.put('metadata', mig);
+    } catch (error) {
+      console.warn('[SessionManager] Migration error:', error);
+    }
+  }
+
+  /**
    * Helper function to count responses in a response bucket
    * @param {Object} responseBucket - Object containing provider responses
    * @returns {number} Total count of responses
@@ -151,6 +224,13 @@ export class SessionManager {
     this.isInitialized = true;
     console.log('[SessionManager] Persistence layer integration successful.');
     console.log('[SessionManager] Initialization complete');
+
+    // Attempt lazy data migrations after adapter is ready
+    try {
+      await this._runPendingMigrations();
+    } catch (e) {
+      console.warn('[SessionManager] Pending migrations failed (non-fatal):', e);
+    }
   }
 
   
@@ -865,45 +945,68 @@ export class SessionManager {
           }
         };
 
-        await persistResponses(aiTurn.batchResponses, 'batch');
-        await persistResponses(aiTurn.synthesisResponses, 'synthesis');
-        await persistResponses(aiTurn.mappingResponses, 'mapping');
+      await persistResponses(aiTurn.batchResponses, 'batch');
+      await persistResponses(aiTurn.synthesisResponses, 'synthesis');
+      await persistResponses(aiTurn.mappingResponses, 'mapping');
 
-        const aiTurnRecord = {
-          id: aiTurnId,
-          type: 'ai',
-          role: 'assistant',
-          sessionId,
-          threadId: 'default-thread',
-          createdAt: aiTurn.createdAt || now,
-          updatedAt: now,
-          content: aiTurn.text || '',
-          sequence: nextSequence,
-          userTurnId: userTurn?.id,
-          providerResponseIds,
-          batchResponseCount: this.countResponses(aiTurn.batchResponses),
-          synthesisResponseCount: this.countResponses(aiTurn.synthesisResponses),
-          mappingResponseCount: this.countResponses(aiTurn.mappingResponses)
-        };
-        await this.adapter.put('turns', aiTurnRecord);
+      // Build providerContexts from batch responses meta, if present
+      const providerContexts = (() => {
+        const ctx = {};
+        try {
+          const bucket = aiTurn.batchResponses || {};
+          Object.entries(bucket).forEach(([pid, r]) => {
+            if (r && r.meta && Object.keys(r.meta).length > 0) {
+              // Store raw meta under provider id
+              ctx[pid] = r.meta;
+            }
+          });
+        } catch (_) {}
+        return Object.keys(ctx).length > 0 ? ctx : undefined;
+      })();
 
-        // Mirror in legacy cache for UI compatibility
-        session.turns = session.turns || [];
-        session.turns.push({ ...aiTurn, threadId: 'default-thread', completedAt: now });
-      }
+      const aiTurnRecord = {
+        id: aiTurnId,
+        type: 'ai',
+        role: 'assistant',
+        sessionId,
+        threadId: 'default-thread',
+        createdAt: aiTurn.createdAt || now,
+        updatedAt: now,
+        content: aiTurn.text || '',
+        sequence: nextSequence,
+        userTurnId: userTurn?.id,
+        providerResponseIds,
+        batchResponseCount: this.countResponses(aiTurn.batchResponses),
+        synthesisResponseCount: this.countResponses(aiTurn.synthesisResponses),
+        mappingResponseCount: this.countResponses(aiTurn.mappingResponses),
+        // NEW: Turn-scoped provider contexts captured from responses
+        providerContexts
+      };
+      await this.adapter.put('turns', aiTurnRecord);
 
-      // Title: first user turn text if missing
-      if (!session.title && userTurn?.text) {
-        session.title = String(userTurn.text).slice(0, 50);
+      // Mirror in legacy cache for UI compatibility
+      session.turns = session.turns || [];
+      session.turns.push({ ...aiTurn, threadId: 'default-thread', providerContexts });
+
+      // Update session lastTurnId pointer for ContextResolver and lastActivity timestamp
+      try {
         const sessionRecord = await this.adapter.get('sessions', sessionId);
         if (sessionRecord) {
+          // Maintain title and update pointers
           sessionRecord.title = session.title;
+          sessionRecord.lastTurnId = aiTurnId;
+          sessionRecord.lastActivity = now;
           sessionRecord.updatedAt = now;
           await this.adapter.put('sessions', sessionRecord);
         }
+        // Mirror to legacy cache
+        session.lastActivity = now;
+        session.lastTurnId = aiTurnId;
+      } catch (e) {
+        console.warn('[SessionManager] Failed to update session pointers during saveTurn:', e);
       }
-
-      session.lastActivity = now;
+      // Close the AI turn persistence block
+      }
       await this.saveSession(sessionId);
     } catch (error) {
       console.error(`[SessionManager] Failed to save turn with persistence:`, error);

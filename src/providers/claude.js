@@ -426,7 +426,6 @@ export class ClaudeProviderController {
         if (this.initialized) {
             return;
         }
-        console.log('[HTOSClaude] Initializing Claude provider...');
         // Register with bus controller if available
         if (typeof BusController !== 'undefined' && BusController.on) {
             BusController.on('claude.ask', this._handleAskRequest.bind(this));

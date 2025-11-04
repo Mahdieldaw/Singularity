@@ -1,0 +1,56 @@
+Location,Log Type,Content Summary,Recommendation,Rationale
+buildSynthesisPrompt (line ~10),console.log,"buildSynthesisPrompt called with: {originalPromptLength, sourceResultsCount, ...}",Flag: if (DEBUG_WORKFLOW) console.log(...),"Entry trace; useful for prompt bloat checks, but spams every synthesis."
+buildSynthesisPrompt (line ~20),console.log,"Filtered batch results: {originalCount, filteredCount, excludedSynthesizer}",Delete,Deterministic filter; count derivable from args.
+buildSynthesisPrompt (line ~35),console.log,"Built synthesis prompt sections: {otherResultsLength, mappingSectionLength, ...}",Flag,"Lengths help spot truncation, but rare; flag for perf tuning."
+buildSynthesisPrompt (line ~70),console.log,Final synthesis prompt length: ${finalPrompt.length},Delete,Implicit from above; no action.
+buildSynthesisPrompt (line ~72),console.log,"Final synthesis prompt contains ""CONFLICT RESOLUTION MAP"": ${includes}",Delete,Template validation; static check—move to unit test.
+buildSynthesisPrompt (line ~73),console.log,"Final synthesis prompt contains ""(MAP)"": ${includes}",Delete,Duplicate of above; remnant from iteration.
+makeDelta cases (lines ~110-150),logger.stream,"First emission: {providerId, textLength} / Incremental append: {deltaLen} / Duplicate (no-op) / Acceptable regression: {chars, percent} / Divergence detected",Keep (guarded),Streaming-specific; already behind STREAMING_DEBUG. Tune threshold if regressions false-positive.
+makeDelta regression warn (line ~145),logger.warn,"Significant text regression for ${providerId}: {prevLen, fullLen, ...}",Keep,"Signals LLM flakes (e.g., truncated streams); actionable."
+clearDeltaCache (line ~165),logger.debug,Cleared ${keysToDelete.length} cache entries for session ${sessionId},Delete,"Cleanup echo; memory leaks show in metrics, not logs."
+execute prompt loop (line ~220),console.log,Cached context for ${pid}: ${keys},Flag,Context propagation trace; flag for dep debugging.
+execute prompt catch (line ~230),console.error,Prompt step ${stepId} failed: ${error},Keep,Step failure; gates early exit.
+execute mapping/synthesis loops (lines ~250-280),console.error,[Type] step ${stepId} failed: ${error},Keep,Consistent failure surfacing.
+execute persistence try (line ~300),console.error,CRITICAL persistence failed: ${e},Keep,Blocks history; high-severity.
+execute deferred catch (line ~320),console.warn,Deferred non-critical persistence failed: ${e},Keep,Background flake; non-blocking but signals DB issues.
+_emitTurnFinalized skip (line ~340),console.log,Skipping TURN_FINALIZED for historical rerun,Flag,"Historical mode trace; rare, but flags rerun paths."
+_emitTurnFinalized no msg (line ~345),console.log,"No user message, skipping TURN_FINALIZED",Delete,Guard echo; obvious from context.
+_emitTurnFinalized emit (line ~410),console.log,"Emitting TURN_FINALIZED {userTurnId, aiTurnId, batchCount, ...}",Flag,Canonical ID alignment; useful for UI sync bugs.
+_emitTurnFinalized catch (line ~415),console.error,Failed to emit TURN_FINALIZED: ${error},Keep,UI hang risk.
+"_persistCriticalTurnData (implicit, line ~430)",N/A,No logs; silent if no msg,Add console.warn if !userMessage post-guard,Silent skip risks incomplete turns; low-volume.
+_persistNonCriticalData no id (line ~510),console.warn,No canonicalUserTurnId; cannot append...,Keep,Persistence gap; prevents orphans.
+_persistCompletedTurn historical (lines ~530-570),N/A (in try),No explicit; catches with warn,Consolidate to single console.warn on append fail,Dupe collection logic vs. non-critical; abstract to helper.
+_persistCompletedTurn fallback (line ~580),console.warn,Failed to persist last finalized turn...,Keep,ID stability fail.
+_persistCompletedTurn no data (line ~610),N/A,No logs,Delete (implicit),Good—empty runs silent.
+_resolveProviderContext tier1 (line ~630),console.log,${stepType} using workflow-cached context for ${providerId}: ${keys},Flag,Cache hit trace; patterns dep chains.
+_resolveProviderContext tier2 (line ~650),console.log,${stepType} continuing... via batch step,Flag,Back-compat trace; flag for migration pains.
+_resolveProviderContext tier3 (line ~670),console.log,${stepType} using persisted context for ${providerId}: ${keys},Flag,Stale context warning; signals perf debt.
+executePromptStep resolveSourceData start (line ~720),console.log,"resolveSourceData start {sourceStepIds, ...}",Delete,Entry; derivable from payload.
+executePromptStep onAllComplete results.forEach (implicit),N/A,No log; persists silently,Add logger.debug on update count if >0,Low-value; metrics better.
+resolveSourceData historical (line ~750),console.log,Resolving historical data from turn: ${userTurnId},Keep,Cross-session search entry; flags reconns.
+resolveSourceData fallback session (line ~770),console.warn,Historical turn ${userTurnId} found in different session ${sid},Keep,State drift alert.
+resolveSourceData no aiTurn text fallback (lines ~800-850),N/A (in try),No explicit; warns on search,Consolidate to console.warn on multi-session hit,Repetitive search logic—extract to _findAiTurnByText.
+resolveSourceData fallback multi (line ~840),console.warn,Historical fallback matched by text in different session ${sid},Keep,As above; subtext: ID mismatches from optimistic UI.
+resolveSourceData current loop warn (line ~880),console.warn,Step ${stepId} not found or incomplete,Flag,Incomplete deps; spams if steps missing.
+resolveSourceData current (line ~890),console.log,Using batch results from step ${stepId} {providers},Delete,Obvious from loop.
+resolveSourceData current end (line ~910),console.log,Found ${sourceArray.length} current workflow sources,Flag,Source count; validates batch health.
+resolveSourceData historical end (line ~760),console.log,Found ${sourceArray.length} historical sources,Flag,Mirrors above; consistent.
+executeSynthesisStep sources (line ~930),console.log,Running synthesis with ${sourceData.length} sources: ${join},Flag,Step entry; pairs with resolve logs.
+executeSynthesisStep mapping ids (line ~940),console.log,Synthesis step has mappingStepIds: ${payload},Delete,Payload dump; static.
+executeSynthesisStep prev keys (line ~942),console.log,Available previousResults keys: ${Array.from},Delete,Debug artifact; use breakpoints.
+executeSynthesisStep mapping loop check (line ~950),console.log,Checking mapping step ${mappingStepId}: ${mappingStepResult},Flag,Dep resolution; flag for missing maps.
+executeSynthesisStep found mapping (line ~960),console.log,"Found mapping result from step ${mappingStepId} for synthesis: {providerId, textLength, preview}",Keep (trim preview),"Validates chain; preview spots bad maps, but cap at 50 chars."
+executeSynthesisStep unsuitable (line ~970),console.log,"Mapping step ${mappingStepId} not suitable: {status, hasResult, ...}",Flag,Why-no-map trace; patterns broken workflows.
+executeSynthesisStep no mapping error (line ~980),console.error,No valid mapping result found. mappingResult: ${mappingResult},Keep,Gates synthesis; error context.
+executeSynthesisStep no ids (line ~990),console.log,No mappingStepIds configured for synthesis step,Delete,Config echo.
+executeSynthesisStep historical mapping session warn (line ~1020),console.warn,(Synthesis) Using mapping from historical session ${sid},Keep,Drift alert.
+executeSynthesisStep rehydrate (line ~1050),console.log,Rehydrated session from persistence for historical mapping lookup,Flag,Legacy bridge; flag for perf hits.
+executeSynthesisStep rehydrate fail (line ~1060),console.warn,Rehydrate attempt failed: ${rehydrateErr},Keep,Fallback fail.
+executeSynthesisStep candidate (line ~1080),console.log,Attached historical mapping result from ${candidatePid} (len=...),Flag,Success trace; count patterns in histories.
+executeSynthesisStep no historical (line ~1090),console.log,No historical mapping result found for userTurn ${userTurnId},Flag,Missing dep; surfaces gaps.
+executeSynthesisStep historical fetch fail (line ~1110),console.warn,Failed to fetch historical mapping for synthesis: ${e},Keep,Chain break.
+executeSynthesisStep onAllComplete final emit (implicit),logger.stream,"Final synthesis emission: {providerId, len}",Keep (guarded),Streaming closeout.
+executeSynthesisStep workflow update (line ~1160),console.log,Updated workflow context for ${providerId}: ${keys},Flag,As tier1; intra-run propagation.
+executeMappingStep sources (line ~1200),console.log,Running mapping with ${sourceData.length} sources: ${join},Flag,Mirrors synthesis.
+executeMappingStep onAllComplete final emit (implicit),logger.stream,"Final mapping emission: {providerId, len}",Keep (guarded),As above.
+executeMappingStep workflow update (line ~1250),console.log,Updated workflow context for ${providerId}: ${keys},Flag,As above.

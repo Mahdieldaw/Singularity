@@ -1,0 +1,48 @@
+Location,Log Type,Content Summary,Recommendation,Rationale
+updateAEConfig (line ~80),console.log,Updating AE config keys,Delete,Redundant; config merge is deterministic—log only on failure if needed.
+updateAEConfig (line ~90),console.log,AE config updated successfully,Delete,Success is implicit; no action required.
+ChatGPTProviderController.updateAEConfig (line ~290),console.log,Updating AE configuration,Delete,Echoes the inner function; consolidate to one if kept.
+ask (line ~380),console.log,Checking offscreen (oi) readiness...,Flag: if (DEBUG_CHATGPT) console.log(...),"Status ok for first-time debugging, but spams on every ask."
+ask (line ~382),console.log,[ChatGPT Debug] preparing to check... {ts},Delete,Timestamp noise; use a single timed entry/exit log if flagged.
+ask (line ~390),console.log,"[ChatGPT Debug] First offscreen check, adding delay",Flag,"Useful for race-condition hunting, but rare."
+Poll loop (lines ~410-420),console.warn,"Poll attempt failed, retries left",Keep,Warns on retry exhaustion; signals flakiness.
+Poll catch (lines ~430-440),console.warn / console.error,"poll startup.oiReady timed out/error {ts, dur}",Keep (consolidate to one console.error),Critical for timeout diagnosis; add dur only here.
+Poll exit (line ~450),console.log,"poll startup.oiReady result {result, ts, dur}",Flag,Redundant with above; flag for perf profiling.
+Bus poll fallback (line ~470),console.log,Offscreen (oi) is ready,Delete,Success echo; readiness is validated upstream.
+Bus poll fallback (line ~475),console.warn,No bus.poll available...,Keep,Indicates env mismatch (background vs. offscreen).
+Bus poll catch (line ~480),console.warn,Offscreen readiness check failed: error,Keep,Surfaces bus failures.
+Access token (line ~490),console.log,Ensuring access token...,Flag,Pairs with status log below; one suffices.
+Access token (line ~495),console.log,Access token status: present/missing,Keep,Key gating decision; impacts flow.
+AE injection try/catch (line ~530),console.error,AE header injection failed: e,Keep,Error context for auth failures.
+Fetch (line ~550),console.log,Executing authenticated fetch...,Delete,Obvious from method name; no value.
+Response (line ~555),console.log,Response status: ${res.status},Keep,First signal of success/fail.
+Response error (line ~560),console.error,Request failed with status ${res.status}: errJson,Keep,Detailed failure payload.
+Content-type (line ~570),console.log,Response content-type: ${ct},Delete,Deterministic (SSE expected); log only if mismatch.
+SSE processing (line ~580),console.log,Processing SSE stream...,Flag,Stream entry; useful for tracing hangs.
+SSE loop finally (line ~620),console.log,"SSE stream completed. Total chunks: ${chunkCount}, final text length: ${aggText.length}",Keep (but flag chunks/len),"Confirms completion; lengths help spot truncation, but flag metrics."
+SSE catch (line ~615),console.error,SSE stream error: e,Keep,"Propagates to throw, but logs for inspection."
+_wrapMethod (line ~650),N/A (via _logError),Errors via _logError,Keep,Guarded by this._logs; toggle via constructor.
+_ensureAccessToken catch (implicit),N/A,No explicit log; returns null,Add console.warn if fetch fails post-429/403,Silent failure risks; surface for login issues.
+_fetchAuth catch (line ~780),console.error,Network fetch failed for ${url}: fetchErr,Keep,Isolates network flakes.
+_fetchAuth retry catch (line ~810),console.error,Network fetch retry failed...,Keep,Differentiates retry vs. initial.
+_busSendWithTimeout attempt (line ~850),console.log,Bus call: ${action} payload=${truncated},Flag,Payloads bloat; truncate further or omit.
+_busSendWithTimeout success (line ~860),console.log,Bus response: ${action} result=ok,Delete,Success is return; no need.
+_busSendWithTimeout catch (line ~865),console.log / console.warn,Bus response: error / send failed: ${action} e,Consolidate to console.warn,Dupe echoes; one warn suffices.
+Retry loop (line ~875),console.log,Retrying BusController.send...,Flag,"Retry count is useful, but spams."
+Timeout final (line ~885),console.error,Bus call ${action} timed out...,Keep,Actionable alert.
+Fail final (line ~890),console.error,Bus call ${action} failed... lastErr,Keep,Terminal error.
+_generateProofToken (line ~920),console.log,"[ChatGPT Debug] about to call ai.generateProofToken {ts, payload}",Flag,Bus entry; pair with response.
+_generateProofToken catch (line ~945),console.error,"ai.generateProofToken error e {ts, dur}",Keep,Timed failure.
+_generateProofToken exit (line ~950),console.log,"ai.generateProofToken response {res, ts, dur}",Flag,Response validation; flag for perf.
+_retrieveArkoseToken (line ~1050),console.log,"[ChatGPT Debug] about to call ai.retrieveArkoseToken {ts, payload}",Flag,Mirrors above; consistent pattern.
+_retrieveArkoseToken catch (line ~1075),console.error,"ai.retrieveArkoseToken error e {ts, dur}",Keep,Timed failure.
+_retrieveArkoseToken exit (line ~1080),console.log,"ai.retrieveArkoseToken response {res, ts, dur}",Flag,As above.
+_injectAEHeaders entry (line ~1110),console.log,Injecting AE headers...,Delete,Method intent clear.
+Sentinel inject (line ~1120),console.log,Sentinel token injected...,Delete,Success detail; omit unless debug.
+PoW required (line ~1135),console.log,"PoW token required, generating...",Flag,Gating decision.
+PoW inject (line ~1160),console.log,PoW token generated and injected...,Delete,Echo.
+PoW catch (line ~1165),console.error,PoW token generation failed: e,Keep,Propagates.
+Arkose required (line ~1180),console.log,"Arkose token required, retrieving...",Flag,As PoW.
+Arkose inject (line ~1205),console.log,Arkose token retrieved and injected...,Delete,Echo.
+Arkose catch (line ~1210),console.error,Arkose token retrieval failed: e,Keep,Propagates.
+AE exit (line ~1220),console.log,AE headers injection completed,Delete,Success.

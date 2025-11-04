@@ -16,7 +16,7 @@ export class WorkflowCompiler {
     this.sessionManager = sessionManager;
   }
 
-  compile(request) {
+  compile(request, resolvedContext = null) {
     this._validateRequest(request);
 
     const {
@@ -77,6 +77,23 @@ export class WorkflowCompiler {
         synthesis.providers.length > 0 &&
         providers.length > 1;
 
+      // Determine provider contexts: prefer resolvedContext from ContextResolver in Phase 2
+      const promptProviderContexts = (() => {
+        try {
+          if (resolvedContext && resolvedContext.type === 'extend' && resolvedContext.providerContexts) {
+            return resolvedContext.providerContexts;
+          }
+        } catch (_) {}
+        return this._getProviderContexts(
+          sessionId,
+          threadId,
+          mode,
+          providers,
+          providerModes,
+          historicalContext
+        );
+      })();
+
       steps.push({
         stepId: batchStepId,
         type: "prompt",
@@ -85,15 +102,8 @@ export class WorkflowCompiler {
           providers: providers,
           hidden: !!isSynthesisFirst,
           useThinking: !!useThinking,
-          // ✅ ADDED providerModes to this function call
-          providerContexts: this._getProviderContexts(
-            sessionId,
-            threadId,
-            mode,
-            providers,
-            providerModes,
-            historicalContext
-          ),
+          // Prefer resolved contexts when available; fall back to legacy lookup
+          providerContexts: promptProviderContexts,
           // ✅ Pass through per-provider metadata (e.g., gemini model)
           providerMeta,
         },

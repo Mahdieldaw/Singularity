@@ -3,8 +3,8 @@
 import { StoreConfig, MetadataRecord } from './types';
 
 export const DB_NAME = 'OpusDeusDB';
-export const DB_VERSION = 1;
-export const SCHEMA_VERSION = 1;
+export const DB_VERSION = 2;
+export const SCHEMA_VERSION = 2;
 
 // Store configurations matching the schema specification
 export const STORE_CONFIGS: StoreConfig[] = [
@@ -136,15 +136,41 @@ export async function openDatabase(): Promise<IDBDatabase> {
         const schemaVersionRecord: MetadataRecord = {
           id: 'schema_version_record',
           key: 'schema_version',
-          value: SCHEMA_VERSION,
+          value: 1,
           createdAt: now, // <-- ADD THIS LINE
           updatedAt: now
         };
         metadataStore.add(schemaVersionRecord);
       }
       
-      // Future migrations would go here
-      // if (oldVersion < 2) { ... }
+      // Migration to v2: mark turn-scoped context migration as pending and bump schema_version
+      if (oldVersion < 2) {
+        const metadataStore = transaction.objectStore('metadata');
+        const now = Date.now();
+        try {
+          // Bump schema_version
+          const rec: MetadataRecord = {
+            id: 'schema_version_record',
+            key: 'schema_version',
+            value: SCHEMA_VERSION,
+            createdAt: now,
+            updatedAt: now
+          } as any;
+          metadataStore.put(rec);
+        } catch (_) {}
+
+        try {
+          // Flag application-level migration; SessionManager will complete it lazily
+          const mig: MetadataRecord = {
+            id: 'migration_1_turn_scoped_contexts',
+            key: 'migration_1_turn_scoped_contexts',
+            value: 'pending',
+            createdAt: now,
+            updatedAt: now
+          } as any;
+          metadataStore.put(mig);
+        } catch (_) {}
+      }
     };
     
     request.onsuccess = () => {

@@ -48,7 +48,6 @@ export class IndexedDBAdapter implements IPersistenceAdapter {
 
   // Lifecycle methods
   async initialize(config: PersistenceConfig = {}): Promise<void> {
-    console.warn('persistence:init - Starting IndexedDBAdapter initialization');
     
     this.config = {
       dbName: 'htos-db',

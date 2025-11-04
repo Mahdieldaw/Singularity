@@ -1,0 +1,14 @@
+Location,Log Type,Content Summary,Recommendation,Rationale
+init start (line ~25),console.warn,persistence:init - Starting SimpleIndexedDBAdapter initialization,Delete,"Init entry; timestamp + stack trace it if needed, but spams on reloads."
+init db null (line ~35),console.error,persistence:init - Database failed to open,Keep,Blocks all ops; critical path fail.
+init missing stores (line ~50),console.error,persistence:init - Missing required object stores: ${missingStores},Keep,Schema rot alert; prevents silent bad state.
+init success (line ~55),console.warn,persistence adapter initialized,Flag: if (DEBUG_PERSISTENCE) console.warn(...),"Milestone; useful for cold-start profiling, but one-off."
+init catch (line ~60),console.error,persistence:init - Initialization failed: ${error},Keep,Root cause for downstream crashes.
+get outcome (line ~80),console.log,"persistence:get(${resolved}, ${key}) - ${'found' : 'not found'}",Flag,"Tx trace; patterns cache misses, but floods reads (e.g., session loads)."
+get catch (line ~85),console.error,"persistence:get(${resolved}, ${key}) - error: ${error}",Keep,"Isolates read fails (e.g., corrupted keys)."
+put success (line ~110),console.log,"persistence:put(${resolved}, ${id}) - success",Flag,"Write confirmation; derivable from return, but flags bulk inserts."
+put catch (line ~115),console.error,"persistence:put(${resolved}, ${key",,id}) - error: ${error}
+delete success (line ~130),console.log,"persistence:delete(${resolved}, ${key}) - success",Delete,Implicit via boolean return; rare op anyway.
+delete catch (line ~135),console.error,"persistence:delete(${resolved}, ${key}) - error: ${error}",Keep,Cleanup fails compound state bloat.
+getAll outcome (line ~150),console.log,persistence:getAll(${resolved}) - found ${result.length} records,Flag,"Bulk read summary; spots data growth (e.g., turns exploding), but spams exports."
+getAll catch (line ~155),console.error,persistence:getAll(${resolved}) - error: ${error},Keep,Bulk fails risk full history loss.

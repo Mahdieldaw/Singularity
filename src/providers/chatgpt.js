@@ -106,10 +106,6 @@ let AE_CONFIG = { ...DEFAULT_AE_CONFIG };
 
 // Helper function to update AE config at runtime
 function updateAEConfig(runtimeConfig) {
-  console.log(
-    "[ChatGPT] Updating AE config with runtime values:",
-    Object.keys(runtimeConfig)
-  );
   AE_CONFIG = {
     ...DEFAULT_AE_CONFIG,
     ...runtimeConfig,
@@ -127,7 +123,6 @@ function updateAEConfig(runtimeConfig) {
       ...(runtimeConfig.parameters || {}),
     },
   };
-  console.log("[ChatGPT] AE config updated successfully");
 }
 
 // =============================================================================
@@ -240,7 +235,6 @@ export class ChatGPTProviderController {
 
   // Public method to update AE configuration at runtime
   updateAEConfig(runtimeConfig) {
-    console.log("[ChatGPTProviderController] Updating AE configuration");
     updateAEConfig(runtimeConfig);
     return AE_CONFIG;
   }
@@ -323,18 +317,11 @@ export class ChatGPTSessionApi {
     } = options || {};
 
     // Ensure offscreen (oi) is ready for token generation
-    console.log("[ChatGPT Session] Checking offscreen (oi) readiness...");
-    // Debug instrumentation: log around offscreen readiness and ai bus calls
-    console.log("[ChatGPT Debug] preparing to check offscreen readiness", {
-      ts: Date.now(),
-    });
 
     // Give the offscreen document a moment to initialize if this is the first call
     // This helps avoid race conditions during extension startup
     if (!this._offscreenEverReady) {
-      console.log(
-        "[ChatGPT Debug] First offscreen check, adding initialization delay"
-      );
+      // [ChatGPT Debug] First offscreen check, adding initialization delay
       await new Promise((resolve) => setTimeout(resolve, 500));
     }
 
@@ -417,7 +404,6 @@ export class ChatGPTSessionApi {
       const __bg_bus = this._getHtosBus();
       if (__bg_bus?.poll) {
         await __bg_bus.poll("startup.oiReady");
-        console.log("[ChatGPT Session] Offscreen (oi) is ready");
       } else {
         console.warn(
           "[ChatGPT Session] No bus.poll available in background context"
@@ -481,7 +467,6 @@ export class ChatGPTSessionApi {
     }
 
     // 6) Execute ask via authenticated fetch
-    console.log("[ChatGPT Session] Executing authenticated fetch...");
     const res = await this._fetchAuth("/backend-api/conversation", {
       method: "POST",
       headers,
@@ -507,7 +492,6 @@ export class ChatGPTSessionApi {
     }
 
     const ct = (res.headers.get("content-type") || "").toLowerCase();
-    console.log(`[ChatGPT Session] Response content-type: ${ct}`);
 
     // Prefer SSE path
     if (ct.includes("text/event-stream")) {
@@ -765,7 +749,6 @@ export class ChatGPTSessionApi {
           setTimeout(() => reject(new Error("timeout")), timeoutMs)
         );
         const res = await Promise.race([sendPromise, timeoutPromise]);
-        console.log(`[ChatGPT Session] Bus response: ${action} result=ok`);
         return res;
       } catch (e) {
         console.log(`[ChatGPT Session] Bus response: ${action} result=error`);
@@ -984,10 +967,6 @@ export class ChatGPTSessionApi {
   async _injectAEHeaders(headers, requirements) {
     if (!requirements) return headers;
 
-    console.log(
-      "[ChatGPT Session] Injecting AE headers directly into request..."
-    );
-
     // Sentinel token header
     const sentinelToken = this._get(
       requirements,
@@ -995,9 +974,6 @@ export class ChatGPTSessionApi {
     );
     if (sentinelToken && AE_CONFIG.requirements.headerName) {
       headers[AE_CONFIG.requirements.headerName] = sentinelToken;
-      console.log(
-        "[ChatGPT Session] Sentinel token injected directly into headers"
-      );
     }
 
     // PoW header - fail fast if required but generation fails
@@ -1023,9 +999,6 @@ export class ChatGPTSessionApi {
           );
         }
         headers[AE_CONFIG.pow.headerName] = token;
-        console.log(
-          "[ChatGPT Session] PoW token generated and injected directly into headers"
-        );
       } catch (e) {
         console.error("[ChatGPT Session] PoW token generation failed:", e);
         const isTimeout = String(e).toLowerCase().includes("timeout");
@@ -1063,9 +1036,6 @@ export class ChatGPTSessionApi {
           );
         }
         headers[AE_CONFIG.headerName] = arkoseToken;
-        console.log(
-          "[ChatGPT Session] Arkose token retrieved and injected directly into headers"
-        );
       } catch (e) {
         console.error("[ChatGPT Session] Arkose token retrieval failed:", e);
         const isTimeout = String(e).toLowerCase().includes("timeout");
@@ -1078,7 +1048,6 @@ export class ChatGPTSessionApi {
       }
     }
 
-    console.log("[ChatGPT Session] AE headers injection completed");
     return headers;
   }
 

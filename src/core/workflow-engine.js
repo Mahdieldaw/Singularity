@@ -20,11 +20,6 @@ function buildSynthesisPrompt(originalPrompt, sourceResults, synthesisProvider, 
     return !isSynthesizer;
   });
 
-  console.log(`[WorkflowEngine] Filtered batch results:`, {
-    originalCount: sourceResults?.length,
-    filteredCount: filteredResults.length,
-    excludedSynthesizer: synthesisProvider
-  });
 
   const otherItems = filteredResults
     .map(res => `**${(res.providerId || 'UNKNOWN').toUpperCase()}:**\n${String(res.text)}`);
@@ -82,9 +77,6 @@ ${otherResults}
 </model_outputs>
 
 Begin`;
-  console.log(`[WorkflowEngine] Final synthesis prompt length:`, finalPrompt.length);
-  console.log(`[WorkflowEngine] Final synthesis prompt contains "CONFLICT RESOLUTION MAP":`, finalPrompt.includes('CONFLICT RESOLUTION MAP'))
-  console.log(`[WorkflowEngine] Final synthesis prompt contains "(MAP)":`, finalPrompt.includes('(MAP)'));
   
   return finalPrompt;
 }
@@ -169,34 +161,42 @@ function makeDelta(sessionId, providerId, fullText = "") {
     return "";
   }
 
-  // CASE 4: Text got shorter - smart detection with warnings instead of errors
-  if (fullText.length < prev.length) {
-    const regression = prev.length - fullText.length;
-    
-    // Calculate regression percentage
-    const regressionPercent = (regression / prev.length) * 100;
-    
-    // ✅ Allow small absolute regressions OR small percentage regressions
-    const isSmallRegression = regression <= 200 || regressionPercent <= 5;
-    
-    if (isSmallRegression) {
-      logger.stream(`Acceptable regression for ${providerId}:`, { 
-        chars: regression, 
-        percent: regressionPercent.toFixed(1) + '%' 
-      });
-      lastStreamState.set(key, fullText);
-      return "";
-    }
-    
-    // Only warn (not error) about significant regressions
-    logger.warn(`[makeDelta] Significant text regression for ${providerId}:`, { 
-      prevLen: prev.length, 
-      fullLen: fullText.length,
-      regression,
-      regressionPercent: regressionPercent.toFixed(1) + '%'
+// CASE 4: Text got shorter - smart detection with warnings instead of errors
+if (fullText.length < prev.length) {
+  const regression = prev.length - fullText.length;
+  const regressionPercent = (regression / prev.length) * 100;
+  
+  // ✅ Tighten thresholds: allow up to 500 chars OR 10% (tunes for LLM edits)
+  const isSmallRegression = regression <= 500 || regressionPercent <= 10;
+  
+  if (isSmallRegression) {
+    logger.stream(`Acceptable regression for ${providerId}:`, { 
+      chars: regression, 
+      percent: regressionPercent.toFixed(1) + '%' 
     });
+    lastStreamState.set(key, fullText);
     return "";
   }
+  
+  // Flag & throttle: only warn if DEBUG_STREAMING=true, or log once per provider/session
+  if (process.env.DEBUG_STREAMING === 'true') {  // Or your global DEBUG_WORKFLOW
+    // Optional: debounce per-provider (e.g., Map of lastWarn ts)
+    const now = Date.now();
+    const lastWarnKey = `${key}:lastRegressionWarn`;
+    const lastWarn = lastStreamState.get(lastWarnKey) || 0;
+    if (now - lastWarn > 5000) {  // 5s cooldown per provider
+      logger.warn(`[makeDelta] Significant text regression for ${providerId}:`, { 
+        prevLen: prev.length, 
+        fullLen: fullText.length,
+        regression,
+        regressionPercent: regressionPercent.toFixed(1) + '%'
+      });
+      lastStreamState.set(lastWarnKey, now);
+    }
+  }
+  lastStreamState.set(key, fullText);  // Still update state
+  return "";  // No emit on regression
+}
 
   // CASE 5: Fallback (shouldn't reach here, but safe default)
   return "";
@@ -378,7 +378,6 @@ export class WorkflowEngine {
 
     const userMessage = context?.userMessage || this.currentUserMessage || '';
     if (!userMessage) {
-      console.log('[WorkflowEngine] No user message, skipping TURN_FINALIZED');
       return;
     }
 
@@ -950,14 +949,7 @@ export class WorkflowEngine {
    * Resolve source data - FIXED to handle new format
    */
   async resolveSourceData(payload, context, previousResults) {
-    try {
-      const prevKeys = Array.from(previousResults.keys());
-      console.log('[WorkflowEngine] resolveSourceData start', {
-        sourceStepIds: payload.sourceStepIds,
-        sourceHistorical: payload.sourceHistorical,
-        previousResultsKeys: prevKeys
-      });
-    } catch (_) {}
+    // removed low-value entry log
 
     if (payload.sourceHistorical) {
       // Historical source
@@ -1072,11 +1064,7 @@ export class WorkflowEngine {
         }
 
         const { results } = stepResult.result;
-        try {
-          console.log('[WorkflowEngine] Using batch results from step', stepId, {
-            providers: Object.keys(results || {})
-          });
-        } catch (_) {}
+        // removed low-value current-source log
         
         // Results is now an object: { claude: {...}, gemini: {...} }
         Object.entries(results).forEach(([providerId, result]) => {
@@ -1112,8 +1100,7 @@ export class WorkflowEngine {
 
     // Look for mapping results from the current workflow
     let mappingResult = null;
-    console.log(`[WorkflowEngine] Synthesis step has mappingStepIds:`, payload.mappingStepIds);
-    console.log(`[WorkflowEngine] Available previousResults keys:`, Array.from(previousResults.keys()));
+    // removed verbose payload/key echo logs
     
     if (payload.mappingStepIds && payload.mappingStepIds.length > 0) {
       for (const mappingStepId of payload.mappingStepIds) {
@@ -1143,7 +1130,7 @@ export class WorkflowEngine {
         throw new Error('Synthesis requires a completed Map result; none found.');
       }
     } else {
-      console.log(`[WorkflowEngine] No mappingStepIds configured for synthesis step`);
+      // no mappingStepIds configured for synthesis step
       // Historical synthesis case: attempt to retrieve a prior mapping result
       if (!mappingResult && payload.sourceHistorical?.turnId) {
         try {

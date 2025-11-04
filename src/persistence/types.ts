@@ -25,6 +25,7 @@ export interface SessionRecord {
   activeThreadId: string;         // Currently active thread
   turnCount: number;              // Denormalized for performance
   isActive: boolean;              // Missing property causing errors
+  lastTurnId?: string;            // NEW: pointer to latest AI turn for ContextResolver
   
   // ADD THESE NEW FIELDS:
   updatedAt: number;
@@ -88,6 +89,8 @@ export interface AiTurnRecord extends BaseTurnRecord {
   batchResponseCount: number;
   synthesisResponseCount: number;
   mappingResponseCount: number;
+  // NEW: Turn-scoped provider contexts captured during prompt step
+  providerContexts?: Record<string, any>;
 }
 
 export type TurnRecord = UserTurnRecord | AiTurnRecord;

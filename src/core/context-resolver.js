@@ -59,7 +59,15 @@ export class ContextResolver {
     const lastTurn = await this._getTurn(session.lastTurnId);
     if (!lastTurn) throw new Error(`[ContextResolver] Last turn ${session.lastTurnId} not found`);
 
-    const relevantContexts = this._filterContexts(lastTurn.providerContexts || {}, request.providers || []);
+    // Prefer turn-scoped provider contexts
+    // Normalization: stored shape may be either { [pid]: meta } or { [pid]: { meta } }
+    const turnContexts = lastTurn.providerContexts || {};
+    const normalized = {};
+    for (const [pid, ctx] of Object.entries(turnContexts)) {
+      normalized[pid] = ctx && ctx.meta ? ctx.meta : ctx;
+    }
+
+    const relevantContexts = this._filterContexts(normalized, request.providers || []);
 
     return {
       type: 'extend',

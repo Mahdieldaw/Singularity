@@ -197,6 +197,7 @@ export class ConnectionHandler {
    */
   async _handleExecuteWorkflow(message) {
     let executeRequest = message.payload;
+    let resolvedContext = null;
 
     // Support new three-primitive union: initialize | extend | recompute
     // If a primitive request is detected, adapt it into the legacy
@@ -206,6 +207,13 @@ export class ConnectionHandler {
       executeRequest.type === 'extend' ||
       executeRequest.type === 'recompute'
     )) {
+      // Phase 2: Resolve → Compile → Execute
+      try {
+        resolvedContext = await this.services.contextResolver.resolve(message.payload);
+      } catch (e) {
+        console.error('[ConnectionHandler] ContextResolver failed:', e);
+      }
+
       executeRequest = await this._mapPrimitiveToLegacy(executeRequest).catch((e) => {
         console.error('[ConnectionHandler] Failed to map primitive request:', e);
         return message.payload; // fallback to raw payload
@@ -223,27 +231,31 @@ export class ConnectionHandler {
       // Activate lifecycle manager before workflow
       this.lifecycleManager?.activateWorkflowMode();
 
-      // Auto-relocate sessionId if needed (after reconnects or UI drift)
-      await this._relocateSessionId(executeRequest);
+      // Phase 2 flow: Resolve → Compile → Execute
+      // When resolvedContext is present (i.e., UI sent primitives), skip legacy hydration and prechecks
+      if (!resolvedContext) {
+        // Auto-relocate sessionId if needed (after reconnects or UI drift)
+        await this._relocateSessionId(executeRequest);
 
-      // CRITICAL: Aggressive session hydration for continuation/historical requests
-      await this._ensureSessionHydration(executeRequest);
+        // CRITICAL: Aggressive session hydration for continuation/historical requests
+        await this._ensureSessionHydration(executeRequest);
 
-      // Step 1: Normalize per-provider modes (allows new providers to start fresh)
-      this._normalizeProviderModesForContinuation(executeRequest);
+        // Step 1: Normalize per-provider modes (allows new providers to start fresh)
+        this._normalizeProviderModesForContinuation(executeRequest);
 
-      // Step 2: Validate that providers explicitly marked for continuation have context
-      const precheck = this._precheckContinuation(executeRequest);
-      if (
-        precheck &&
-        precheck.missingProviders &&
-        precheck.missingProviders.length > 0
-      ) {
-        this._emitContinuationPrecheckFailure(
-          executeRequest,
-          precheck.missingProviders
-        );
-        return;
+        // Step 2: Validate that providers explicitly marked for continuation have context
+        const precheck = this._precheckContinuation(executeRequest);
+        if (
+          precheck &&
+          precheck.missingProviders &&
+          precheck.missingProviders.length > 0
+        ) {
+          this._emitContinuationPrecheckFailure(
+            executeRequest,
+            precheck.missingProviders
+          );
+          return;
+        }
       }
 
       // --- NEW: Validate presence of userTurnId for historical-only runs ---
@@ -287,8 +299,8 @@ export class ConnectionHandler {
         console.warn("[Backend] SessionId pre-generation failed, will rely on compiler:", e);
       }
 
-      // Compile high-level request to detailed workflow
-      const workflowRequest = this.services.compiler.compile(executeRequest);
+      // Compile high-level request to detailed workflow (pass resolvedContext when available)
+      const workflowRequest = this.services.compiler.compile(executeRequest, resolvedContext);
 
       // Decide if this workflow creates a NEW turn (batch prompt present) or
       // appends results to an existing historical turn (mapping/synthesis-only)
@@ -308,19 +320,12 @@ export class ConnectionHandler {
         try {
           this.port.postMessage({
             type: "TURN_CREATED",
-            sessionId: executeRequest?.sessionId,
+            sessionId: workflowRequest?.context?.sessionId || executeRequest?.sessionId,
             userTurnId,
             aiTurnId,
           });
-        } catch (e) {
-          console.warn("[ConnectionHandler] Failed to post TURN_CREATED:", e);
-        }
+        } catch (_) {}
       } else {
-        // Historical-only run: attach canonical userTurnId, DO NOT create or emit a new AI turn
-        workflowRequest.context = {
-          ...workflowRequest.context,
-          canonicalUserTurnId: userTurnId,
-        };
         console.log('[ConnectionHandler] Historical-only run: skipping TURN_CREATED');
       }
 

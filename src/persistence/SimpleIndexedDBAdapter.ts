@@ -25,7 +25,6 @@ export class SimpleIndexedDBAdapter {
    * Only returns after onupgradeneeded completes and DB is fully open
    */
   async init(options?: { timeoutMs?: number; autoRepair?: boolean }): Promise<void> {
-    console.warn('persistence:init - Starting SimpleIndexedDBAdapter initialization');
     this.initTimeoutMs = options?.timeoutMs ?? this.initTimeoutMs;
     const autoRepair = options?.autoRepair ?? true;
 
@@ -57,7 +56,6 @@ export class SimpleIndexedDBAdapter {
       }
       
       this.isInitialized = true;
-      console.warn('persistence adapter initialized');
     } catch (error) {
       console.error('persistence:init - Initialization failed:', error);
       throw error;
@@ -81,7 +79,6 @@ export class SimpleIndexedDBAdapter {
         });
       });
       
-      console.log(`persistence:get(${resolved}, ${key}) - ${result ? 'found' : 'not found'}`);
       return result;
     } catch (error) {
       console.error(`persistence:get(${resolved}, ${key}) - error:`, error);
@@ -122,7 +119,6 @@ export class SimpleIndexedDBAdapter {
         });
       });
       
-      console.log(`persistence:put(${resolved}, ${clonedValue.id}) - success`);
       return result;
     } catch (error) {
       console.error(`persistence:put(${resolved}, ${key || value.id}) - error:`, error);
@@ -146,7 +142,6 @@ export class SimpleIndexedDBAdapter {
         });
       });
       
-      console.log(`persistence:delete(${resolved}, ${key}) - success`);
       return true;
     } catch (error) {
       console.error(`persistence:delete(${resolved}, ${key}) - error:`, error);
@@ -171,7 +166,6 @@ export class SimpleIndexedDBAdapter {
         });
       });
       
-      console.log(`persistence:getAll(${resolved}) - found ${result.length} records`);
       return result;
     } catch (error) {
       console.error(`persistence:getAll(${resolved}) - error:`, error);
