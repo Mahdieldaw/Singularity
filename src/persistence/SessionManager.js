@@ -522,6 +522,92 @@ export class SessionManager {
   }
 
   /**
+   * Migration verification helper
+   * Returns overall migration status across sessions.
+   * A session is considered "migrated" when:
+   *  - It has a lastTurnId pointing to the latest AI turn, and
+   *  - The latest AI turn contains providerContexts with at least one provider
+   */
+  async getMigrationStatus() {
+    try {
+      if (!this.adapter?.isReady || !this.adapter.isReady()) {
+        return { total: 0, migrated: 0, pending: 0, pendingSessions: [], sessions: {} };
+      }
+
+      const sessions = await this.adapter.getAll('sessions');
+      const allTurns = await this.adapter.getAll('turns');
+
+      const details = {};
+      let migrated = 0;
+      let pending = 0;
+
+      for (const s of sessions) {
+        const sid = s.id;
+        const turns = allTurns
+          .filter(t => t.sessionId === sid)
+          .sort((a,b) => (a.sequence ?? a.createdAt) - (b.sequence ?? b.createdAt));
+        const latestAi = [...turns].reverse().find(t => (t.type === 'ai' || t.role === 'assistant')) || null;
+
+        const hasLastPointer = !!(s.lastTurnId && latestAi && s.lastTurnId === latestAi.id);
+        const contextsOnLatest = !!(latestAi && latestAi.providerContexts && Object.keys(latestAi.providerContexts || {}).length > 0);
+        const ok = !!(latestAi && hasLastPointer && contextsOnLatest);
+
+        details[sid] = {
+          hasLastPointer,
+          latestAiId: latestAi?.id || null,
+          contextsOnLatest,
+          migrated: ok
+        };
+
+        if (ok) migrated++; else pending++;
+      }
+
+      const pendingSessions = Object.entries(details)
+        .filter(([, d]) => !d.migrated)
+        .map(([sid]) => sid);
+
+      return {
+        total: sessions.length,
+        migrated,
+        pending,
+        pendingSessions,
+        sessions: details
+      };
+    } catch (e) {
+      console.warn('[SessionManager] getMigrationStatus failed:', e);
+      return { total: 0, migrated: 0, pending: 0, pendingSessions: [], sessions: {} };
+    }
+  }
+
+  /**
+   * Force-run migrations for all sessions.
+   * This will reset the metadata flag and invoke the pending migration routine.
+   */
+  async forceMigrateAll() {
+    try {
+      if (!this.adapter?.isReady || !this.adapter.isReady()) {
+        throw new Error('[SessionManager] forceMigrateAll requires initialized adapter');
+      }
+      let mig = null;
+      try { mig = await this.adapter.get('metadata', 'migration_1_turn_scoped_contexts'); } catch (_) {}
+      const now = Date.now();
+      if (!mig) {
+        mig = { key: 'migration_1_turn_scoped_contexts', id: 'migration_1_turn_scoped_contexts', value: 'pending', createdAt: now, updatedAt: now };
+      } else {
+        mig.value = 'pending';
+        mig.updatedAt = now;
+      }
+      try { await this.adapter.put('metadata', mig); } catch (_) {}
+
+      await this._runPendingMigrations();
+      return await this.getMigrationStatus();
+    } catch (e) {
+      console.warn('[SessionManager] forceMigrateAll failed:', e);
+      return await this.getMigrationStatus();
+    }
+  }
+
+  /**
    * Helper function to count responses in a response bucket
    * @param {Object} responseBucket - Object containing provider responses
    * @returns {number} Total count of responses

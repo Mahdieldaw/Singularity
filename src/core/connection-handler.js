@@ -210,43 +210,47 @@ export class ConnectionHandler {
       this.lifecycleManager?.activateWorkflowMode();
 
       // ========================================================================
-      // PHASE 3: Always use primitive-based flow
+      // PHASE 5: Primitives-only execution path (fail-fast on legacy)
       // ========================================================================
       const isPrimitive = executeRequest && typeof executeRequest.type === 'string' && ['initialize', 'extend', 'recompute'].includes(executeRequest.type);
-
-      if (isPrimitive) {
-        // Phase 3 path: Resolve → Compile → Execute
-        console.log(`[ConnectionHandler] Processing ${executeRequest.type} primitive`);
-
-        // Step 1: Resolve context
+      if (!isPrimitive) {
+        const errMsg = '[ConnectionHandler] Non-primitive request rejected. Use {type:"initialize"|"extend"|"recompute"} primitives only.';
+        console.error(errMsg, { received: executeRequest });
         try {
-          resolvedContext = await this.services.contextResolver.resolve(executeRequest);
-          console.log(`[ConnectionHandler] Context resolved: ${resolvedContext.type}`);
-        } catch (e) {
-          console.error('[ConnectionHandler] Context resolution failed:', e);
-          throw e;
-        }
+          this.port.postMessage({
+            type: 'WORKFLOW_STEP_UPDATE',
+            sessionId: executeRequest?.sessionId || 'unknown',
+            stepId: 'validate-primitive',
+            status: 'failed',
+            error: 'Legacy ExecuteWorkflowRequest is no longer supported. Please migrate to primitives.'
+          });
+          this.port.postMessage({
+            type: 'WORKFLOW_COMPLETE',
+            sessionId: executeRequest?.sessionId || 'unknown',
+            error: 'Legacy ExecuteWorkflowRequest is no longer supported.'
+          });
+        } catch (_) {}
+        return;
+      }
 
-        // Step 2: Map primitive to legacy request format
-        try {
-          executeRequest = await this._mapPrimitiveToLegacy(executeRequest);
-        } catch (e) {
-          console.error('[ConnectionHandler] Failed to map primitive request:', e);
-          throw e;
-        }
-      } else {
-        // Legacy path: Fall back to hydration (Phase 4 will remove this)
-        console.warn('[ConnectionHandler] Legacy request detected - using hydration path');
+      // Phase 5 path: Resolve → Map → Compile → Execute
+      console.log(`[ConnectionHandler] Processing ${executeRequest.type} primitive`);
 
-        await this._relocateSessionId(executeRequest);
-        await this._ensureSessionHydration(executeRequest);
-        this._normalizeProviderModesForContinuation(executeRequest);
+      // Step 1: Resolve context
+      try {
+        resolvedContext = await this.services.contextResolver.resolve(executeRequest);
+        console.log(`[ConnectionHandler] Context resolved: ${resolvedContext.type}`);
+      } catch (e) {
+        console.error('[ConnectionHandler] Context resolution failed:', e);
+        throw e;
+      }
 
-        const precheck = this._precheckContinuation(executeRequest);
-        if (precheck && precheck.missingProviders && precheck.missingProviders.length > 0) {
-          this._emitContinuationPrecheckFailure(executeRequest, precheck.missingProviders);
-          return;
-        }
+      // Step 2: Map primitive to legacy request format for compiler/engine
+      try {
+        executeRequest = await this._mapPrimitiveToLegacy(executeRequest);
+      } catch (e) {
+        console.error('[ConnectionHandler] Failed to map primitive request:', e);
+        throw e;
       }
 
       // ========================================================================

@@ -1,383 +1,300 @@
-// src/core/workflow-compiler.js (FINAL, COMPLETE VERSION)
+// src/core/workflow-compiler.js - PHASE 3 COMPLETE
 /**
- * WorkflowCompiler
+ * WorkflowCompiler - PURE FUNCTION
  *
- * Translates a high-level ExecuteWorkflowRequest into a sequence of
- * low-level WorkflowSteps the engine can execute.
- *
- * Principles:
- * - Declarative input (ExecuteWorkflowRequest)
- * - Imperative output (WorkflowRequest.steps)
- * - Stateless given session state read-only
+ * Phase 3 completion: Zero database access, fully synchronous.
+ * All data comes from ResolvedContext parameter.
  */
 
 export class WorkflowCompiler {
   constructor(sessionManager) {
+    // Kept only for dependency injection - NEVER USED
     this.sessionManager = sessionManager;
   }
 
-  compile(request, resolvedContext = null) {
+  /**
+   * PURE COMPILE: Request + Context → Workflow Steps
+   * 
+   * @param {Object} request - ExecuteWorkflowRequest
+   * @param {ResolvedContext} resolvedContext - REQUIRED from ContextResolver
+   * @returns {Object} Executable workflow
+   */
+  compile(request, resolvedContext) {
+    // Phase 3: Strict requirement enforcement
+    if (!resolvedContext) {
+      throw new Error('[Compiler] resolvedContext required. Call ContextResolver.resolve() first.');
+    }
+
     this._validateRequest(request);
+    this._validateContext(resolvedContext);
 
-    const {
-      mode,
-      sessionId,
-      threadId,
-      userMessage,
-      providers,
-      providerModes = {}, // Default to empty object for safety
-      providerMeta = {},
-      synthesis,
-      mapping,
-      useThinking,
-      historicalContext,
-    } = request;
-
-    // Defensive: if sessionId is null but this is clearly not a new conversation
-    // (historical mapping/synthesis or continuation), attempt to relocate to the
-    // correct session before generating context. This complements the
-    // ConnectionHandler-level relocation.
-    let effectiveSessionId = sessionId;
-    try {
-      const isHistorical = !!historicalContext?.userTurnId;
-      const isContinuation = mode === 'continuation';
-      const isNew = mode === 'new-conversation';
-      if (!isNew && !effectiveSessionId) {
-        if (isHistorical) {
-          const targetTurnId = historicalContext.userTurnId;
-          const sessions = this.sessionManager?.sessions || {};
-          for (const [sid, s] of Object.entries(sessions)) {
-            const turns = Array.isArray(s?.turns) ? s.turns : [];
-            const idx = turns.findIndex(t => t?.id === targetTurnId && (t?.type === 'user' || t?.role === 'user'));
-            if (idx !== -1) { effectiveSessionId = sid; break; }
-          }
-        }
-        if (!effectiveSessionId && isContinuation) {
-          const sessions = this.sessionManager?.sessions || {};
-          let bestSid = null, bestTs = -1;
-          for (const [sid, s] of Object.entries(sessions)) {
-            const ts = Number(s?.lastActivity) || 0;
-            if (ts > bestTs) { bestTs = ts; bestSid = sid; }
-          }
-          if (bestSid) effectiveSessionId = bestSid;
-        }
-      }
-    } catch (_) {}
-
-    const workflowId = this._generateWorkflowId(mode);
+    const workflowId = this._generateWorkflowId(resolvedContext.type);
     const steps = [];
 
-    const shouldRunBatch = providers && providers.length > 0;
-    const batchStepId = shouldRunBatch ? `batch-${Date.now()}` : null;
+    console.log(`[Compiler] Compiling ${resolvedContext.type} workflow`);
 
-    // STEP 1: Batch prompt (optional)
-    if (shouldRunBatch) {
-      const isSynthesisFirst =
-        synthesis?.enabled &&
-        synthesis.providers.length > 0 &&
-        providers.length > 1;
+    // ========================================================================
+    // STEP GENERATION: Pure switch on context type
+    // ========================================================================
+    switch (resolvedContext.type) {
+      case 'initialize':
+      case 'extend':
+        // Both need batch - context differs
+        if (request.providers && request.providers.length > 0) {
+          steps.push(this._createBatchStep(request, resolvedContext));
+        }
+        break;
 
-      // Determine provider contexts: prefer resolvedContext from ContextResolver in Phase 2
-      const promptProviderContexts = (() => {
-        try {
-          if (resolvedContext && resolvedContext.type === 'extend' && resolvedContext.providerContexts) {
-            return resolvedContext.providerContexts;
-          }
-        } catch (_) {}
-        return this._getProviderContexts(
-          sessionId,
-          threadId,
-          mode,
-          providers,
-          providerModes,
-          historicalContext
-        );
-      })();
-
-      steps.push({
-        stepId: batchStepId,
-        type: "prompt",
-        payload: {
-          prompt: userMessage,
-          providers: providers,
-          hidden: !!isSynthesisFirst,
-          useThinking: !!useThinking,
-          // Prefer resolved contexts when available; fall back to legacy lookup
-          providerContexts: promptProviderContexts,
-          // ✅ Pass through per-provider metadata (e.g., gemini model)
-          providerMeta,
-        },
-      });
-      try {
-        console.log('[Compiler] Batch step created', {
-          batchStepId,
-          hidden: !!isSynthesisFirst,
-          providers,
-          mode,
-          providerModes
-        });
-      } catch (_) {}
+      case 'recompute':
+        // No batch - engine seeds frozen outputs
+        console.log('[Compiler] Recompute: Skipping batch (frozen outputs)');
+        break;
     }
 
-    // Calculate latestUserTurnId once for both synthesis and mapping steps
-    // If there is no batch step in this workflow and no explicit historical turn
-    // provided by the UI, automatically source from the latest completed turn
-    // so synthesis/mapping works on subsequent rounds without needing explicit UI context.
-    const latestUserTurnId = (!historicalContext?.userTurnId && !batchStepId)
-      ? this._getLatestUserTurnId(effectiveSessionId || sessionId)
-      : null;
-
-    // STEP 2: Mapping (one step per selected mapping provider) - NOW RUNS FIRST
-    const mappingStepIds = [];
-    if (mapping?.enabled && mapping.providers.length > 0) {
-      mapping.providers.forEach((provider) => {
-        const mappingStepId = `mapping-${provider}-${Date.now()}`;
-        mappingStepIds.push(mappingStepId);
-        // ✅ RESPECTS providerModes override
-        const providerMode = providerModes[provider] || mode;
-
-        const mappingStep = {
-          stepId: mappingStepId,
-          type: "mapping",
-          payload: {
-            mappingProvider: provider,
-            continueFromBatchStep: (providerModes[provider] !== 'new-conversation' && batchStepId)
-              ? batchStepId
-              : undefined,
-            sourceStepIds: historicalContext?.userTurnId
-              ? undefined
-              : batchStepId
-              ? [batchStepId]
-              : undefined,
-            sourceHistorical: historicalContext?.userTurnId
-              ? {
-                  turnId: historicalContext.userTurnId,
-                  responseType: historicalContext.sourceType || "batch",
-                }
-              : latestUserTurnId
-              ? {
-                  turnId: latestUserTurnId,
-                  responseType: "batch",
-                }
-              : undefined,
-            originalPrompt: userMessage,
-            useThinking: !!useThinking && provider === "chatgpt",
-            attemptNumber: historicalContext?.attemptNumber || 1,
-          },
-        };
-        steps.push(mappingStep);
-        try {
-          console.log('[Compiler] Mapping step', {
-            mappingStepId,
-            provider,
-            ...mappingStep.payload
-          });
-        } catch (_) {}
-      });
+    // Mapping
+    if (this._needsMappingStep(request, resolvedContext)) {
+      steps.push(this._createMappingStep(request, resolvedContext));
     }
 
-    // STEP 3: Synthesis (one step per selected synthesis provider) - NOW RUNS AFTER MAPPING
-    if (synthesis?.enabled && synthesis.providers.length > 0) {
-      synthesis.providers.forEach((provider) => {
-        const synthStepId = `synthesis-${provider}-${Date.now()}`;
-        // ✅ RESPECTS providerModes override for determining continuation
-        const providerMode = providerModes[provider] || mode;
-
-        const synthStep = {
-          stepId: synthStepId,
-          type: "synthesis",
-          payload: {
-            synthesisProvider: provider,
-            continueFromBatchStep: (providerModes[provider] !== 'new-conversation' && batchStepId)
-              ? batchStepId
-              : undefined,
-            sourceStepIds: historicalContext?.userTurnId
-              ? undefined
-              : batchStepId
-              ? [batchStepId]
-              : undefined,
-            // NEW: Include mapping step IDs as dependencies for synthesis
-            mappingStepIds: mappingStepIds.length > 0 ? mappingStepIds : undefined,
-            sourceHistorical: historicalContext?.userTurnId
-              ? {
-                  turnId: historicalContext.userTurnId,
-                  responseType: historicalContext.sourceType || "batch",
-                }
-              : latestUserTurnId
-              ? {
-                  turnId: latestUserTurnId,
-                  responseType: "batch",
-                }
-              : undefined,
-            originalPrompt: userMessage,
-            useThinking: !!useThinking && provider === "chatgpt",
-            attemptNumber: historicalContext?.attemptNumber || 1,
-          },
-        };
-        steps.push(synthStep);
-        try {
-          console.log('[Compiler] Synthesis step', {
-            synthStepId,
-            provider,
-            ...synthStep.payload
-          });
-        } catch (_) {}
-      });
+    // Synthesis
+    if (this._needsSynthesisStep(request, resolvedContext)) {
+      steps.push(this._createSynthesisStep(request, resolvedContext));
     }
+
+    const workflowContext = this._buildWorkflowContext(request, resolvedContext);
+
+    console.log(`[Compiler] Generated ${steps.length} steps`);
 
     return {
       workflowId,
-      // If the caller explicitly passed `null` for sessionId it means the
-      // frontend wants the backend to create the session id. Create a new
-      // deterministic id here and flag the context so the engine will emit
-      // a SESSION_STARTED message immediately.
-      context: (() => {
-        let ctxSessionId;
-        let sessionCreated = false;
-        if (mode === 'new-conversation' && sessionId === null) {
-          // Only create new session for explicit new-conversation
-          ctxSessionId = `sid-${Date.now()}`;
-          sessionCreated = true;
-        } else {
-          ctxSessionId = effectiveSessionId || sessionId || "new-session";
-        }
-        return {
-          sessionId: ctxSessionId,
-          threadId: threadId || "default-thread",
-          targetUserTurnId: historicalContext?.userTurnId || "",
-          sessionCreated,
-          userMessage
-        };
-      })(),
-      steps,
+      context: workflowContext,
+      steps
     };
   }
 
-  // Helper Methods
+  // ============================================================================
+  // STEP CREATORS (Pure)
+  // ============================================================================
 
-  // ✅ ADDED providerModes parameter to function signature
-  _getProviderContexts(
-    sessionId,
-    threadId,
-    mode,
-    providers,
-    providerModes,
-    historicalContext
-  ) {
-    if (historicalContext?.branchPointTurnId) {
-      return this._getInheritedContexts(
-        sessionId,
-        historicalContext.branchPointTurnId,
-        providers
-      );
-    }
-    if (mode === "new-conversation" && !historicalContext?.userTurnId) {
-      return undefined;
-    }
-    const contexts = this.sessionManager.getProviderContexts(
-      sessionId,
-      threadId
-    );
-    if (!contexts) return undefined;
+  _createBatchStep(request, context) {
+    const isSynthesisFirst =
+      request.synthesis?.enabled &&
+      request.synthesis.providers?.length > 0 &&
+      request.providers.length > 1;
 
-    const result = {};
-    providers.forEach((providerId) => {
-      // ✅ LOGIC ADDED to respect per-provider override
-      const providerMode = providerModes[providerId] || mode;
-      if (providerMode === "new-conversation") {
-        return; // Skip context for this provider to force a new conversation
+    return {
+      stepId: `batch-${Date.now()}`,
+      type: 'prompt',
+      payload: {
+        prompt: request.userMessage,
+        providers: request.providers,
+        providerContexts: context.type === 'extend' 
+          ? context.providerContexts 
+          : undefined,
+        providerMeta: request.providerMeta || {},
+        hidden: !!isSynthesisFirst,
+        useThinking: !!request.useThinking
       }
-
-      if (contexts[providerId]) {
-        result[providerId] = {
-          meta: contexts[providerId].meta,
-          continueThread: true,
-        };
-      }
-    });
-    return Object.keys(result).length > 0 ? result : undefined;
+    };
   }
 
-  // ... (the rest of the helper methods are identical and correct) ...
+  _createMappingStep(request, context) {
+    const mappingStepId = `mapping-${Date.now()}`;
 
-  _getInheritedContexts(sessionId, branchPointTurnId, providers) {
-    const session = this.sessionManager.sessions?.[sessionId];
-    if (!session) return undefined;
-    const branchIndex = session.turns.findIndex(
-      (t) => t.id === branchPointTurnId
-    );
-    if (branchIndex === -1) return undefined;
-    const result = {};
-    providers.forEach((providerId) => {
-      for (let i = branchIndex; i >= 0; i--) {
-        const turn = session.turns[i];
-        if (turn.type === "ai" && turn.batchResponses?.[providerId]) {
-          result[providerId] = {
-            meta: turn.batchResponses[providerId].meta,
-            continueThread: true,
-          };
-          break;
+    if (context.type === 'recompute') {
+      return {
+        stepId: mappingStepId,
+        type: 'mapping',
+        payload: {
+          mappingProvider: context.targetProvider,
+          sourceHistorical: {
+            turnId: context.sourceTurnId,
+            responseType: 'batch'
+          },
+          originalPrompt: context.sourceUserMessage,
+          useThinking: !!request.useThinking,
+          attemptNumber: 1
         }
+      };
+    }
+
+    const mapper = request.mapper || this._getDefaultMapper(request);
+    return {
+      stepId: mappingStepId,
+      type: 'mapping',
+      payload: {
+        mappingProvider: mapper,
+        sourceStepIds: [`batch-${Date.now()}`],
+        originalPrompt: request.userMessage,
+        useThinking: !!request.useThinking && mapper === 'chatgpt',
+        attemptNumber: 1
       }
-    });
-    return Object.keys(result).length > 0 ? result : undefined;
+    };
   }
 
-  _generateWorkflowId(mode) {
-    return `wf-${mode}-${Date.now()}-${Math.random()
-      .toString(36)
-      .substr(2, 9)}`;
+  _createSynthesisStep(request, context) {
+    const synthStepId = `synthesis-${Date.now()}`;
+    const mappingStepId = `mapping-${Date.now()}`;
+
+    if (context.type === 'recompute') {
+      return {
+        stepId: synthStepId,
+        type: 'synthesis',
+        payload: {
+          synthesisProvider: context.targetProvider,
+          sourceHistorical: {
+            turnId: context.sourceTurnId,
+            responseType: 'batch'
+          },
+          originalPrompt: context.sourceUserMessage,
+          useThinking: !!request.useThinking,
+          attemptNumber: 1,
+          strategy: 'continuation',
+          mappingStepIds: context.stepType === 'mapping' ? [mappingStepId] : undefined
+        }
+      };
+    }
+
+    const synthesizer = request.synthesizer || this._getDefaultSynthesizer(request);
+    return {
+      stepId: synthStepId,
+      type: 'synthesis',
+      payload: {
+        synthesisProvider: synthesizer,
+        sourceStepIds: [`batch-${Date.now()}`],
+        mappingStepIds: request.includeMapping ? [mappingStepId] : undefined,
+        originalPrompt: request.userMessage,
+        useThinking: !!request.useThinking && synthesizer === 'chatgpt',
+        attemptNumber: 1,
+        strategy: 'continuation'
+      }
+    };
   }
+
+  // ============================================================================
+  // DECISION LOGIC (Pure)
+  // ============================================================================
+
+  _needsMappingStep(request, context) {
+    if (context.type === 'recompute') {
+      return context.stepType === 'mapping';
+    }
+    return request.includeMapping || false;
+  }
+
+  _needsSynthesisStep(request, context) {
+    if (context.type === 'recompute') {
+      return context.stepType === 'synthesis';
+    }
+    return request.includeSynthesis || false;
+  }
+
+  // ============================================================================
+  // CONTEXT BUILDER (Pure)
+  // ============================================================================
+
+  _buildWorkflowContext(request, context) {
+    let sessionId;
+    let sessionCreated = false;
+
+    switch (context.type) {
+      case 'initialize':
+        sessionId = `session-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        sessionCreated = true;
+        break;
+      
+      case 'extend':
+      case 'recompute':
+        sessionId = context.sessionId;
+        break;
+      
+      default:
+        sessionId = 'unknown-session';
+    }
+
+    const userMessage = context.type === 'recompute'
+      ? context.sourceUserMessage
+      : request.userMessage;
+
+    return {
+      sessionId,
+      threadId: 'default-thread',
+      targetUserTurnId: context.type === 'recompute' ? context.sourceTurnId : '',
+      sessionCreated,
+      userMessage
+    };
+  }
+
+  // ============================================================================
+  // UTILITIES (Pure)
+  // ============================================================================
+
+  _getDefaultMapper(request) {
+    try {
+      const stored = localStorage.getItem('htos_mapping_provider');
+      if (stored) return stored;
+    } catch {}
+    return request.providers?.[0] || 'claude';
+  }
+
+  _getDefaultSynthesizer(request) {
+    try {
+      const stored = localStorage.getItem('htos_last_synthesis_model');
+      if (stored) return stored;
+    } catch {}
+    return request.providers?.[0] || 'claude';
+  }
+
+  _generateWorkflowId(contextType) {
+    return `wf-${contextType}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+  }
+
+  // ============================================================================
+  // VALIDATION
+  // ============================================================================
 
   _validateRequest(request) {
-    if (!request) throw new Error("Request is required");
-    const validModes = ["new-conversation", "continuation"];
+    if (!request) throw new Error('[Compiler] Request required');
+    
+    const validModes = ['new-conversation', 'continuation'];
     if (!request.mode || !validModes.includes(request.mode)) {
-      throw new Error(
-        `mode is required and must be one of: ${validModes.join(", ")}`
-      );
+      throw new Error(`[Compiler] Invalid mode: ${request.mode}`);
     }
-    if (!request.historicalContext?.userTurnId) {
-      if (!request.userMessage || !request.userMessage.trim()) {
-        throw new Error("userMessage is required for non-historical requests");
-      }
+
+    if (!request.historicalContext?.userTurnId && (!request.userMessage || !request.userMessage.trim())) {
+      throw new Error('[Compiler] userMessage required');
     }
+
     const hasProviders = request.providers && request.providers.length > 0;
-    const hasSynthesis =
-      request.synthesis?.enabled && request.synthesis.providers?.length > 0;
-    const hasMapping =
-      request.mapping?.enabled && request.mapping.providers?.length > 0;
+    const hasSynthesis = request.synthesis?.enabled && request.synthesis.providers?.length > 0;
+    const hasMapping = request.mapping?.enabled && request.mapping.providers?.length > 0;
+
     if (!hasProviders && !hasSynthesis && !hasMapping) {
-      throw new Error(
-        "Request must specify at least one action: providers, synthesis, or mapping."
-      );
+      throw new Error('[Compiler] Must specify at least one action');
     }
-    const validProviders = ["claude", "gemini", "gemini-pro", "chatgpt", "qwen"];
-    const allProviderIds = [
-      ...(request.providers || []),
-      ...(request.synthesis?.providers || []),
-      ...(request.mapping?.providers || []),
-      ...Object.keys(request.providerModes || {}),
-    ];
-    const invalid = allProviderIds.filter(
-      (p) => p && !validProviders.includes(p)
-    );
-    if (invalid.length > 0)
-      throw new Error(`Invalid providers: ${invalid.join(", ")}`);
   }
 
-  // Returns the most recent user turn id in the session for default historical sourcing
-  _getLatestUserTurnId(sessionId) {
-    try {
-      const session = this.sessionManager.sessions?.[sessionId];
-      if (!session || !Array.isArray(session.turns)) return null;
-      for (let i = session.turns.length - 1; i >= 0; i--) {
-        const t = session.turns[i];
-        if (t && t.type === 'user' && t.id) return t.id;
-      }
-      return null;
-    } catch (_) {
-      return null;
+  _validateContext(context) {
+    if (!context?.type) throw new Error('[Compiler] Context type required');
+
+    const validTypes = ['initialize', 'extend', 'recompute'];
+    if (!validTypes.includes(context.type)) {
+      throw new Error(`[Compiler] Invalid context type: ${context.type}`);
+    }
+
+    switch (context.type) {
+      case 'extend':
+        if (!context.sessionId) throw new Error('[Compiler] Extend: sessionId required');
+        if (!context.lastTurnId) throw new Error('[Compiler] Extend: lastTurnId required');
+        if (!context.providerContexts) throw new Error('[Compiler] Extend: providerContexts required');
+        break;
+
+      case 'recompute':
+        if (!context.sessionId) throw new Error('[Compiler] Recompute: sessionId required');
+        if (!context.sourceTurnId) throw new Error('[Compiler] Recompute: sourceTurnId required');
+        if (!context.frozenBatchOutputs) throw new Error('[Compiler] Recompute: frozenBatchOutputs required');
+        if (!context.stepType) throw new Error('[Compiler] Recompute: stepType required');
+        break;
     }
   }
 }
