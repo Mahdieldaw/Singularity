@@ -84,6 +84,8 @@ export interface AiTurnRecord extends BaseTurnRecord {
     branchPointTurnId?: string;
     replacesId?: string;
     isHistoricalRerun?: boolean;
+    // Debate mode metadata
+    debate?: DebateMeta;
   };
   // Response counts for quick access
   batchResponseCount: number;
@@ -94,6 +96,15 @@ export interface AiTurnRecord extends BaseTurnRecord {
 }
 
 export type TurnRecord = UserTurnRecord | AiTurnRecord;
+
+// Debate metadata structure
+export interface DebateMeta {
+  stage?: number;
+  stageName?: string;
+  totalStages?: number;
+  originalPrompt?: string;
+  [key: string]: any;
+}
 
 // 4. Provider Responses Store
 export interface ProviderResponseRecord {

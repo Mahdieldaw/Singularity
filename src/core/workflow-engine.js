@@ -431,6 +431,10 @@ export class WorkflowEngine {
             if (!step) return;
             if (step.type === 'prompt') {
               result.batchOutputs = stepResult.result?.results || {};
+              // Attach debate metadata from prompt step result if present
+              if (!result.debateMeta && stepResult?.result?.debateMeta) {
+                result.debateMeta = stepResult.result.debateMeta;
+              }
             } else if (step.type === 'synthesis') {
               const providerId = step.payload?.synthesisProvider;
               if (providerId) result.synthesisOutputs[providerId] = stepResult.result;
@@ -730,6 +734,23 @@ export class WorkflowEngine {
    */
   async executePromptStep(step, context) {
     const { prompt, providers, useThinking, providerContexts } = step.payload;
+    // Debate Mode: extract debate metadata from payload/providerMeta, if present
+    const resolveDebateMeta = () => {
+      try {
+        const pm = step?.payload?.providerMeta;
+        if (pm && typeof pm === 'object') {
+          for (const key of Object.keys(pm)) {
+            const perProviderMeta = pm[key];
+            if (perProviderMeta && (perProviderMeta.debate || perProviderMeta.debateMeta)) {
+              return perProviderMeta.debate || perProviderMeta.debateMeta;
+            }
+          }
+        }
+        if (step?.payload?.debateMeta) return step.payload.debateMeta;
+      } catch (_) {}
+      return undefined;
+    };
+    const debateMeta = resolveDebateMeta();
     
     return new Promise((resolve, reject) => {
       this.orchestrator.executeParallelFanout(prompt, providers, {
@@ -811,13 +832,17 @@ export class WorkflowEngine {
              return; 
            } 
            
-           // Resolve with the complete picture of the batch execution. 
-           // Downstream steps like synthesis will naturally filter for 'completed' status. 
-           resolve({ 
-             results: formattedResults, 
-             // We can still pass along hard errors for logging if needed 
-             errors: Object.fromEntries(errors) 
-           }); 
+           // Resolve with the complete picture of the batch execution.
+           // Downstream steps like synthesis will naturally filter for 'completed' status.
+           const finalResults = {
+             results: formattedResults,
+             // We can still pass along hard errors for logging if needed
+             errors: Object.fromEntries(errors)
+           };
+           if (debateMeta) {
+             finalResults.debateMeta = debateMeta;
+           }
+           resolve(finalResults);
          } 
          // ========= END: RECOMMENDED IMPLEMENTATION ========= 
        });

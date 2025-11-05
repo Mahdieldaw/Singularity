@@ -114,7 +114,9 @@ export class SessionManager {
       sequence: 1,
       batchResponseCount: this.countResponses(result.batchOutputs),
       synthesisResponseCount: this.countResponses(result.synthesisOutputs),
-      mappingResponseCount: this.countResponses(result.mappingOutputs)
+      mappingResponseCount: this.countResponses(result.mappingOutputs),
+      // Persist debate state when present
+      meta: (result && result.debateMeta) ? { debate: result.debateMeta } : undefined
     };
     await this.adapter.put('turns', aiTurnRecord);
 
@@ -204,7 +206,9 @@ export class SessionManager {
       sequence: nextSequence + 1,
       batchResponseCount: this.countResponses(result.batchOutputs),
       synthesisResponseCount: this.countResponses(result.synthesisOutputs),
-      mappingResponseCount: this.countResponses(result.mappingOutputs)
+      mappingResponseCount: this.countResponses(result.mappingOutputs),
+      // Persist debate state when present
+      meta: (result && result.debateMeta) ? { debate: result.debateMeta } : undefined
     };
     await this.adapter.put('turns', aiTurnRecord);
 
