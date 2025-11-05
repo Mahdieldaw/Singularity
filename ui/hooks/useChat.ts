@@ -106,6 +106,7 @@ export function useChat() {
       const primitive: PrimitiveWorkflowRequest = isInitialize
         ? {
             type: 'initialize',
+            sessionId: null, // backend is authoritative; do not generate in UI
             userMessage: prompt,
             providers: activeProviders,
             includeMapping: shouldUseMapping,

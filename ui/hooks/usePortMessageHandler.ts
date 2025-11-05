@@ -228,7 +228,9 @@ export function usePortMessageHandler() {
 
         // Ignore cross-session messages
         if (msgSessionId && currentSessionId && msgSessionId !== currentSessionId) {
-          console.warn(`[Port] Ignoring PARTIAL_RESULT from ${msgSessionId} (active ${currentSessionId})`);
+          if (STREAMING_DEBUG_UI) {
+            console.warn(`[Port] Ignoring PARTIAL_RESULT from ${msgSessionId} (active ${currentSessionId})`);
+          }
           return;
         }
 
@@ -244,7 +246,9 @@ export function usePortMessageHandler() {
           pid = extractProviderFromStepId(stepId, stepType);
         }
         if (!pid) {
-          console.warn(`[Port] PARTIAL_RESULT missing providerId and could not be derived for step ${stepId}`);
+          if (STREAMING_DEBUG_UI) {
+            console.warn(`[Port] PARTIAL_RESULT missing providerId and could not be derived for step ${stepId}`);
+          }
           return;
         }
 
@@ -308,7 +312,64 @@ export function usePortMessageHandler() {
               textLength: data?.text?.length,
               status: data?.status
             });
+            // Only apply direct mutations for recompute flows (historical reruns)
+            if (message.isRecompute) {
+              setTurnsMap((draft: Map<string, TurnMessage>) => {
+                const existing = draft.get(targetId);
+                if (!existing || existing.type !== 'ai') return;
+                const aiTurn = existing as AiTurn;
 
+                const completedEntry = {
+                  providerId,
+                  text: data?.text || '',
+                  status: 'completed' as const,
+                  createdAt: Date.now(),
+                  updatedAt: Date.now(),
+                  meta: data?.meta || {}
+                };
+
+                if (stepType === 'synthesis') {
+                  const arr = Array.isArray(aiTurn.synthesisResponses?.[providerId])
+                    ? [...(aiTurn.synthesisResponses![providerId] as any[])]
+                    : [];
+                  if (arr.length > 0) {
+                    arr[arr.length - 1] = { ...(arr[arr.length - 1] as any), ...completedEntry } as any;
+                  } else {
+                    arr.push(completedEntry as any);
+                  }
+                  aiTurn.synthesisResponses = { ...(aiTurn.synthesisResponses || {}), [providerId]: arr as any };
+                } else if (stepType === 'mapping') {
+                  const arr = Array.isArray(aiTurn.mappingResponses?.[providerId])
+                    ? [...(aiTurn.mappingResponses![providerId] as any[])]
+                    : [];
+                  if (arr.length > 0) {
+                    arr[arr.length - 1] = { ...(arr[arr.length - 1] as any), ...completedEntry } as any;
+                  } else {
+                    arr.push(completedEntry as any);
+                  }
+                  aiTurn.mappingResponses = { ...(aiTurn.mappingResponses || {}), [providerId]: arr as any };
+                } else if (stepType === 'batch') {
+                  aiTurn.batchResponses = {
+                    ...(aiTurn.batchResponses || {}),
+                    [providerId]: {
+                      providerId,
+                      text: data?.text || '',
+                      status: 'completed',
+                      createdAt: Date.now(),
+                      updatedAt: Date.now(),
+                      meta: data?.meta || {}
+                    }
+                  } as any;
+                }
+              });
+
+              // Store provider context in separate atom when available
+              if (data?.meta) {
+                setProviderContexts((draft: Record<string, any>) => {
+                  draft[providerId] = { ...(draft[providerId] || {}), ...data.meta };
+                });
+              }
+            }
           });
 
           // Clear recompute targeting after successful completion (only for recompute flows)
@@ -368,3 +429,5 @@ export function usePortMessageHandler() {
 
   return { streamingBufferRef };
 }
+// Minimize streaming log noise in UI; toggle for deep debugging only
+const STREAMING_DEBUG_UI = false;

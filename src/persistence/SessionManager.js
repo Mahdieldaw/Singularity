@@ -44,7 +44,10 @@ export class SessionManager {
    * Initialize: Create new session + first turn
    */
   async _persistInitialize(request, result) {
-    const sessionId = `session-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const sessionId = request.sessionId;
+    if (!sessionId) {
+      throw new Error('[SessionManager] initialize requires request.sessionId');
+    }
     const now = Date.now();
 
     // 1) Create session
@@ -365,98 +368,7 @@ export class SessionManager {
    * without creating a new user/ai turn pair.
    * additions shape: { batchResponses?, synthesisResponses?, mappingResponses? }
    */
-  async appendProviderResponses(sessionId, targetUserTurnId, additions = {}) {
-    try {
-      const usePA = this.usePersistenceAdapter && this.isInitialized && this.adapter?.isReady();
-
-      // Locate AI turn following the target user turn in legacy cache first
-      let session = this.sessions[sessionId];
-      if (!session) {
-        // Hydrate via getOrCreate to ensure legacy cache exists
-        session = await this.getOrCreateSession(sessionId);
-      }
-      let turns = Array.isArray(session?.turns) ? session.turns : [];
-      let userIdx = turns.findIndex(t => t && t.id === targetUserTurnId && (t.type === 'user' || t.role === 'user'));
-      if (userIdx === -1 || !turns[userIdx + 1] || (turns[userIdx + 1].type !== 'ai' && turns[userIdx + 1].role !== 'assistant')) {
-        // Relocate: search all sessions for the correct one containing targetUserTurnId
-        const all = this.sessions || {};
-        let relocated = null;
-        for (const [sid, s] of Object.entries(all)) {
-          const arr = Array.isArray(s?.turns) ? s.turns : [];
-          const idx = arr.findIndex(t => t && t.id === targetUserTurnId && (t.type === 'user' || t.role === 'user'));
-          if (idx !== -1 && arr[idx + 1] && (arr[idx + 1].type === 'ai' || arr[idx + 1].role === 'assistant')) {
-            sessionId = sid; // update to correct session
-            session = s;
-            turns = arr;
-            userIdx = idx;
-            relocated = sid;
-            break;
-          }
-        }
-        if (!relocated) {
-          console.warn(`[SessionManager] appendProviderResponses: AI turn not found after userTurn ${targetUserTurnId} in any session`);
-          return false;
-        }
-        console.warn(`[SessionManager] appendProviderResponses: relocated to session ${relocated} for userTurn ${targetUserTurnId}`);
-      }
-      const aiTurn = turns[userIdx + 1];
-
-      const now = Date.now();
-      const ensureArrayBucket = (obj, key) => { if (!obj[key]) obj[key] = []; return obj[key]; };
-
-      const persistBucket = async (bucket, responseType) => {
-        if (!bucket) return;
-        for (const [providerId, value] of Object.entries(bucket)) {
-          const entries = Array.isArray(value) ? value : [value];
-          for (let idx = 0; idx < entries.length; idx++) {
-            const entry = entries[idx] || {};
-            // Update legacy mirror
-            if (responseType === 'mapping') {
-              const arr = ensureArrayBucket(aiTurn.mappingResponses = (aiTurn.mappingResponses || {}), providerId);
-              arr.push({ providerId, text: entry.text || '', status: entry.status || 'completed', meta: entry.meta || {} });
-            } else if (responseType === 'synthesis') {
-              const arr = ensureArrayBucket(aiTurn.synthesisResponses = (aiTurn.synthesisResponses || {}), providerId);
-              arr.push({ providerId, text: entry.text || '', status: entry.status || 'completed', meta: entry.meta || {} });
-            } else if (responseType === 'batch') {
-              aiTurn.batchResponses = aiTurn.batchResponses || {};
-              aiTurn.batchResponses[providerId] = { providerId, text: entry.text || '', status: entry.status || 'completed', meta: entry.meta || {} };
-            }
-
-            if (usePA) {
-              // Persist provider response record
-              const respId = `pr-${sessionId}-${aiTurn.id}-${providerId}-${responseType}-${idx}-${Date.now()}`;
-              const record = {
-                id: respId,
-                sessionId,
-                aiTurnId: aiTurn.id,
-                providerId,
-                responseType,
-                responseIndex: idx,
-                text: entry.text || '',
-                status: entry.status || 'completed',
-                meta: entry.meta || {},
-                createdAt: now,
-                updatedAt: now,
-                completedAt: now
-              };
-              await this.adapter.put('provider_responses', record);
-            }
-          }
-        }
-      };
-
-      await persistBucket(additions.batchResponses, 'batch');
-      await persistBucket(additions.synthesisResponses, 'synthesis');
-      await persistBucket(additions.mappingResponses, 'mapping');
-
-      session.lastActivity = now;
-      await this.saveSession(sessionId);
-      return true;
-    } catch (error) {
-      console.error('[SessionManager] appendProviderResponses failed:', error);
-      return false;
-    }
-  }
+  
 
   /**
    * Run pending data migrations in a lazy manner after adapter is initialized.
@@ -701,7 +613,9 @@ export class SessionManager {
           title: '',
           isActive: true,
           createdAt: Date.now(),
-          updatedAt: Date.now()
+          updatedAt: Date.now(),
+          lastTurnId: null,
+          lastActivity: Date.now()
         };
         
         await this.adapter.put('sessions', sessionRecord);
@@ -721,14 +635,17 @@ export class SessionManager {
         await this.adapter.put('threads', defaultThread);
       }
       
-      // Build legacy-compatible session object for backward compatibility
-      const legacySession = await this.buildLegacySessionObject(sessionId);
-      // 3. Store in cache for next time
-      if (legacySession) {
-        this.sessions[sessionId] = legacySession;
-      }
-      
-      return legacySession;
+      // Build lightweight session metadata for UI
+      const lightweightSession = {
+        id: sessionRecord.id,
+        title: sessionRecord.title,
+        createdAt: sessionRecord.createdAt,
+        updatedAt: sessionRecord.updatedAt,
+        lastTurnId: sessionRecord.lastTurnId || null,
+        lastActivity: sessionRecord.lastActivity || sessionRecord.updatedAt || sessionRecord.createdAt
+      };
+      this.sessions[sessionId] = lightweightSession;
+      return lightweightSession;
     } catch (error) {
       console.error(`[SessionManager] Failed to get/create session ${sessionId}:`, error);
       return null;
@@ -736,173 +653,10 @@ export class SessionManager {
   }
 
 
-  /**
-   * Build legacy-compatible session object from persistence layer
-   */
+  // Legacy builder removed; sessions now use lightweight metadata only
   async buildLegacySessionObject(sessionId) {
-    try {
-      console.log(`[SessionManager] Building legacy session for ${sessionId}`);
-      const sessionRecord = await this.adapter.get('sessions', sessionId);
-      if (!sessionRecord) {
-        console.log(`[SessionManager] Session record not found for ${sessionId}`);
-        return null;
-      }
-
-      // Get threads
-      const allThreads = await this.adapter.getAll('threads');
-      const threads = allThreads.filter(thread => thread.sessionId === sessionId);
-      const threadsObj = {};
-      threads.forEach(thread => {
-        threadsObj[thread.id] = {
-          id: thread.id,
-          sessionId: thread.sessionId,
-          parentThreadId: thread.parentThreadId,
-          branchPointTurnId: thread.branchPointTurnId,
-          name: thread.title,
-          color: '#6366f1',
-          isActive: thread.isActive,
-          createdAt: thread.createdAt,
-          lastActivity: thread.updatedAt
-        };
-      });
-
-      // Get turns
-      const allTurns = await this.adapter.getAll('turns');
-      const turns = allTurns
-        .filter(turn => turn.sessionId === sessionId)
-        .sort((a, b) => (a.sequence ?? a.createdAt) - (b.sequence ?? b.createdAt));
-
-      // Build responses lookup
-      const allResponses = await this.adapter.getAll('provider_responses');
-      const responsesByTurn = new Map();
-
-      // Initialize buckets for ALL AI turns first to ensure they always have the correct object structure
-      turns.forEach(turn => {
-        if (turn.type === 'ai' || turn.role === 'assistant') {
-          responsesByTurn.set(turn.id, { batch: {}, synthesis: {}, mapping: {} });
-        }
-      });
-      
-      console.log(`[SessionManager] Processing ${allResponses.length} responses for session ${sessionId}`);
-      
-      for (const resp of allResponses) {
-        if (resp.sessionId !== sessionId) continue;
-        const key = resp.aiTurnId;
-        const bucket = responsesByTurn.get(key);
-        if (!bucket) continue; // Safeguard for responses linked to turns not in the current session scope
-
-        const entry = {
-          providerId: resp.providerId,
-          text: resp.text || '',
-          status: resp.status || 'completed',
-          meta: resp.meta || {}
-        };
-        
-        if (resp.responseType === 'batch') {
-          bucket.batch[resp.providerId] = entry;
-        } else if (resp.responseType === 'synthesis') {
-          const arr = bucket.synthesis[resp.providerId] || [];
-          arr.push(entry);
-          bucket.synthesis[resp.providerId] = arr;
-        } else if (resp.responseType === 'mapping') {
-          const arr = bucket.mapping[resp.providerId] || [];
-          arr.push(entry);
-          bucket.mapping[resp.providerId] = arr;
-        }
-      }
-
-      // Build turns array with proper legacy structure
-      const turnsArray = turns.map(turn => {
-        const base = {
-          id: turn.id,
-          text: turn.content,
-          threadId: turn.threadId,
-          createdAt: turn.createdAt,
-          updatedAt: turn.updatedAt
-        };
-        
-        if (turn.type === 'user' || turn.role === 'user') {
-          return { 
-            ...base, 
-            type: 'user',
-            sessionId: sessionId
-          };
-        } else {
-          // assistant/ai turn
-          const respBuckets = responsesByTurn.get(turn.id) || { batch: {}, synthesis: {}, mapping: {} };
-          
-          console.log(`[SessionManager] Building AI turn ${turn.id}:`, {
-            batch: Object.keys(respBuckets.batch),
-            synthesis: Object.keys(respBuckets.synthesis),
-            mapping: Object.keys(respBuckets.mapping)
-          });
-          
-          return {
-            ...base,
-            type: 'ai',
-            sessionId: sessionId,
-            userTurnId: turn.userTurnId,
-            batchResponses: respBuckets.batch,
-            synthesisResponses: respBuckets.synthesis,
-            mappingResponses: respBuckets.mapping,
-            completedAt: turn.updatedAt
-          };
-        }
-      });
-
-      // Get provider contexts
-      const allContexts = await this.adapter.getAll('provider_contexts');
-      const contexts = allContexts.filter(context => context.sessionId === sessionId);
-      const providersObj = {};
-      // Group contexts by providerId and select the newest record per provider
-      const grouped = contexts.reduce((acc, ctx) => {
-        const pid = ctx.providerId;
-        if (!acc[pid]) acc[pid] = [];
-        acc[pid].push(ctx);
-        return acc;
-      }, {});
-
-      Object.entries(grouped).forEach(([pid, arr]) => {
-        const sorted = arr.sort((a, b) => {
-          const ta = (a.updatedAt ?? a.createdAt ?? 0);
-          const tb = (b.updatedAt ?? b.createdAt ?? 0);
-          return tb - ta; // newest first
-        });
-        const selected = sorted[0];
-        providersObj[pid] = {
-          ...selected.contextData,
-          lastUpdated: selected.updatedAt
-        };
-        if (arr.length > 1) {
-          console.log(`[SessionManager] buildLegacySessionObject: resolved ${arr.length} contexts for provider ${pid}, selected ${selected.id} (updatedAt=${selected.updatedAt})`);
-        }
-      });
-
-      const legacySession = {
-        sessionId: sessionRecord.id,
-        providers: providersObj,
-        contextHistory: [],
-        createdAt: sessionRecord.createdAt,
-        lastActivity: sessionRecord.updatedAt,
-        title: sessionRecord.title,
-        turns: turnsArray,
-        threads: threadsObj
-      };
-
-      console.log(`[SessionManager] Successfully built legacy session for ${sessionId} with ${turnsArray.length} turns`);
-      console.log(`[SessionManager] Session structure:`, {
-        turns: turnsArray.map(t => ({
-          id: t.id,
-          type: t.type,
-          batchResponses: t.type === 'ai' ? Object.keys(t.batchResponses || {}) : 'N/A'
-        }))
-      });
-
-      return legacySession;
-    } catch (error) {
-      console.error(`[SessionManager] Failed to build legacy session object for ${sessionId}:`, error);
-      return null;
-    }
+    console.warn('[SessionManager] buildLegacySessionObject has been removed; returning null.');
+    return null;
   }
 
 

@@ -58,6 +58,26 @@ export class GeminiAdapter {
         }
       );
 
+      // Emit a single partial update so WorkflowEngine treats this like streaming
+      try {
+        const fullText = result?.text ?? '';
+        if (onChunk && fullText && fullText.length > 0) {
+          onChunk({
+            providerId: this.id,
+            ok: true,
+            text: fullText,
+            partial: true,
+            latencyMs: Date.now() - startTime,
+            meta: {
+              cursor: result.cursor,
+              token: result.token,
+              modelName: result.modelName,
+              model,
+            },
+          });
+        }
+      } catch (_) {}
+
       // Return final result
       return {
         providerId: this.id,
@@ -135,6 +155,26 @@ export class GeminiAdapter {
         cursor,
         model,
       });
+
+      // Emit a single partial update so WorkflowEngine treats this like streaming
+      try {
+        const fullText = result?.text ?? '';
+        if (onChunk && fullText && fullText.length > 0) {
+          onChunk({
+            providerId: this.id,
+            ok: true,
+            text: fullText,
+            partial: true,
+            latencyMs: Date.now() - startTime,
+            meta: {
+              cursor: result.cursor,
+              token: result.token,
+              modelName: result.modelName,
+              model,
+            },
+          });
+        }
+      } catch (_) {}
 
       // Return final result with preserved/updated context
       return {

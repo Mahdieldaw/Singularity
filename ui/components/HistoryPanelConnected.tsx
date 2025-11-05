@@ -1,13 +1,15 @@
 import React, { useMemo, useState } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
-import { historySessionsAtom, isHistoryLoadingAtom, isHistoryPanelOpenAtom } from '../state/atoms';
+import { historySessionsAtom, isHistoryLoadingAtom, isHistoryPanelOpenAtom, currentSessionIdAtom } from '../state/atoms';
 import { useChat } from '../hooks/useChat';
 import HistoryPanel from './HistoryPanel';
+import api from '../services/extension-api';
 
 export default function HistoryPanelConnected() {
   const sessions = useAtomValue(historySessionsAtom);
   const isLoading = useAtomValue(isHistoryLoadingAtom);
   const isOpen = useAtomValue(isHistoryPanelOpenAtom);
+  const currentSessionId = useAtomValue(currentSessionIdAtom);
   const setHistorySessions = useSetAtom(historySessionsAtom);
   const { newChat, selectChat, deleteChat } = useChat();
 
@@ -27,9 +29,33 @@ export default function HistoryPanelConnected() {
 
     const ok = await deleteChat(sessionId);
 
-    if (!ok) {
-      // Roll back if deletion failed
-      setHistorySessions(prevSessions as any);
+    // Revalidate against backend to prevent flicker-and-revert when SW response is delayed
+    try {
+      const response = await api.getHistoryList();
+      const refreshed = (response?.sessions || []).map((s: any) => ({
+        id: s.sessionId,
+        sessionId: s.sessionId,
+        title: s.title || 'Untitled',
+        startTime: s.startTime || Date.now(),
+        lastActivity: s.lastActivity || Date.now(),
+        messageCount: s.messageCount || 0,
+        firstMessage: s.firstMessage || '',
+        messages: []
+      }));
+
+      setHistorySessions(refreshed as any);
+
+      const stillExists = refreshed.some((s: any) => (s.sessionId || s.id) === sessionId);
+      // If the deleted session is gone and was active, clear the chat view immediately
+      if (!stillExists && currentSessionId === sessionId) {
+        newChat();
+      }
+    } catch (e) {
+      console.error('[HistoryPanel] Failed to refresh history after deletion:', e);
+      if (!ok) {
+        // If the delete call failed and we also failed to refresh, revert UI to previous list
+        setHistorySessions(prevSessions as any);
+      }
     }
 
     // Clear pending state

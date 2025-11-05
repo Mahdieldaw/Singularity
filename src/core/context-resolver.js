@@ -87,9 +87,11 @@ export class ContextResolver {
     const sourceTurn = await this._getTurn(sourceTurnId);
     if (!sourceTurn) throw new Error(`[ContextResolver] Source turn ${sourceTurnId} not found`);
 
-    const frozenBatchOutputs = this._extractBatchOutputs(sourceTurn);
+    // Build frozen outputs from provider_responses store, not embedded turn fields
+    const responses = await this._getProviderResponsesForTurn(sourceTurnId);
+    const frozenBatchOutputs = this._aggregateBatchOutputs(responses);
     if (!frozenBatchOutputs || Object.keys(frozenBatchOutputs).length === 0) {
-      throw new Error(`[ContextResolver] Source turn ${sourceTurnId} has no batch outputs`);
+      throw new Error(`[ContextResolver] Source turn ${sourceTurnId} has no batch outputs in provider_responses`);
     }
 
     const providerContextsAtSourceTurn = sourceTurn.providerContexts || {};
@@ -149,21 +151,25 @@ export class ContextResolver {
   }
 
   _extractBatchOutputs(turn) {
-    const responses = turn.batchResponses || turn.providerResponses || {};
-    const frozen = {};
-    for (const [providerId, r] of Object.entries(responses)) {
-      if (r && r.text) {
-        frozen[providerId] = {
-          providerId,
-          text: r.text,
-          status: r.status || 'completed',
-          meta: r.meta || {},
-          createdAt: r.createdAt || turn.createdAt,
-          updatedAt: r.updatedAt || turn.createdAt,
-        };
+    // Legacy fallback: if embedded responses exist on the turn, use them
+    const embedded = turn.batchResponses || turn.providerResponses || {};
+    if (embedded && Object.keys(embedded).length > 0) {
+      const frozen = {};
+      for (const [providerId, r] of Object.entries(embedded)) {
+        if (r && r.text) {
+          frozen[providerId] = {
+            providerId,
+            text: r.text,
+            status: r.status || 'completed',
+            meta: r.meta || {},
+            createdAt: r.createdAt || turn.createdAt,
+            updatedAt: r.updatedAt || turn.createdAt,
+          };
+        }
       }
+      return frozen;
     }
-    return frozen;
+    return {};
   }
 
   async _getUserMessageForTurn(aiTurn) {
@@ -172,4 +178,63 @@ export class ContextResolver {
     const userTurn = await this._getTurn(userTurnId);
     return userTurn?.text || userTurn?.content || '';
   }
+  
+  /**
+   * Fetch provider responses for a given AI turn using adapter indices if available.
+   * Falls back to scanning the provider_responses store when indices aren't exposed.
+   */
+  async _getProviderResponsesForTurn(aiTurnId) {
+    try {
+      const adapter = this.sessionManager?.adapter;
+      if (!adapter || typeof adapter.isReady !== 'function' || !adapter.isReady()) {
+        return [];
+      }
+      // Prefer indexed query when supported by the adapter
+      if (typeof adapter.getProviderResponsesByTurnId === 'function') {
+        return await adapter.getProviderResponsesByTurnId(aiTurnId);
+      }
+      // Fallback: scan the store and filter by aiTurnId
+      const all = await adapter.getAll('provider_responses');
+      return (all || []).filter(r => r && r.aiTurnId === aiTurnId);
+    } catch (e) {
+      console.warn('[ContextResolver] _getProviderResponsesForTurn failed:', e);
+      return [];
+    }
+  }
+
+  /**
+   * Aggregate batch outputs per provider from raw provider response records.
+   * Chooses the latest completed 'batch' response for each provider.
+   */
+  _aggregateBatchOutputs(providerResponses = []) {
+    try {
+      const frozen = {};
+      const byProvider = new Map();
+      for (const r of providerResponses) {
+        if (!r || r.responseType !== 'batch') continue;
+        const pid = r.providerId;
+        const existing = byProvider.get(pid);
+        // Prefer the latest completed response
+        const rank = (val) => (val?.status === 'completed' ? 2 : val?.status === 'streaming' ? 1 : 0);
+        if (!existing || (r.updatedAt ?? 0) > (existing.updatedAt ?? 0) || rank(r) > rank(existing)) {
+          byProvider.set(pid, r);
+        }
+      }
+      for (const [pid, r] of byProvider.entries()) {
+        frozen[pid] = {
+          providerId: pid,
+          text: r.text || '',
+          status: r.status || 'completed',
+          meta: r.meta || {},
+          createdAt: r.createdAt || Date.now(),
+          updatedAt: r.updatedAt || r.createdAt || Date.now(),
+        };
+      }
+      return frozen;
+    } catch (e) {
+      console.warn('[ContextResolver] _aggregateBatchOutputs failed:', e);
+      return {};
+    }
+  }
+
 }

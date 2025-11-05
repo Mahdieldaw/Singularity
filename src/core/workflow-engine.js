@@ -179,22 +179,24 @@ if (fullText.length < prev.length) {
       lastStreamState.set(key, fullText);
       return "";
     }
-  
-  // Flag & throttle: only warn if DEBUG_STREAMING=true, or log once per provider/session
-  if (process.env.DEBUG_STREAMING === 'true') {  // Or your global DEBUG_WORKFLOW
-    // Optional: debounce per-provider (e.g., Map of lastWarn ts)
-    const now = Date.now();
-    const lastWarnKey = `${key}:lastRegressionWarn`;
-    const lastWarn = lastStreamState.get(lastWarnKey) || 0;
-    if (now - lastWarn > 5000) {  // 5s cooldown per provider
-      logger.warn(`[makeDelta] Significant text regression for ${providerId}:`, { 
-        prevLen: prev.length, 
-        fullLen: fullText.length,
-        regression,
-        regressionPercent: regressionPercent.toFixed(1) + '%'
-      });
-      lastStreamState.set(lastWarnKey, now);
-    }
+its  
+  // Flag & throttle: warn at most a couple of times per provider/session
+  // Avoid using process.env in extension context; rely on local counters
+  const now = Date.now();
+  const lastWarnKey = `${key}:lastRegressionWarn`;
+  const warnCountKey = `${key}:regressionWarnCount`;
+  const lastWarn = lastStreamState.get(lastWarnKey) || 0;
+  const currentCount = lastStreamState.get(warnCountKey) || 0;
+  const WARN_MAX = 2; // cap warnings per session/provider to reduce noise
+  if (currentCount < WARN_MAX && (now - lastWarn > 5000)) {  // 5s cooldown per provider
+    logger.warn(`[makeDelta] Significant text regression for ${providerId}:`, {
+      prevLen: prev.length,
+      fullLen: fullText.length,
+      regression,
+      regressionPercent: regressionPercent.toFixed(1) + '%'
+    });
+    lastStreamState.set(lastWarnKey, now);
+    lastStreamState.set(warnCountKey, currentCount + 1);
   }
   lastStreamState.set(key, fullText);  // Still update state
   return "";  // No emit on regression
@@ -311,7 +313,16 @@ export class WorkflowEngine {
         try {
             const result = await this.executePromptStep(step, context);
             stepResults.set(step.stepId, { status: 'completed', result });
-            this.port.postMessage({ type: 'WORKFLOW_STEP_UPDATE', sessionId: context.sessionId, stepId: step.stepId, status: 'completed', result });
+            this.port.postMessage({ 
+              type: 'WORKFLOW_STEP_UPDATE', 
+              sessionId: context.sessionId, 
+              stepId: step.stepId, 
+              status: 'completed', 
+              result,
+              // Attach recompute metadata for UI routing/clearing
+              isRecompute: resolvedContext?.type === 'recompute',
+              sourceTurnId: resolvedContext?.sourceTurnId
+            });
 
             // Cache provider contexts from this batch step into workflowContexts so
             // subsequent synthesis/mapping steps in the same workflow can continue
@@ -328,7 +339,16 @@ export class WorkflowEngine {
         } catch (error) {
             console.error(`[WorkflowEngine] Prompt step ${step.stepId} failed:`, error);
             stepResults.set(step.stepId, { status: 'failed', error: error.message });
-            this.port.postMessage({ type: 'WORKFLOW_STEP_UPDATE', sessionId: context.sessionId, stepId: step.stepId, status: 'failed', error: error.message });
+            this.port.postMessage({ 
+              type: 'WORKFLOW_STEP_UPDATE', 
+              sessionId: context.sessionId, 
+              stepId: step.stepId, 
+              status: 'failed', 
+              error: error.message,
+              // Attach recompute metadata for UI routing/clearing
+              isRecompute: resolvedContext?.type === 'recompute',
+              sourceTurnId: resolvedContext?.sourceTurnId
+            });
                 // If the main prompt fails, the entire workflow cannot proceed.
                 this.port.postMessage({ type: 'WORKFLOW_COMPLETE', sessionId: context.sessionId, workflowId: request.workflowId, finalResults: Object.fromEntries(stepResults) });
                 return; // Exit early
@@ -340,11 +360,29 @@ export class WorkflowEngine {
         try {
             const result = await this.executeMappingStep(step, context, stepResults, workflowContexts, resolvedContext);
             stepResults.set(step.stepId, { status: 'completed', result });
-            this.port.postMessage({ type: 'WORKFLOW_STEP_UPDATE', sessionId: context.sessionId, stepId: step.stepId, status: 'completed', result });
+            this.port.postMessage({ 
+              type: 'WORKFLOW_STEP_UPDATE', 
+              sessionId: context.sessionId, 
+              stepId: step.stepId, 
+              status: 'completed', 
+              result,
+              // Attach recompute metadata for UI routing/clearing
+              isRecompute: resolvedContext?.type === 'recompute',
+              sourceTurnId: resolvedContext?.sourceTurnId
+            });
         } catch (error) {
             console.error(`[WorkflowEngine] Mapping step ${step.stepId} failed:`, error);
             stepResults.set(step.stepId, { status: 'failed', error: error.message });
-            this.port.postMessage({ type: 'WORKFLOW_STEP_UPDATE', sessionId: context.sessionId, stepId: step.stepId, status: 'failed', error: error.message });
+            this.port.postMessage({ 
+              type: 'WORKFLOW_STEP_UPDATE', 
+              sessionId: context.sessionId, 
+              stepId: step.stepId, 
+              status: 'failed', 
+              error: error.message,
+              // Attach recompute metadata for UI routing/clearing
+              isRecompute: resolvedContext?.type === 'recompute',
+              sourceTurnId: resolvedContext?.sourceTurnId
+            });
             // Continue with other mapping steps even if one fails
         }
     }
@@ -354,23 +392,81 @@ export class WorkflowEngine {
         try {
             const result = await this.executeSynthesisStep(step, context, stepResults, workflowContexts, resolvedContext);
             stepResults.set(step.stepId, { status: 'completed', result });
-            this.port.postMessage({ type: 'WORKFLOW_STEP_UPDATE', sessionId: context.sessionId, stepId: step.stepId, status: 'completed', result });
+            this.port.postMessage({ 
+              type: 'WORKFLOW_STEP_UPDATE', 
+              sessionId: context.sessionId, 
+              stepId: step.stepId, 
+              status: 'completed', 
+              result,
+              // Attach recompute metadata for UI routing/clearing
+              isRecompute: resolvedContext?.type === 'recompute',
+              sourceTurnId: resolvedContext?.sourceTurnId
+            });
         } catch (error) {
             console.error(`[WorkflowEngine] Synthesis step ${step.stepId} failed:`, error);
             stepResults.set(step.stepId, { status: 'failed', error: error.message });
-            this.port.postMessage({ type: 'WORKFLOW_STEP_UPDATE', sessionId: context.sessionId, stepId: step.stepId, status: 'failed', error: error.message });
+            this.port.postMessage({ 
+              type: 'WORKFLOW_STEP_UPDATE', 
+              sessionId: context.sessionId, 
+              stepId: step.stepId, 
+              status: 'failed', 
+              error: error.message,
+              // Attach recompute metadata for UI routing/clearing
+              isRecompute: resolvedContext?.type === 'recompute',
+              sourceTurnId: resolvedContext?.sourceTurnId
+            });
             // Continue with other synthesis steps even if one fails
         }
     }
     
         // ========================================================================
-        // Persistence: Call new primitive-based method
+        // Persistence: Consolidated single call with complete results
         // ========================================================================
         try {
-          await this._persistCriticalTurnData(context, steps, stepResults, resolvedContext);
+          const result = { batchOutputs: {}, synthesisOutputs: {}, mappingOutputs: {} };
+          const stepById = new Map((steps || []).map(s => [s.stepId, s]));
+          stepResults.forEach((stepResult, stepId) => {
+            if (stepResult.status !== 'completed') return;
+            const step = stepById.get(stepId);
+            if (!step) return;
+            if (step.type === 'prompt') {
+              result.batchOutputs = stepResult.result?.results || {};
+            } else if (step.type === 'synthesis') {
+              const providerId = step.payload?.synthesisProvider;
+              if (providerId) result.synthesisOutputs[providerId] = stepResult.result;
+            } else if (step.type === 'mapping') {
+              const providerId = step.payload?.mappingProvider;
+              if (providerId) result.mappingOutputs[providerId] = stepResult.result;
+            }
+          });
+
+          const userMessage = context?.userMessage || this.currentUserMessage || '';
+          const persistRequest = {
+            type: resolvedContext?.type || 'unknown',
+            sessionId: context.sessionId,
+            userMessage
+          };
+          if (resolvedContext?.type === 'recompute') {
+            persistRequest.sourceTurnId = resolvedContext.sourceTurnId;
+            persistRequest.stepType = resolvedContext.stepType;
+            persistRequest.targetProvider = resolvedContext.targetProvider;
+          }
+          if (context?.canonicalUserTurnId) persistRequest.canonicalUserTurnId = context.canonicalUserTurnId;
+          if (context?.canonicalAiTurnId) persistRequest.canonicalAiTurnId = context.canonicalAiTurnId;
+
+          console.log(`[WorkflowEngine] Persisting (consolidated) ${persistRequest.type} workflow to SessionManager`);
+          const persistResult = await this.sessionManager.persist(persistRequest, resolvedContext, result);
+
+          if (persistResult) {
+            if (persistResult.userTurnId) context.canonicalUserTurnId = persistResult.userTurnId;
+            if (persistResult.aiTurnId) context.canonicalAiTurnId = persistResult.aiTurnId;
+            if (resolvedContext?.type === 'initialize' && persistResult.sessionId) {
+              context.sessionId = persistResult.sessionId;
+              console.log(`[WorkflowEngine] Initialize complete: session=${persistResult.sessionId}`);
+            }
+          }
         } catch (e) {
-          console.error('[WorkflowEngine] CRITICAL persistence failed:', e);
-          // Still notify UI to avoid hanging
+          console.error('[WorkflowEngine] Consolidated persistence failed:', e);
         }
 
         // 2) Signal completion to the UI (unchanged message shape)
@@ -381,13 +477,6 @@ export class WorkflowEngine {
         
         // ✅ Clean up delta cache
         clearDeltaCache(context.sessionId);
-
-        // 3) Defer NON-CRITICAL persistence (mapping/synthesis responses, secondary context updates)
-        setTimeout(() => {
-          this._persistNonCriticalData(context, steps, stepResults, resolvedContext).catch(e => {
-            console.warn('[WorkflowEngine] Deferred non-critical persistence failed:', e);
-          });
-        }, 0);
         
 } catch (error) {
         console.error(`[WorkflowEngine] Critical workflow execution error:`, error);
@@ -534,297 +623,11 @@ export class WorkflowEngine {
     }
   }
 
-  /**
-   * Persist only CRITICAL data needed for historical reruns and stable turn IDs.
-   * - For new/continued conversations: persist user turn + AI turn with batch responses only
-   * - For historical reruns: do nothing here (non-critical path will append responses)
-   */
-  async _persistCriticalTurnData(context, steps, stepResults, resolvedContext) {
-    // Skip for historical reruns (no new turn created)
-    if (context?.targetUserTurnId) {
-      console.log('[WorkflowEngine] Skipping critical persistence (historical rerun)');
-      return;
-    }
+  // Legacy _persistCriticalTurnData removed; consolidated persistence happens in execute()
 
-    const userMessage = context?.userMessage || this.currentUserMessage || '';
-    if (!userMessage) {
-      console.log('[WorkflowEngine] Skipping persistence (no user message)');
-      return;
-    }
+  // Legacy _persistNonCriticalData removed; consolidated persistence happens in execute()
 
-    try {
-      // ========================================================================
-      // Extract results from step execution
-      // ========================================================================
-      const result = {
-        batchOutputs: {},
-        synthesisOutputs: {},
-        mappingOutputs: {}
-      };
-      const stepById = new Map((steps || []).map(s => [s.stepId, s]));
-      stepResults.forEach((stepResult, stepId) => {
-        if (stepResult.status !== 'completed') return;
-        const step = stepById.get(stepId);
-        if (!step) return;
-        if (step.type === 'prompt') {
-          result.batchOutputs = stepResult.result?.results || {};
-        } else if (step.type === 'synthesis') {
-          const providerId = step.payload.synthesisProvider;
-          if (providerId) result.synthesisOutputs[providerId] = stepResult.result;
-        } else if (step.type === 'mapping') {
-          const providerId = step.payload.mappingProvider;
-          if (providerId) result.mappingOutputs[providerId] = stepResult.result;
-        }
-      });
-
-      // ========================================================================
-      // Construct request object for persistence
-      // ========================================================================
-      const request = {
-        type: resolvedContext?.type || 'unknown',
-        sessionId: context.sessionId,
-        userMessage
-      };
-      if (resolvedContext?.type === 'recompute') {
-        request.sourceTurnId = resolvedContext.sourceTurnId;
-        request.stepType = resolvedContext.stepType;
-        request.targetProvider = resolvedContext.targetProvider;
-      }
-
-      // Prefer the canonical IDs chosen by connection-handler if present
-      if (context?.canonicalUserTurnId) request.canonicalUserTurnId = context.canonicalUserTurnId;
-      if (context?.canonicalAiTurnId) request.canonicalAiTurnId = context.canonicalAiTurnId;
-
-      console.log(`[WorkflowEngine] Persisting ${request.type} workflow to SessionManager`);
-
-      // Call new primitive-based persist method
-      const persistResult = await this.sessionManager.persist(request, resolvedContext, result);
-
-      // Update workflow context with canonical IDs (and sessionId for initialize)
-      if (persistResult) {
-        if (persistResult.userTurnId) context.canonicalUserTurnId = persistResult.userTurnId;
-        if (persistResult.aiTurnId) context.canonicalAiTurnId = persistResult.aiTurnId;
-        if (resolvedContext?.type === 'initialize' && persistResult.sessionId) {
-          context.sessionId = persistResult.sessionId;
-          console.log(`[WorkflowEngine] Initialize complete: session=${persistResult.sessionId}`);
-        }
-      }
-    } catch (error) {
-      console.error('[WorkflowEngine] Critical persistence failed:', error);
-      throw error;
-    }
-  }
-
-  /**
-   * Persist NON-CRITICAL data in the background:
-   * - Append synthesis/mapping responses to the persisted AI turn
-   * - Optionally update session metadata
-   */
-  async _persistNonCriticalData(context, steps, stepResults, resolvedContext) {
-    // Build additions from synthesis/mapping step results
-    const synthesisResponses = {};
-    const mappingResponses = {};
-    try {
-      const stepById = new Map((steps || []).map(s => [s.stepId, s]));
-      stepResults.forEach((value, stepId) => {
-        const step = stepById.get(stepId);
-        if (!step || value?.status !== 'completed') return;
-        const result = value.result;
-        if (step.type === 'synthesis') {
-          const providerId = result?.providerId;
-          if (!providerId) return;
-          const entry = { providerId, text: result?.text || '', status: result?.status || 'completed', meta: result?.meta || {} };
-          if (!synthesisResponses[providerId]) synthesisResponses[providerId] = [];
-          synthesisResponses[providerId].push(entry);
-        } else if (step.type === 'mapping') {
-          const providerId = result?.providerId;
-          if (!providerId) return;
-          const entry = { providerId, text: result?.text || '', status: result?.status || 'completed', meta: result?.meta || {} };
-          if (!mappingResponses[providerId]) mappingResponses[providerId] = [];
-          mappingResponses[providerId].push(entry);
-        }
-      });
-    } catch (_) {}
-
-    const additions = {};
-    if (Object.keys(synthesisResponses).length > 0) additions.synthesisResponses = synthesisResponses;
-    if (Object.keys(mappingResponses).length > 0) additions.mappingResponses = mappingResponses;
-    if (Object.keys(additions).length === 0) return; // Nothing to do
-
-    // Historical reruns append to the existing AI turn following targetUserTurnId
-    if (context?.targetUserTurnId) {
-      await this.sessionManager.appendProviderResponses(context.sessionId, context.targetUserTurnId, additions);
-      await this.sessionManager.saveSession(context.sessionId);
-      return;
-    }
-
-    // New/continued conversation: append to the AI turn saved in critical phase
-    const userTurnId = context?.canonicalUserTurnId;
-    if (!userTurnId) {
-      console.warn('[WorkflowEngine] No canonicalUserTurnId present; cannot append non-critical responses');
-      return;
-    }
-    await this.sessionManager.appendProviderResponses(context.sessionId, userTurnId, additions);
-    await this.sessionManager.saveSession(context.sessionId);
-  }
-
-  /**
-   * Persist a completed user/ai turn pair to the SessionManager.
-   * Skips persistence for historical reruns (targetUserTurnId present).
-   */
-  _persistCompletedTurn(context, steps, stepResults) {
-    // For historical reruns, append mapping/synthesis results to the existing AI turn
-    if (context?.targetUserTurnId) {
-      try {
-        // Collect provider outputs from this workflow
-        const batchResponses = {};
-        const synthesisResponses = {};
-        const mappingResponses = {};
-
-        const stepById = new Map((steps || []).map(s => [s.stepId, s]));
-        stepResults.forEach((value, stepId) => {
-          const step = stepById.get(stepId);
-          if (!step || value?.status !== 'completed') return;
-          const result = value.result;
-          switch (step.type) {
-            case 'prompt': {
-              const resultsObj = result?.results || {};
-              Object.entries(resultsObj).forEach(([providerId, r]) => {
-                batchResponses[providerId] = {
-                  providerId,
-                  text: r.text || '',
-                  status: r.status || 'completed',
-                  meta: r.meta || {}
-                };
-              });
-              break;
-            }
-            case 'synthesis': {
-              const providerId = result?.providerId;
-              if (!providerId) return;
-              const entry = { providerId, text: result?.text || '', status: result?.status || 'completed', meta: result?.meta || {} };
-              if (!synthesisResponses[providerId]) synthesisResponses[providerId] = [];
-              synthesisResponses[providerId].push(entry);
-              break;
-            }
-            case 'mapping': {
-              const providerId = result?.providerId;
-              if (!providerId) return;
-              const entry = { providerId, text: result?.text || '', status: result?.status || 'completed', meta: result?.meta || {} };
-              if (!mappingResponses[providerId]) mappingResponses[providerId] = [];
-              mappingResponses[providerId].push(entry);
-              break;
-            }
-          }
-        });
-
-        const additions = {};
-        if (Object.keys(batchResponses).length > 0) additions.batchResponses = batchResponses;
-        if (Object.keys(synthesisResponses).length > 0) additions.synthesisResponses = synthesisResponses;
-        if (Object.keys(mappingResponses).length > 0) additions.mappingResponses = mappingResponses;
-
-        if (Object.keys(additions).length > 0) {
-          this.sessionManager.appendProviderResponses(context.sessionId, context.targetUserTurnId, additions);
-        }
-      } catch (e) {
-        console.warn('[WorkflowEngine] Failed to append historical provider responses:', e);
-      }
-      return;
-    }
-
-    const userMessage = context?.userMessage || this.currentUserMessage || '';
-    if (!userMessage) return; // No content to persist
-
-    // If we have a recently finalized turn for this session, persist it directly to keep IDs stable
-    if (this._lastFinalizedTurn && this._lastFinalizedTurn.sessionId === context.sessionId) {
-      try {
-        this.sessionManager.saveTurn(context.sessionId, this._lastFinalizedTurn.user, this._lastFinalizedTurn.ai);
-      } catch (e) {
-        console.warn('[WorkflowEngine] Failed to persist last finalized turn, falling back to rebuild:', e);
-      } finally {
-        this._lastFinalizedTurn = null; // Clear regardless to avoid cross-run leaks
-      }
-      return;
-    }
-
-    // Build UserTurn
-    const timestamp = Date.now();
-    const userTurnId = context?.canonicalUserTurnId || this._generateId('user');
-    const userTurn = {
-      type: 'user',
-      id: userTurnId,
-      text: userMessage,
-      createdAt: timestamp
-    };
-
-    // Collect AI results
-    const batchResponses = {};
-    const synthesisResponses = {};
-    const mappingResponses = {};
-
-    const stepById = new Map((steps || []).map(s => [s.stepId, s]));
-    stepResults.forEach((value, stepId) => {
-      const step = stepById.get(stepId);
-      if (!step || value?.status !== 'completed') return;
-      const result = value.result;
-      switch (step.type) {
-        case 'prompt': {
-          const resultsObj = result?.results || {};
-          Object.entries(resultsObj).forEach(([providerId, r]) => {
-            batchResponses[providerId] = {
-              providerId,
-              text: r.text || '',
-              status: r.status || 'completed',
-              meta: r.meta || {}
-            };
-          });
-          break;
-        }
-        case 'synthesis': {
-          const providerId = result?.providerId;
-          if (!providerId) return;
-          const entry = {
-            providerId,
-            text: result?.text || '',
-            status: result?.status || 'completed',
-            meta: result?.meta || {}
-          };
-          if (!synthesisResponses[providerId]) synthesisResponses[providerId] = [];
-          synthesisResponses[providerId].push(entry);
-          break;
-        }
-        case 'mapping': {
-          const providerId = result?.providerId;
-          if (!providerId) return;
-          const entry = {
-            providerId,
-            text: result?.text || '',
-            status: result?.status || 'completed',
-            meta: result?.meta || {}
-          };
-          if (!mappingResponses[providerId]) mappingResponses[providerId] = [];
-          mappingResponses[providerId].push(entry);
-          break;
-        }
-      }
-    });
-
-    const hasData = Object.keys(batchResponses).length > 0 || Object.keys(synthesisResponses).length > 0 || Object.keys(mappingResponses).length > 0;
-    if (!hasData) return; // Nothing to persist
-
-    // Build AiTurn
-    const aiTurn = {
-      type: 'ai',
-      id: context?.canonicalAiTurnId || this._generateId('ai'),
-      createdAt: Date.now(),
-      userTurnId: userTurn.id,
-      batchResponses,
-      synthesisResponses,
-      mappingResponses
-    };
-
-    this.sessionManager.saveTurn(context.sessionId, userTurn, aiTurn);
-  }
+  // Legacy _persistCompletedTurn removed; consolidated persistence happens in execute()
 
   _generateId(prefix = 'turn') {
     return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -1014,34 +817,63 @@ export class WorkflowEngine {
 
     if (payload.sourceHistorical) {
       // Historical source
-      const { turnId: userTurnId, responseType } = payload.sourceHistorical;
-      console.log(`[WorkflowEngine] Resolving historical data from turn: ${userTurnId}`);
-      
-      // Prefer current session
+      const { turnId, responseType } = payload.sourceHistorical;
+      console.log(`[WorkflowEngine] Resolving historical data from turn: ${turnId}`);
+
+      // Prefer adapter lookup: turnId may be a user or AI turn
       let session = this.sessionManager.sessions[context.sessionId];
       let aiTurn = null;
-      if (session && Array.isArray(session.turns)) {
-        const userTurnIndex = session.turns.findIndex(t => t.id === userTurnId && t.type === 'user');
-        if (userTurnIndex !== -1) {
-          aiTurn = session.turns[userTurnIndex + 1];
+      try {
+        const adapter = this.sessionManager?.adapter;
+        if (adapter?.isReady && adapter.isReady()) {
+          const turn = await adapter.get('turns', turnId);
+          if (turn && (turn.type === 'ai' || turn.role === 'assistant')) {
+            aiTurn = turn;
+          } else if (turn && turn.type === 'user') {
+            // If we have the user turn, try to locate the subsequent AI turn in memory
+            if (session && Array.isArray(session.turns)) {
+              const userIdx = session.turns.findIndex(t => t.id === turnId && t.type === 'user');
+              if (userIdx !== -1) {
+                const next = session.turns[userIdx + 1];
+                if (next && (next.type === 'ai' || next.role === 'assistant')) aiTurn = next;
+              }
+            }
+          }
+        }
+      } catch (_) {}
+
+      // Fallback: resolve from current session memory
+      if (!aiTurn && session && Array.isArray(session.turns)) {
+        // If turnId is an AI id, pick that turn directly
+        aiTurn = session.turns.find(t => t && t.id === turnId && (t.type === 'ai' || t.role === 'assistant')) || null;
+        if (!aiTurn) {
+          // Otherwise treat as user id and take the next AI turn
+          const userTurnIndex = session.turns.findIndex(t => t.id === turnId && t.type === 'user');
+          if (userTurnIndex !== -1) {
+            aiTurn = session.turns[userTurnIndex + 1] || null;
+          }
         }
       }
+
       // Fallback: search across all sessions (helps after reconnects or wrong session targeting)
       if (!aiTurn) {
         try {
           const allSessions = this.sessionManager.sessions || {};
           for (const [sid, s] of Object.entries(allSessions)) {
             if (!s || !Array.isArray(s.turns)) continue;
-            const idx = s.turns.findIndex(t => t.id === userTurnId && t.type === 'user');
+            const direct = s.turns.find(t => t && t.id === turnId && (t.type === 'ai' || t.role === 'assistant'));
+            if (direct) { aiTurn = direct; session = s; break; }
+            const idx = s.turns.findIndex(t => t.id === turnId && t.type === 'user');
             if (idx !== -1) {
               aiTurn = s.turns[idx + 1];
               session = s;
-              console.warn(`[WorkflowEngine] Historical turn ${userTurnId} found in different session ${sid}; proceeding with that context.`);
+              console.warn(`[WorkflowEngine] Historical turn ${turnId} resolved in different session ${sid}; proceeding with that context.`);
               break;
             }
           }
         } catch (_) {}
       }
+
       if (!aiTurn || aiTurn.type !== 'ai') {
         // Fallback: try to resolve by matching user text when IDs differ (optimistic vs canonical)
         const fallbackText = context?.userMessage || this.currentUserMessage || '';
@@ -1077,13 +909,13 @@ export class WorkflowEngine {
             if (found) {
               aiTurn = found;
             } else {
-              throw new Error(`Could not find corresponding AI turn for ${userTurnId}`);
+              throw new Error(`Could not find corresponding AI turn for ${turnId}`);
             }
           } catch (e) {
-            throw new Error(`Could not find corresponding AI turn for ${userTurnId}`);
+            throw new Error(`Could not find corresponding AI turn for ${turnId}`);
           }
         } else {
-          throw new Error(`Could not find corresponding AI turn for ${userTurnId}`);
+          throw new Error(`Could not find corresponding AI turn for ${turnId}`);
         }
       }
       
@@ -1101,13 +933,29 @@ export class WorkflowEngine {
       }
       
       // Convert to array format
-      const sourceArray = Object.values(sourceContainer)
+      let sourceArray = Object.values(sourceContainer)
         .flat()
         .filter(res => res.status === 'completed' && res.text && res.text.trim().length > 0)
         .map(res => ({
           providerId: res.providerId,
           text: res.text
         }));
+
+      // If embedded responses were not present, attempt provider_responses fallback
+      if (sourceArray.length === 0 && this.sessionManager?.adapter?.isReady && this.sessionManager.adapter.isReady()) {
+        try {
+          const allPR = await this.sessionManager.adapter.getAll('provider_responses');
+          sourceArray = (allPR || [])
+            .filter(r => r && r.aiTurnId === aiTurn.id && r.responseType === (responseType || 'batch') && r.text && String(r.text).trim().length > 0)
+            .sort((a, b) => (a.updatedAt || a.createdAt || 0) - (b.updatedAt || b.createdAt || 0))
+            .map(r => ({ providerId: r.providerId, text: r.text }));
+          if (sourceArray.length > 0) {
+            console.log('[WorkflowEngine] provider_responses fallback succeeded for historical sources');
+          }
+        } catch (e) {
+          console.warn('[WorkflowEngine] provider_responses fallback failed for historical sources:', e);
+        }
+      }
 
       console.log(`[WorkflowEngine] Found ${sourceArray.length} historical sources`);
       return sourceArray;

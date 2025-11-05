@@ -31,91 +31,7 @@ export class ConnectionHandler {
    * Map new primitive requests into legacy ExecuteWorkflowRequest
    * so the existing compiler/engine can process them without signature changes.
    */
-  async _mapPrimitiveToLegacy(primitive) {
-    const now = Date.now();
-    const genId = (prefix) => `${prefix}-${now}-${Math.random().toString(36).slice(2, 8)}`;
-
-    switch (primitive.type) {
-      case 'initialize': {
-        const providers = Array.isArray(primitive.providers) ? primitive.providers : [];
-        const mappingProviders = primitive.includeMapping && primitive.mapper ? [primitive.mapper] : [];
-        const synthesisProviders = primitive.includeSynthesis && primitive.synthesizer ? [primitive.synthesizer] : [];
-        /** @type {any} */
-        const req = {
-          sessionId: '',
-          userTurnId: primitive.clientUserTurnId || genId('user'),
-          threadId: 'default-thread',
-          mode: 'new-conversation',
-          userMessage: primitive.userMessage || '',
-          providers,
-          providerMeta: primitive.providerMeta || {},
-          synthesis: synthesisProviders.length > 0 ? { enabled: true, providers: synthesisProviders } : undefined,
-          mapping: mappingProviders.length > 0 ? { enabled: true, providers: mappingProviders } : undefined,
-          useThinking: !!primitive.useThinking,
-        };
-        return req;
-      }
-      case 'extend': {
-        const providers = Array.isArray(primitive.providers) ? primitive.providers : [];
-        const mappingProviders = primitive.includeMapping && primitive.mapper ? [primitive.mapper] : [];
-        const synthesisProviders = primitive.includeSynthesis && primitive.synthesizer ? [primitive.synthesizer] : [];
-        /** @type {any} */
-        const req = {
-          sessionId: primitive.sessionId,
-          userTurnId: primitive.clientUserTurnId || genId('user'),
-          threadId: 'default-thread',
-          mode: 'continuation',
-          userMessage: primitive.userMessage || '',
-          providers,
-          providerModes: primitive.providerModes || {},
-          providerMeta: primitive.providerMeta || {},
-          synthesis: synthesisProviders.length > 0 ? { enabled: true, providers: synthesisProviders } : undefined,
-          mapping: mappingProviders.length > 0 ? { enabled: true, providers: mappingProviders } : undefined,
-          useThinking: !!primitive.useThinking,
-        };
-        return req;
-      }
-      case 'recompute': {
-        // Historical-only run: use empty providers (no batch), and enable exactly the one requested step
-        // Need to resolve the source user turn id for persistence alignment
-        let sourceUserTurnId = null;
-        try {
-          const sm = this.services.sessionManager;
-          if (sm?.adapter?.isReady()) {
-            const sourceAiTurn = await sm.adapter.get('turns', primitive.sourceTurnId);
-            sourceUserTurnId = sourceAiTurn?.userTurnId || null;
-          } else {
-            // Fallback: scan in-memory cache
-            const sessions = this.services.sessionManager?.sessions || {};
-            for (const s of Object.values(sessions)) {
-              const turns = Array.isArray(s?.turns) ? s.turns : [];
-              const ai = turns.find((t) => t?.id === primitive.sourceTurnId);
-              if (ai) { sourceUserTurnId = ai.userTurnId || null; break; }
-            }
-          }
-        } catch (_) {}
-
-        const mapping = primitive.stepType === 'mapping' ? { enabled: true, providers: [primitive.targetProvider] } : undefined;
-        const synthesis = primitive.stepType === 'synthesis' ? { enabled: true, providers: [primitive.targetProvider] } : undefined;
-        /** @type {any} */
-        const req = {
-          sessionId: primitive.sessionId,
-          userTurnId: undefined, // no new user turn for recompute
-          threadId: 'default-thread',
-          mode: 'continuation',
-          userMessage: '', // compiler/engine will use historical
-          providers: [], // no batch providers for recompute
-          synthesis,
-          mapping,
-          useThinking: !!primitive.useThinking,
-          historicalContext: sourceUserTurnId ? { userTurnId: sourceUserTurnId, sourceType: 'batch' } : undefined,
-        };
-        return req;
-      }
-      default:
-        return primitive;
-    }
-  }
+  
 
   /**
    * Async initialization - waits for backend readiness
@@ -222,7 +138,10 @@ export class ConnectionHandler {
             sessionId: executeRequest?.sessionId || 'unknown',
             stepId: 'validate-primitive',
             status: 'failed',
-            error: 'Legacy ExecuteWorkflowRequest is no longer supported. Please migrate to primitives.'
+            error: 'Legacy ExecuteWorkflowRequest is no longer supported. Please migrate to primitives.',
+            // Attach recompute metadata when applicable
+            isRecompute: executeRequest?.type === 'recompute',
+            sourceTurnId: executeRequest?.sourceTurnId
           });
           this.port.postMessage({
             type: 'WORKFLOW_COMPLETE',
@@ -245,19 +164,15 @@ export class ConnectionHandler {
         throw e;
       }
 
-      // Step 2: Map primitive to legacy request format for compiler/engine
-      try {
-        executeRequest = await this._mapPrimitiveToLegacy(executeRequest);
-      } catch (e) {
-        console.error('[ConnectionHandler] Failed to map primitive request:', e);
-        throw e;
-      }
+     // Step 2: No mapping needed - compiler accepts primitives + resolvedContext
+console.log('[ConnectionHandler] Passing primitive directly to compiler');
 
       // ========================================================================
       // Validation
       // ========================================================================
       const histUserTurnId = executeRequest?.historicalContext?.userTurnId;
-      const userTurnId = executeRequest?.userTurnId || histUserTurnId;
+      // Prefer primitive's clientUserTurnId; fall back to legacy userTurnId
+      const userTurnId = executeRequest?.clientUserTurnId || executeRequest?.userTurnId || histUserTurnId;
       const hasBatch = Array.isArray(executeRequest?.providers) && executeRequest.providers.length > 0;
       const hasSynthesis = !!(executeRequest?.synthesis?.enabled && executeRequest.synthesis.providers?.length > 0);
       const hasMapping = !!(executeRequest?.mapping?.enabled && executeRequest.mapping.providers?.length > 0);
@@ -269,7 +184,10 @@ export class ConnectionHandler {
           sessionId: executeRequest?.sessionId || 'unknown',
           stepId: 'validate-user-turn',
           status: 'failed',
-          error: 'Missing userTurnId for historical run'
+          error: 'Missing userTurnId for historical run',
+          // Attach recompute metadata when applicable
+          isRecompute: executeRequest?.type === 'recompute',
+          sourceTurnId: executeRequest?.sourceTurnId
         });
         this.port.postMessage({
           type: 'WORKFLOW_COMPLETE',
@@ -324,7 +242,10 @@ export class ConnectionHandler {
           sessionId: executeRequest?.sessionId || 'unknown',
           stepId: 'handler-error',
           status: 'failed',
-          error: error.message || String(error)
+          error: error.message || String(error),
+          // Attach recompute metadata when applicable
+          isRecompute: executeRequest?.type === 'recompute',
+          sourceTurnId: executeRequest?.sourceTurnId
         });
         this.port.postMessage({
           type: 'WORKFLOW_COMPLETE',
@@ -343,137 +264,7 @@ export class ConnectionHandler {
    * CRITICAL: Ensure session is fully hydrated from persistence
    * This solves the SW restart context loss bug
    */
-  async _ensureSessionHydration(executeRequest) {
-    const isContinuation = executeRequest?.mode === "continuation";
-    const isHistorical = !!executeRequest?.historicalContext?.userTurnId;
-    const sid = executeRequest?.sessionId;
-
-    // Only hydrate for continuation or historical requests with a valid sessionId
-    if ((!isContinuation && !isHistorical) || !sid) {
-      console.log(
-        "[ConnectionHandler] Skipping hydration: not a continuation/historical request"
-      );
-      return;
-    }
-
-    console.log(`[ConnectionHandler] Starting hydration for session ${sid}...`);
-    const sm = this.services.sessionManager;
-
-    // Validate SessionManager is ready
-    if (!sm) {
-      console.error("[ConnectionHandler] SessionManager is null");
-      throw new Error("[ConnectionHandler] SessionManager not available");
-    }
-    console.log("[ConnectionHandler] SessionManager exists");
-
-    if (!sm.isInitialized) {
-      console.warn(
-        "[ConnectionHandler] SessionManager not initialized, waiting..."
-      );
-      // Give it 2 seconds to initialize
-      const timeout = 2000;
-      const startTime = Date.now();
-      while (!sm.isInitialized && Date.now() - startTime < timeout) {
-        await new Promise((resolve) => setTimeout(resolve, 100));
-      }
-      if (!sm.isInitialized) {
-        console.error("[ConnectionHandler] SessionManager never initialized");
-        throw new Error(
-          "[ConnectionHandler] SessionManager initialization timeout"
-        );
-      }
-    }
-    console.log("[ConnectionHandler] SessionManager is initialized");
-
-    if (!sm.adapter) {
-      console.error("[ConnectionHandler] SessionManager adapter is null");
-      throw new Error("[ConnectionHandler] Persistence adapter missing");
-    }
-    console.log("[ConnectionHandler] SessionManager adapter exists");
-
-    if (!sm.adapter.isReady || !sm.adapter.isReady()) {
-      console.error("[ConnectionHandler] Persistence adapter not ready");
-      throw new Error("[ConnectionHandler] Persistence adapter not ready");
-    }
-    console.log("[ConnectionHandler] Persistence adapter is ready");
-
-    console.log(
-      `[ConnectionHandler] All checks passed, calling getOrCreateSession(${sid})...`
-    );
-
-    try {
-      // Wrap hydration with timeout protection
-      const HYDRATION_TIMEOUT = 10000; // 10 seconds
-      const hydrationPromise = sm.getOrCreateSession(sid);
-      const timeoutPromise = new Promise((_, reject) => {
-        setTimeout(
-          () => reject(new Error("Hydration timeout after 10s")),
-          HYDRATION_TIMEOUT
-        );
-      });
-
-      const hydratedSession = await Promise.race([
-        hydrationPromise,
-        timeoutPromise,
-      ]);
-      console.log(`[ConnectionHandler] getOrCreateSession returned:`, {
-        exists: !!hydratedSession,
-        sessionId: hydratedSession?.sessionId,
-        hasProviders: !!hydratedSession?.providers,
-        providerCount: Object.keys(hydratedSession?.providers || {}).length,
-        hasTurns: !!hydratedSession?.turns,
-        turnCount: hydratedSession?.turns?.length || 0,
-      });
-
-      if (!hydratedSession) {
-        throw new Error(
-          `[ConnectionHandler] getOrCreateSession returned null for ${sid}`
-        );
-      }
-
-      // Validate that the session has expected structure
-      if (!hydratedSession.sessionId || hydratedSession.sessionId !== sid) {
-        throw new Error(
-          `[ConnectionHandler] Hydrated session has mismatched ID: ${hydratedSession.sessionId} vs ${sid}`
-        );
-      }
-
-      // For continuation requests, verify that provider contexts were loaded
-      if (isContinuation) {
-        const contexts = sm.getProviderContexts(sid, "default-thread") || {};
-        const contextCount = Object.keys(contexts).length;
-
-        console.log(
-          `[ConnectionHandler] Session ${sid} hydrated with ${contextCount} provider contexts`
-        );
-
-        // Log each provider's context for debugging
-        Object.entries(contexts).forEach(([providerId, ctx]) => {
-          const metaKeys = ctx?.meta ? Object.keys(ctx.meta) : [];
-          console.log(
-            `[ConnectionHandler] Provider ${providerId} context: ${
-              metaKeys.join(", ") || "(empty)"
-            }`
-          );
-        });
-
-        // Note: We don't fail here if contexts are empty because:
-        // 1. It might be a legitimate new provider being added
-        // 2. The precheck will catch missing contexts for providers that should have them
-      }
-
-      console.log(
-        `[ConnectionHandler] ✅ Session ${sid} successfully hydrated`
-      );
-    } catch (error) {
-      console.error(
-        `[ConnectionHandler] Session hydration failed for ${sid}:`,
-        error
-      );
-      console.error("[ConnectionHandler] Error stack:", error.stack);
-      throw new Error(`Failed to hydrate session ${sid}: ${error.message}`);
-    }
-  }
+  // Legacy hydration helper removed: session hydration now handled by persistence-backed readers
 
   /**
    * Normalize provider modes for continuation requests:
@@ -483,47 +274,7 @@ export class ConnectionHandler {
    * This allows new providers to join existing chats without triggering errors.
    */
   _normalizeProviderModesForContinuation(executeRequest) {
-    try {
-      const mode = executeRequest?.mode;
-      const sessionId = executeRequest?.sessionId;
-      const providers = Array.isArray(executeRequest?.providers)
-        ? executeRequest.providers
-        : [];
-      if (mode !== "continuation" || !sessionId || providers.length === 0)
-        return;
-
-      const contexts =
-        this.services.sessionManager?.getProviderContexts(
-          sessionId,
-          "default-thread"
-        ) || {};
-      const providerModes = { ...(executeRequest?.providerModes || {}) };
-
-      const debug = { hasCtx: {}, before: { ...providerModes } };
-      for (const pid of providers) {
-        // Respect explicit UI overrides
-        if (providerModes[pid]) continue;
-
-        // Auto-assign mode based on context presence
-        const hasCtx = !!(
-          contexts?.[pid]?.meta && Object.keys(contexts[pid].meta).length > 0
-        );
-        providerModes[pid] = hasCtx ? "continuation" : "new-conversation";
-        debug.hasCtx[pid] = hasCtx;
-      }
-
-      executeRequest.providerModes = providerModes;
-      console.log(
-        `[ConnectionHandler] normalizeProviderModes: session=${sessionId}, mode=${mode}`,
-        {
-          providers,
-          hasCtx: debug.hasCtx,
-          after: providerModes,
-        }
-      );
-    } catch (_) {
-      // Best-effort; compiler will handle defaults
-    }
+    // Legacy continuation mode normalization removed; compiler handles defaults and context resolution
   }
 
   /**
@@ -534,98 +285,13 @@ export class ConnectionHandler {
    * It does NOT fail for new providers joining an existing chat.
    */
   _precheckContinuation(executeRequest) {
-    try {
-      const mode = executeRequest?.mode;
-      const sessionId = executeRequest?.sessionId;
-      const providers = Array.isArray(executeRequest?.providers)
-        ? executeRequest.providers
-        : [];
-      const providerModes = executeRequest?.providerModes || {};
-
-      if (mode !== "continuation" || !sessionId || providers.length === 0)
-        return null;
-
-      const contexts =
-        this.services.sessionManager?.getProviderContexts(
-          sessionId,
-          "default-thread"
-        ) || {};
-      const missing = [];
-
-      for (const pid of providers) {
-        const providerMode = providerModes[pid];
-
-        // Only validate providers that SHOULD have context
-        // (i.e., explicitly marked as 'continuation')
-        if (providerMode !== "continuation") continue;
-
-        const ctxMeta = contexts?.[pid]?.meta;
-        if (
-          !ctxMeta ||
-          (typeof ctxMeta === "object" && Object.keys(ctxMeta).length === 0)
-        ) {
-          missing.push(pid);
-        }
-      }
-
-      return { missingProviders: missing };
-    } catch (_) {
-      return null;
-    }
+    // Legacy precheck removed; engine and resolver enforce required contexts
   }
 
   /**
    * Emit a clean failure message when continuation precheck fails
    */
-  _emitContinuationPrecheckFailure(executeRequest, missingProviders) {
-    const sid = executeRequest?.sessionId || "unknown";
-    const providers = Array.isArray(executeRequest?.providers)
-      ? executeRequest.providers
-      : [];
-    const now = Date.now();
-    const stepId = `batch-precheck-${now}`;
-
-    const results = {};
-    for (const pid of providers) {
-      if (missingProviders.includes(pid)) {
-        results[pid] = {
-          providerId: pid,
-          text: "",
-          status: "failed",
-          errorCode: "missing-provider-context",
-          meta: {
-            _rawError: `Cannot continue: missing context for ${pid}. The conversation may have been lost due to a restart. Please start a new chat.`,
-          },
-        };
-      } else {
-        // Mark other selected providers as skipped to complete the round cleanly
-        results[pid] = {
-          providerId: pid,
-          text: "",
-          status: "failed",
-          errorCode: "precheck-skipped",
-          meta: {
-            _rawError:
-              "Request cancelled due to missing context for one or more providers.",
-          },
-        };
-      }
-    }
-
-    try {
-      this.port.postMessage({
-        type: "WORKFLOW_STEP_UPDATE",
-        sessionId: sid,
-        stepId,
-        status: "completed",
-        result: { results },
-      });
-    } catch (_) {}
-
-    try {
-      this.port.postMessage({ type: "WORKFLOW_COMPLETE", sessionId: sid });
-    } catch (_) {}
-  }
+  // Legacy failure emitter removed; modern workflow emits structured errors directly
 
   /**
    * Session relocation guard: if the UI sends sessionId=null for a request that
@@ -633,82 +299,7 @@ export class ConnectionHandler {
    * find the correct session to attach to.
    */
   async _relocateSessionId(executeRequest) {
-    try {
-      const isHistorical = !!executeRequest?.historicalContext?.userTurnId;
-      const isContinuation = executeRequest?.mode === "continuation";
-      const isNew = executeRequest?.mode === "new-conversation";
-
-      if (isNew) return; // New chat is allowed to pass null to create a session
-      if (executeRequest?.sessionId) return; // Already set correctly
-
-      // If historical, search for the session that contains the user turn
-      if (isHistorical) {
-        const targetTurnId = executeRequest.historicalContext.userTurnId;
-        const sessions = this.services.sessionManager?.sessions || {};
-        for (const [sid, s] of Object.entries(sessions)) {
-          const turns = Array.isArray(s?.turns) ? s.turns : [];
-          const idx = turns.findIndex(
-            (t) =>
-              t?.id === targetTurnId &&
-              (t?.type === "user" || t?.role === "user")
-          );
-          if (idx !== -1) {
-            executeRequest.sessionId = sid;
-            console.warn(
-              `[ConnectionHandler] Relocated historical request to session ${sid}`
-            );
-            return;
-          }
-        }
-        // Persistence fallback: lookup turnId to find sessionId
-        try {
-          const sm = this.services.sessionManager;
-          if (
-            sm?.usePersistenceAdapter &&
-            sm?.isInitialized &&
-            sm.adapter?.isReady()
-          ) {
-            const turnRecord = await sm.adapter.get("turns", targetTurnId);
-            const foundSid = turnRecord?.sessionId;
-            if (foundSid) {
-              executeRequest.sessionId = foundSid;
-              try {
-                await sm.getOrCreateSession(foundSid);
-              } catch (_) {}
-              console.warn(
-                `[ConnectionHandler] Relocated historical request via persistence to session ${foundSid}`
-              );
-              return;
-            }
-          }
-        } catch (_) {
-          /* non-fatal */
-        }
-        // If not found, let engine fallback search handle it
-      }
-
-      // For plain continuation with no explicit historical turn, attach to the most recent session
-      if (isContinuation && !executeRequest.sessionId) {
-        const sessions = this.services.sessionManager?.sessions || {};
-        let bestSid = null;
-        let bestTs = -1;
-        for (const [sid, s] of Object.entries(sessions)) {
-          const ts = Number(s?.lastActivity) || 0;
-          if (ts > bestTs) {
-            bestTs = ts;
-            bestSid = sid;
-          }
-        }
-        if (bestSid) {
-          executeRequest.sessionId = bestSid;
-          console.warn(
-            `[ConnectionHandler] Relocated continuation request to session ${bestSid}`
-          );
-        }
-      }
-    } catch (e) {
-      // Non-fatal; continue as-is
-    }
+    // Legacy relocation logic removed; primitives carry explicit session context
   }
 
   /**

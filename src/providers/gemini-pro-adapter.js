@@ -54,6 +54,25 @@ export class GeminiProAdapter {
         (result?.candidates?.[0]?.content ??
           (typeof result === "string" ? result : JSON.stringify(result)));
 
+      // Emit a single partial update so WorkflowEngine treats this like streaming
+      try {
+        if (onChunk && normalizedText && normalizedText.length > 0) {
+          onChunk({
+            providerId: this.id,
+            ok: true,
+            text: normalizedText,
+            partial: true,
+            latencyMs: Date.now() - startTime,
+            meta: {
+              cursor: result.cursor,
+              token: result.token,
+              modelName: result.modelName,
+              model,
+            },
+          });
+        }
+      } catch (_) {}
+
       return {
         providerId: this.id,
         ok: true,
@@ -112,6 +131,25 @@ export class GeminiProAdapter {
         result?.text ??
         (result?.candidates?.[0]?.content ??
           (typeof result === "string" ? result : JSON.stringify(result)));
+
+      // Emit a single partial update so WorkflowEngine treats this like streaming
+      try {
+        if (onChunk && normalizedText && normalizedText.length > 0) {
+          onChunk({
+            providerId: this.id,
+            ok: true,
+            text: normalizedText,
+            partial: true,
+            latencyMs: Date.now() - startTime,
+            meta: {
+              cursor: result.cursor,
+              token: result.token,
+              modelName: result.modelName,
+              model,
+            },
+          });
+        }
+      } catch (_) {}
 
       return {
         providerId: this.id,

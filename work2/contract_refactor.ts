@@ -1,51 +1,84 @@
 // ============================================================================
+// REFACTORED API CONTRACT: Three Explicit Primitives
+// ============================================================================
+
+// ============================================================================
 // CORE TYPES & ENUMS
 // ============================================================================
 export type ProviderKey = "claude" | "gemini" | "gemini-pro" | "chatgpt" | "qwen";
 export type WorkflowStepType = "prompt" | "synthesis" | "mapping";
-export type WorkflowMode = "new-conversation" | "continuation";
+export type WorkflowMode = "new-conversation" | "continuation";  // Kept for backward compat
 export type SynthesisStrategy = "continuation" | "fresh";
 
 // ============================================================================
-// SECTION 1: UNIFIED EXECUTION REQUEST (UI -> BACKEND)
-// SOURCE: This is from your "New Contract" and the core of the new architecture.
+// SECTION 1: UNIFIED EXECUTION REQUEST (UI -> BACKEND) - REFACTORED
 // ============================================================================
+
 /**
- * This is the high-level, declarative request the UI sends to the backend.
- * It describes user intent, not execution steps.
+ * REFACTORED: Three explicit primitives replace the overloaded ExecuteWorkflowRequest
  */
-export interface ExecuteWorkflowRequest {
-  sessionId: string;
-  // The canonical ID of the user's turn, generated client-side and REQUIRED
-  userTurnId: string;
-  threadId: string;
-  mode: WorkflowMode; // Global default
+export type WorkflowRequest = 
+  | InitializeRequest 
+  | ExtendRequest 
+  | RecomputeRequest;
+
+/**
+ * Initialize: Start a brand new conversation
+ * - No sessionId (will be generated)
+ * - No historical context
+ * - All providers start fresh
+ */
+export interface InitializeRequest {
+  type: 'initialize';
   userMessage: string;
   providers: ProviderKey[];
-
-  // Optional per-provider mode overrides (e.g., force new-conversation for a provider)
-  providerModes?: Partial<Record<ProviderKey, WorkflowMode>>;
-
-  // Optional per-provider metadata to pass through to adapters (e.g., Gemini model selection)
-  providerMeta?: Partial<Record<ProviderKey, any>>;
-
-  // Multi-synthesis: Array of providers that each synthesize
-  synthesis?: { enabled: boolean; providers: ProviderKey[] };
-
-  // Multi-mapping: Array of providers that each mapping
-  mapping?: { enabled: boolean; providers: ProviderKey[] };
-
+  includeMapping: boolean;
+  includeSynthesis: boolean;
+  synthesizer?: ProviderKey;  // Default or specified
+  mapper?: ProviderKey;
   useThinking?: boolean;
+  
+  // Optional per-provider metadata
+  providerMeta?: Partial<Record<ProviderKey, any>>;
+}
 
-  historicalContext?: {
-    userTurnId?: string;
-    sourceType?: "batch" | "synthesis" | "mapping";
-    attemptNumber?: number;
-    branchPointTurnId?: string;
-    inheritContextUpTo?: string;
-    replaceTurnId?: string;
-    preferredMappingProvider?: ProviderKey;
-  };
+/**
+ * Extend: Continue an existing conversation
+ * - Requires sessionId
+ * - New user message
+ * - Can use subset of session's providers
+ * - Inherits contexts from last turn
+ */
+export interface ExtendRequest {
+  type: 'extend';
+  sessionId: string;
+  userMessage: string;
+  providers: ProviderKey[];  // Can be subset of session providers
+  includeMapping: boolean;
+  includeSynthesis: boolean;
+  synthesizer?: ProviderKey;
+  mapper?: ProviderKey;
+  useThinking?: boolean;
+  
+  // Optional per-provider mode overrides
+  providerModes?: Partial<Record<ProviderKey, WorkflowMode>>;
+  providerMeta?: Partial<Record<ProviderKey, any>>;
+}
+
+/**
+ * Recompute: Rerun synthesis or mapping on frozen batch outputs
+ * - Requires sessionId and sourceTurnId
+ * - No new providers (uses frozen batch)
+ * - No new user message (uses source turn's message)
+ * - Creates derived turn without advancing main timeline
+ */
+export interface RecomputeRequest {
+  type: 'recompute';
+  sessionId: string;
+  sourceTurnId: string;       // Which turn to recompute
+  stepType: 'synthesis' | 'mapping';  // Which step to rerun
+  targetProvider: ProviderKey;  // New synthesizer or mapper
+  useThinking?: boolean;
 }
 
 export interface ExecuteWorkflowResponse {
@@ -55,64 +88,45 @@ export interface ExecuteWorkflowResponse {
 }
 
 // ============================================================================
-// SECTION 1b: THREE PRIMITIVES (initialize | extend | recompute)
-// Introduced for the turn-based model. ExecuteWorkflowRequest remains for
-// backward-compat in legacy surfaces, but the system should migrate to this
-// union over time.
+// SECTION 2: RESOLVED CONTEXT (BACKEND-INTERNAL) - NEW
 // ============================================================================
 
-export type PrimitiveWorkflowRequest = InitializeRequest | ExtendRequest | RecomputeRequest;
+/**
+ * Output of ContextResolver - contains all data needed for compilation/execution
+ */
+export type ResolvedContext = 
+  | InitializeContext 
+  | ExtendContext 
+  | RecomputeContext;
 
-export interface InitializeRequest {
+export interface InitializeContext {
   type: 'initialize';
-  // Optional sessionId set to null to signal backend authority
-  sessionId?: string | null;
-  userMessage: string;
   providers: ProviderKey[];
-  includeMapping: boolean;
-  includeSynthesis: boolean;
-  synthesizer?: ProviderKey;
-  mapper?: ProviderKey;
-  useThinking?: boolean;
-  // Optional per-provider metadata
-  providerMeta?: Partial<Record<ProviderKey, any>>;
-  // Optional: client-side provisional user turn id so TURN_CREATED can reference it
-  clientUserTurnId?: string;
+  // Empty contexts - each provider starts fresh
 }
 
-export interface ExtendRequest {
+export interface ExtendContext {
   type: 'extend';
   sessionId: string;
-  userMessage: string;
-  providers: ProviderKey[];
-  includeMapping: boolean;
-  includeSynthesis: boolean;
-  synthesizer?: ProviderKey;
-  mapper?: ProviderKey;
-  useThinking?: boolean;
-  providerModes?: Partial<Record<ProviderKey, WorkflowMode>>;
-  providerMeta?: Partial<Record<ProviderKey, any>>;
-  // Optional: client-side provisional user turn id so TURN_CREATED can reference it
-  clientUserTurnId?: string;
+  lastTurnId: string;
+  providerContexts: Record<ProviderKey, { meta: any; continueThread: boolean }>;
 }
 
-export interface RecomputeRequest {
+export interface RecomputeContext {
   type: 'recompute';
   sessionId: string;
   sourceTurnId: string;
+  frozenBatchOutputs: Record<ProviderKey, ProviderResponse>;
+  providerContextsAtSourceTurn: Record<ProviderKey, { meta: any }>;
   stepType: 'synthesis' | 'mapping';
   targetProvider: ProviderKey;
-  useThinking?: boolean;
+  sourceUserMessage: string;  // Original message from source turn
 }
 
 // ============================================================================
-// SECTION 2: COMPILED WORKFLOW (BACKEND-INTERNAL)
-// SOURCE: This is from your "New Contract." It's essential for the backend's internal logic.
+// SECTION 3: COMPILED WORKFLOW (BACKEND-INTERNAL)
 // ============================================================================
-/**
- * These are the low-level, imperative steps produced by the WorkflowCompiler
- * and consumed by the WorkflowEngine.
- */
+
 export interface PromptStepPayload {
   prompt: string;
   providers: ProviderKey[];
@@ -120,7 +134,6 @@ export interface PromptStepPayload {
     ProviderKey,
     { meta: any; continueThread: boolean }
   >;
-  // Arbitrary per-provider metadata to be forwarded to orchestrator/adapters
   providerMeta?: Partial<Record<ProviderKey, any>>;
   hidden?: boolean;
   useThinking?: boolean;
@@ -141,7 +154,6 @@ export interface SynthesisStepPayload {
   preferredMappingProvider?: ProviderKey;
 }
 
-// NOTE: Added Omit<...> to reduce duplication, but the effective type is the same.
 export interface MappingStepPayload
   extends Omit<SynthesisStepPayload, "synthesisProvider"> {
   mappingProvider: ProviderKey;
@@ -157,6 +169,10 @@ export interface WorkflowContext {
   sessionId: string;
   threadId: string;
   targetUserTurnId: string;
+  sessionCreated?: boolean;
+  userMessage?: string;
+  canonicalUserTurnId?: string;
+  canonicalAiTurnId?: string;
 }
 
 export interface WorkflowRequest {
@@ -166,42 +182,8 @@ export interface WorkflowRequest {
 }
 
 // ============================================================================
-// SECTION 2b: RESOLVED CONTEXT (output of ContextResolver)
+// SECTION 4: REAL-TIME MESSAGING (BACKEND -> UI)
 // ============================================================================
-
-export type ResolvedContext = InitializeContext | ExtendContext | RecomputeContext;
-
-export interface InitializeContext {
-  type: 'initialize';
-  providers: ProviderKey[];
-}
-
-export interface ExtendContext {
-  type: 'extend';
-  sessionId: string;
-  lastTurnId: string;
-  providerContexts: Record<ProviderKey, { meta: any; continueThread: boolean }>;
-}
-
-export interface RecomputeContext {
-  type: 'recompute';
-  sessionId: string;
-  sourceTurnId: string;
-  frozenBatchOutputs: Record<ProviderKey, ProviderResponse>;
-  providerContextsAtSourceTurn: Record<ProviderKey, { meta: any }>;
-  stepType: 'synthesis' | 'mapping';
-  targetProvider: ProviderKey;
-  sourceUserMessage: string;
-}
-
-// ============================================================================
-// SECTION 3: REAL-TIME MESSAGING (BACKEND -> UI)
-// SOURCE: This is from your "New Contract." It defines the streaming communication.
-// ============================================================================
-/**
- * These are the messages sent from the backend to the UI via the persistent port
- * to provide real-time updates on workflow execution.
- */
 
 export interface PartialResultMessage {
   type: "PARTIAL_RESULT";
@@ -211,16 +193,13 @@ export interface PartialResultMessage {
   chunk: { text?: string; meta?: any };
 }
 
-// NOTE: I made the `result` property more specific and robust here.
 export interface WorkflowStepUpdateMessage {
   type: "WORKFLOW_STEP_UPDATE";
   sessionId: string;
   stepId: string;
   status: "completed" | "failed";
   result?: {
-    // For batch prompt steps, this will be populated
     results?: Record<string, ProviderResponse>;
-    // For single-provider steps (synthesis/mapping), these will be populated
     providerId?: string;
     text?: string;
     status?: string;
@@ -237,9 +216,6 @@ export interface WorkflowCompleteMessage {
   error?: string;
 }
 
-// Sent immediately after backend receives ExecuteWorkflowRequest and generates
-// the canonical AI turn ID. Establishes canonical IDs up-front to eliminate
-// frontend atomic swap/ID remapping.
 export interface TurnCreatedMessage {
   type: "TURN_CREATED";
   sessionId: string;
@@ -272,13 +248,9 @@ export type PortMessage =
   | TurnCreatedMessage;
 
 // ============================================================================
-// SECTION 4: PERSISTENT DATA MODELS (FOR UI & SESSION STATE)
-// SOURCE: This section is from your "Old Contract" and is MERGED IN here. It's essential.
+// SECTION 5: PERSISTENT DATA MODELS
 // ============================================================================
-/**
- * These are the core data entities that represent the application's state.
- * They are used for UI rendering and are persisted by the SessionManager.
- */
+
 export interface ProviderResponse {
   providerId: string;
   text: string;
@@ -304,12 +276,16 @@ export interface AiTurn {
   batchResponses: Record<string, ProviderResponse>;
   synthesisResponses: Record<string, ProviderResponse[]>;
   mappingResponses: Record<string, ProviderResponse[]>;
+  
+  // NEW: Turn-scoped provider contexts
+  providerContexts?: Record<string, any>;
+  
   meta?: {
     branchPointTurnId?: string;
     replacesId?: string;
     isHistoricalRerun?: boolean;
-    synthForUserTurnId?: string; 
-  [key: string]: any;
+    synthForUserTurnId?: string;
+    [key: string]: any;
   };
 }
 
@@ -327,18 +303,34 @@ export interface Thread {
 
 // ============================================================================
 // TYPE GUARDS
-// SOURCE: From your "New Contract."
 // ============================================================================
 export function isPromptPayload(payload: any): payload is PromptStepPayload {
   return "prompt" in payload && "providers" in payload;
 }
+
 export function isSynthesisPayload(
   payload: any
 ): payload is SynthesisStepPayload {
   return "synthesisProvider" in payload;
 }
+
 export function isMappingPayload(
   payload: any
 ): payload is MappingStepPayload {
   return "mappingProvider" in payload;
+}
+
+// ============================================================================
+// REQUEST TYPE GUARDS - NEW
+// ============================================================================
+export function isInitializeRequest(req: WorkflowRequest): req is InitializeRequest {
+  return req.type === 'initialize';
+}
+
+export function isExtendRequest(req: WorkflowRequest): req is ExtendRequest {
+  return req.type === 'extend';
+}
+
+export function isRecomputeRequest(req: WorkflowRequest): req is RecomputeRequest {
+  return req.type === 'recompute';
 }

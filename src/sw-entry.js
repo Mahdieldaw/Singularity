@@ -132,18 +132,20 @@ async function initializeSessionManager(persistenceLayer) {
     sessionManager.sessions = __HTOS_SESSIONS;
 
     // Always initialize with persistence adapter
-    const { SimpleIndexedDBAdapter } = await import(
-      "./persistence/SimpleIndexedDBAdapter.js"
+    // Use the richer IndexedDBAdapter to leverage indices (e.g., byAiTurnId)
+    const { IndexedDBAdapter } = await import(
+      "./persistence/adapters/IndexedDBAdapter.js"
     );
-    const simpleAdapter = new SimpleIndexedDBAdapter();
+    const adapter = new IndexedDBAdapter();
 
     console.log(
-      "[SW] Initializing SimpleIndexedDBAdapter for SessionManager..."
+      "[SW] Initializing IndexedDBAdapter for SessionManager..."
     );
-    await simpleAdapter.init();
+    // Disable internal auto-cleanup; sw-entry manages cleanup centrally
+    await adapter.initialize({ autoCleanup: false });
 
     await sessionManager.initialize({
-      adapter: simpleAdapter,
+      adapter,
     });
 
     console.log("[SW:INIT:6] ✅ Session manager initialized with persistence");
@@ -499,28 +501,92 @@ async function handleUnifiedMessage(message, sender, sendResponse) {
             console.warn('[SW] Persistence adapter not ready; returning empty record sets for GET_HISTORY_SESSION');
           }
 
-          let sessionRecord = null;
-          let turns = [];
-          let providerResponses = [];
+      let sessionRecord = null;
+      let turns = [];
+      let providerResponses = [];
 
-          if (useAdapter) {
-            sessionRecord = await sm.adapter.get('sessions', sessionId);
-            const allTurns = await sm.adapter.getAll('turns');
-            turns = allTurns.filter(t => t && t.sessionId === sessionId)
-                            .sort((a, b) => (a.sequence ?? a.createdAt) - (b.sequence ?? b.createdAt));
-            const allResponses = await sm.adapter.getAll('provider_responses');
-            providerResponses = allResponses.filter(r => r && r.sessionId === sessionId);
-          }
+      if (useAdapter) {
+        sessionRecord = await sm.adapter.get('sessions', sessionId);
+        const allTurns = await sm.adapter.getAll('turns');
+        turns = allTurns.filter(t => t && t.sessionId === sessionId)
+                        .sort((a, b) => (a.sequence ?? a.createdAt) - (b.sequence ?? b.createdAt));
+        const allResponses = await sm.adapter.getAll('provider_responses');
+        providerResponses = allResponses.filter(r => r && r.sessionId === sessionId);
+      }
 
-          // Respond with the new, normalized payload
-          sendResponse({ 
-            success: true, 
-            data: {
-              session: sessionRecord,
-              turns,
-              providerResponses
+          // Assemble UI-friendly rounds from raw records
+          try {
+            const sortedTurns = Array.isArray(turns)
+              ? turns.sort((a, b) => (a.sequence ?? a.createdAt) - (b.sequence ?? b.createdAt))
+              : [];
+
+            const rounds = [];
+            for (let i = 0; i < sortedTurns.length; i++) {
+              const user = sortedTurns[i];
+              if (!user || !(user.type === 'user' || user.role === 'user')) continue;
+              // Prefer the immediate next assistant turn or one linked by userTurnId
+              let ai = sortedTurns[i + 1] && (sortedTurns[i + 1].type === 'ai' || sortedTurns[i + 1].role === 'assistant')
+                ? sortedTurns[i + 1]
+                : sortedTurns.find(t => (t.type === 'ai' || t.role === 'assistant') && t.userTurnId === user.id) || null;
+              if (!ai) continue;
+
+              const responsesForAi = (providerResponses || []).filter(r => r && r.aiTurnId === ai.id)
+                .sort((a, b) => (a.responseIndex ?? 0) - (b.responseIndex ?? 0));
+
+              const providers = {};
+              const synthesisResponses = {};
+              const mappingResponses = {};
+              const createdAt = user.createdAt || user.updatedAt || Date.now();
+              const completedAt = ai.updatedAt || ai.createdAt || createdAt;
+
+              for (const r of responsesForAi) {
+                const pid = r.providerId;
+                const baseResp = {
+                  providerId: pid,
+                  text: r.text || '',
+                  status: r.status || 'completed',
+                  meta: r.meta || {},
+                  createdAt: r.createdAt || createdAt,
+                  updatedAt: r.updatedAt || completedAt
+                };
+                if (r.responseType === 'batch') {
+                  providers[pid] = baseResp;
+                } else if (r.responseType === 'synthesis') {
+                  (synthesisResponses[pid] = synthesisResponses[pid] || []).push(baseResp);
+                } else if (r.responseType === 'mapping') {
+                  (mappingResponses[pid] = mappingResponses[pid] || []).push(baseResp);
+                }
+              }
+
+              rounds.push({
+                userTurnId: user.id,
+                aiTurnId: ai.id,
+                user: { id: user.id, text: user.text || user.content || '', createdAt },
+                providers,
+                synthesisResponses,
+                mappingResponses,
+                createdAt,
+                completedAt
+              });
             }
-          });
+
+            // Respond with FullSessionPayload format expected by UI
+            sendResponse({
+              success: true,
+              data: {
+                id: (sessionRecord && sessionRecord.id) || sessionId,
+                sessionId,
+                title: (sessionRecord && sessionRecord.title) || 'New Chat',
+                createdAt: (sessionRecord && sessionRecord.createdAt) || 0,
+                lastActivity: (sessionRecord && (sessionRecord.updatedAt || sessionRecord.lastActivity)) || 0,
+                turns: rounds,
+                providerContexts: {}
+              }
+            });
+          } catch (assembleError) {
+            console.error('[SW] Failed to assemble rounds:', assembleError);
+            sendResponse({ success: true, data: { id: sessionId, sessionId, title: 'New Chat', createdAt: 0, lastActivity: 0, turns: [], providerContexts: {} } });
+          }
         } catch (e) {
           console.error('[SW] GET_HISTORY_SESSION error:', e);
           sendResponse({ success: false, error: 'Failed to load session' });
@@ -612,8 +678,14 @@ async function handleUnifiedMessage(message, sender, sendResponse) {
         
       case 'DELETE_SESSION': {
         const sessionId = message.sessionId || message.payload?.sessionId;
-        await sm.deleteSession(sessionId);
-        sendResponse({ success: true });
+        try {
+          const removed = await sm.deleteSession(sessionId);
+          // Return explicit removed boolean so UI can react optimistically
+          sendResponse({ success: true, removed });
+        } catch (e) {
+          console.error('[SW] DELETE_SESSION failed:', e);
+          sendResponse({ success: false, error: e?.message || String(e) });
+        }
         return true;
       }
         

@@ -54,7 +54,6 @@ export declare class SessionManager {
   
   getOrCreateSession(sessionId: string): Promise<SessionData>;
   getOrCreateSessionWithPersistence(sessionId: string): Promise<SessionData>;
-  buildLegacySessionObject(sessionId: string): Promise<SessionData>;
   
   saveSession(sessionId: string): Promise<void>;
   saveSessionWithPersistence(sessionId: string): Promise<void>;
