@@ -153,10 +153,22 @@ export class SessionManager {
     const lastTurn = await this.adapter.get('turns', context.lastTurnId);
     if (!lastTurn) throw new Error(`[SessionManager] Last turn ${context.lastTurnId} not found`);
 
-    // Determine next sequence
-    const allTurns = await this.adapter.getAll('turns');
-    const sessionTurns = allTurns.filter(t => t.sessionId === sessionId);
-    const nextSequence = sessionTurns.length;
+    // Determine next sequence using session.turnCount when available (avoids full-store scan)
+    let nextSequence = 0;
+    try {
+      const session = await this.adapter.get('sessions', sessionId);
+      if (session && typeof session.turnCount === 'number') {
+        nextSequence = session.turnCount;
+      } else {
+        // Fallback: compute from turns if session metadata is missing
+        const allTurns = await this.adapter.getAll('turns');
+        nextSequence = allTurns.filter(t => t.sessionId === sessionId).length;
+      }
+    } catch (e) {
+      // Conservative fallback on error
+      const allTurns = await this.adapter.getAll('turns');
+      nextSequence = allTurns.filter(t => t.sessionId === sessionId).length;
+    }
 
     // 1) User turn
     const userTurnId = request.canonicalUserTurnId || `user-${now}`;

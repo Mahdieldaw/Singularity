@@ -29,6 +29,7 @@ class ExtensionAPI {
   private sessionId: string | null = null;
   private port: chrome.runtime.Port | null = null;
   private portMessageHandler: ((message: any) => void) | null = null;
+  private static DEBUG_PORT_LOGS = false;
 
   constructor() {
     this.portHealthManager = new PortHealthManager('htos-popup', {
@@ -112,7 +113,9 @@ class ExtensionAPI {
 
   setPortMessageHandler(handler: ((message: any) => void) | null): void {
     this.portMessageHandler = handler;
-    console.log("[API] Port message handler registered.");
+    if (ExtensionAPI.DEBUG_PORT_LOGS) {
+      console.log("[API] Port message handler registered.");
+    }
   }
 
   async executeWorkflow(request: ExecuteWorkflowRequest | PrimitiveWorkflowRequest): Promise<void> {

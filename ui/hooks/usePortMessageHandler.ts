@@ -67,6 +67,9 @@ export function usePortMessageHandler() {
   const streamingBufferRef = useRef<StreamingBuffer | null>(null);
   const activeAiTurnIdRef = useRef<string | null>(null);
   const activeRecomputeRef = useRef<{ aiTurnId: string; stepType: 'synthesis' | 'mapping'; providerId: string } | null>(null);
+  // Track whether we've already logged the first PARTIAL_RESULT for a given
+  // stepId/providerId pair to avoid noisy, repeated logs in devtools.
+  const partialLoggedRef = useRef<Map<string, Set<string>>>(new Map());
 
   // Keep ref in sync with atom
   useEffect(() => {
@@ -82,7 +85,10 @@ export function usePortMessageHandler() {
   const handler = useCallback((message: any) => {
     if (!message || !message.type) return;
     
-    console.log('[Port Handler]', message.type, message);
+    // Reduce noise: do not dump full PARTIAL_RESULT objects repeatedly
+    if (message.type !== 'PARTIAL_RESULT') {
+      console.log('[Port Handler]', message.type, message);
+    }
 
     switch (message.type) {
       // SESSION_STARTED is deprecated. UI now initializes session from TURN_CREATED.
@@ -252,6 +258,22 @@ export function usePortMessageHandler() {
           return;
         }
 
+        // Log the first partial per provider per step only
+        try {
+          let perStep = partialLoggedRef.current.get(stepId);
+          if (!perStep) {
+            perStep = new Set<string>();
+            partialLoggedRef.current.set(stepId, perStep);
+          }
+          if (!perStep.has(pid as string)) {
+            const preview = typeof chunk?.text === 'string' ? chunk.text.slice(0, 200) : '';
+            console.log('[Port Handler] PARTIAL_RESULT (first)', { stepId, providerId: pid, preview });
+            perStep.add(pid as string);
+          }
+        } catch (e) {
+          // non-fatal
+        }
+
         // Initialize buffer if needed
         if (!streamingBufferRef.current) {
           streamingBufferRef.current = new StreamingBuffer((updates) => {
@@ -282,6 +304,11 @@ export function usePortMessageHandler() {
       case 'WORKFLOW_STEP_UPDATE': {
         const { stepId, status, result, error, sessionId: msgSessionId } = message;
         
+        // Clean up once a step completes/fails to avoid memory growth
+        if (status === 'completed' || status === 'failed') {
+          try { partialLoggedRef.current.delete(stepId); } catch {}
+        }
+
         if (msgSessionId && currentSessionId && msgSessionId !== currentSessionId) {
           console.warn(`[Port] Ignoring WORKFLOW_STEP_UPDATE from ${msgSessionId}`);
           break;

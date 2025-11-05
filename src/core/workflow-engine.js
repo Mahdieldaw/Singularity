@@ -464,6 +464,21 @@ export class WorkflowEngine {
               context.sessionId = persistResult.sessionId;
               console.log(`[WorkflowEngine] Initialize complete: session=${persistResult.sessionId}`);
             }
+
+            // Emit TURN_CREATED with authoritative IDs from persistence for initialize/extend
+            try {
+              const isRecompute = (resolvedContext?.type === 'recompute');
+              if (!isRecompute && context.canonicalUserTurnId && context.canonicalAiTurnId) {
+                this.port.postMessage({
+                  type: 'TURN_CREATED',
+                  sessionId: context.sessionId,
+                  userTurnId: context.canonicalUserTurnId,
+                  aiTurnId: context.canonicalAiTurnId
+                });
+              }
+            } catch (emitErr) {
+              console.warn('[WorkflowEngine] Failed to emit TURN_CREATED:', emitErr);
+            }
           }
         } catch (e) {
           console.error('[WorkflowEngine] Consolidated persistence failed:', e);

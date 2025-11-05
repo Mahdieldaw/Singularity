@@ -207,27 +207,9 @@ console.log('[ConnectionHandler] Passing primitive directly to compiler');
       // ========================================================================
       const workflowRequest = this.services.compiler.compile(executeRequest, resolvedContext);
 
-      // ========================================================================
-      // TURN_CREATED message
-      // ========================================================================
-      const createsNewTurn = hasBatch;
-      if (createsNewTurn) {
-        const aiTurnId = `ai-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-        workflowRequest.context = {
-          ...workflowRequest.context,
-          canonicalUserTurnId: userTurnId,
-          canonicalAiTurnId: aiTurnId
-        };
-
-        try {
-          this.port.postMessage({
-            type: 'TURN_CREATED',
-            sessionId: workflowRequest.context.sessionId || executeRequest.sessionId,
-            userTurnId,
-            aiTurnId
-          });
-        } catch (_) {}
-      }
+      // NOTE: TURN_CREATED now emits from WorkflowEngine after persistence
+      // to ensure authoritative IDs. We no longer emit here to avoid
+      // premature/non-canonical IDs.
 
       // ========================================================================
       // Execute
