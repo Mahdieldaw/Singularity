@@ -81,7 +81,6 @@ async function initializePersistence() {
     persistenceLayer = await initializePersistenceLayer({
       dbName: 'HTOSPersistenceDB',
       version: 1,
-      enableMigration: true,
       enableProvenance: globalThis.HTOS_ENABLE_PROVENANCE_TRACKING || false
     });
     // Expose globally for UI bridge and debugging

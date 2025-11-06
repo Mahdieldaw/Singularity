@@ -337,75 +337,70 @@ export function usePortMessageHandler() {
           const resultsMap = result.results || (result.providerId ? { [result.providerId]: result } : {});
           
           Object.entries(resultsMap).forEach(([providerId, data]: [string, any]) => {
-            // Route recompute completions to the exact historical turn
-            const targetId = (message.isRecompute && message.sourceTurnId) ? message.sourceTurnId : activeAiTurnIdRef.current;
+            const targetId = activeAiTurnIdRef.current;
             if (!targetId) return;
 
-            console.log(`[Port] Completing ${stepType}/${providerId}:`, {
+            console.log(`[Port] Completing ${stepType}/${providerId} on turn ${targetId}:`, {
               textLength: data?.text?.length,
               status: data?.status
             });
-            // Only apply direct mutations for recompute flows (historical reruns)
-            if (message.isRecompute) {
-              setTurnsMap((draft: Map<string, TurnMessage>) => {
-                const existing = draft.get(targetId);
-                if (!existing || existing.type !== 'ai') return;
-                const aiTurn = existing as AiTurn;
 
-                const completedEntry = {
-                  providerId,
-                  text: data?.text || '',
-                  status: 'completed' as const,
-                  createdAt: Date.now(),
-                  updatedAt: Date.now(),
-                  meta: data?.meta || {}
-                };
+            setTurnsMap((draft: Map<string, TurnMessage>) => {
+              const existing = draft.get(targetId);
+              if (!existing || existing.type !== 'ai') return;
+              const aiTurn = existing as AiTurn;
 
-                if (stepType === 'synthesis') {
-                  const arr = Array.isArray(aiTurn.synthesisResponses?.[providerId])
-                    ? [...(aiTurn.synthesisResponses![providerId] as any[])]
-                    : [];
-                  if (arr.length > 0) {
-                    arr[arr.length - 1] = { ...(arr[arr.length - 1] as any), ...completedEntry } as any;
-                  } else {
-                    arr.push(completedEntry as any);
-                  }
-                  aiTurn.synthesisResponses = { ...(aiTurn.synthesisResponses || {}), [providerId]: arr as any };
-                } else if (stepType === 'mapping') {
-                  const arr = Array.isArray(aiTurn.mappingResponses?.[providerId])
-                    ? [...(aiTurn.mappingResponses![providerId] as any[])]
-                    : [];
-                  if (arr.length > 0) {
-                    arr[arr.length - 1] = { ...(arr[arr.length - 1] as any), ...completedEntry } as any;
-                  } else {
-                    arr.push(completedEntry as any);
-                  }
-                  aiTurn.mappingResponses = { ...(aiTurn.mappingResponses || {}), [providerId]: arr as any };
-                } else if (stepType === 'batch') {
-                  aiTurn.batchResponses = {
-                    ...(aiTurn.batchResponses || {}),
-                    [providerId]: {
-                      providerId,
-                      text: data?.text || '',
-                      status: 'completed',
-                      createdAt: Date.now(),
-                      updatedAt: Date.now(),
-                      meta: data?.meta || {}
-                    }
-                  } as any;
+              const completedEntry = {
+                providerId,
+                text: data?.text || '',
+                status: 'completed' as const,
+                createdAt: Date.now(),
+                updatedAt: Date.now(),
+                meta: data?.meta || {}
+              };
+
+              if (stepType === 'synthesis') {
+                const arr = Array.isArray(aiTurn.synthesisResponses?.[providerId])
+                  ? [...(aiTurn.synthesisResponses![providerId] as any[])]
+                  : [];
+                if (arr.length > 0) {
+                  arr[arr.length - 1] = { ...(arr[arr.length - 1] as any), ...completedEntry } as any;
+                } else {
+                  arr.push(completedEntry as any);
                 }
-              });
-
-              // Store provider context in separate atom when available
-              if (data?.meta) {
-                setProviderContexts((draft: Record<string, any>) => {
-                  draft[providerId] = { ...(draft[providerId] || {}), ...data.meta };
-                });
+                aiTurn.synthesisResponses = { ...(aiTurn.synthesisResponses || {}), [providerId]: arr as any };
+              } else if (stepType === 'mapping') {
+                const arr = Array.isArray(aiTurn.mappingResponses?.[providerId])
+                  ? [...(aiTurn.mappingResponses![providerId] as any[])]
+                  : [];
+                if (arr.length > 0) {
+                  arr[arr.length - 1] = { ...(arr[arr.length - 1] as any), ...completedEntry } as any;
+                } else {
+                  arr.push(completedEntry as any);
+                }
+                aiTurn.mappingResponses = { ...(aiTurn.mappingResponses || {}), [providerId]: arr as any };
+              } else if (stepType === 'batch') {
+                aiTurn.batchResponses = {
+                  ...(aiTurn.batchResponses || {}),
+                  [providerId]: {
+                    providerId,
+                    text: data?.text || '',
+                    status: 'completed',
+                    createdAt: Date.now(),
+                    updatedAt: Date.now(),
+                    meta: data?.meta || {}
+                  }
+                } as any;
               }
+            });
+
+            if (data?.meta) {
+              setProviderContexts((draft: Record<string, any>) => {
+                draft[providerId] = { ...(draft[providerId] || {}), ...data.meta };
+              });
             }
           });
 
-          // Clear recompute targeting after successful completion (only for recompute flows)
           if (message.isRecompute) {
             setActiveRecomputeState(null);
           }

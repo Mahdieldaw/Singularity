@@ -9,8 +9,7 @@ export class PersistenceMonitor {
             operations: new Map(),
             errors: [],
             performance: new Map(),
-            connections: new Map(),
-            migrations: []
+            connections: new Map()
         };
         
         this.isEnabled = globalThis.HTOS_DEBUG_MODE || false;
@@ -136,20 +135,7 @@ export class PersistenceMonitor {
         });
     }
 
-    /**
-     * Record migration event
-     */
-    recordMigration(fromVersion, toVersion, details = {}) {
-        if (!this.isEnabled) return;
-        
-        this.metrics.migrations.push({
-            fromVersion,
-            toVersion,
-            timestamp: Date.now(),
-            details,
-            id: `migration_${Date.now()}`
-        });
-    }
+    // Migration tracking removed
 
     /**
      * Get comprehensive health report
@@ -165,13 +151,11 @@ export class PersistenceMonitor {
             summary: {
                 totalOperations: this.metrics.operations.size,
                 totalErrors: this.metrics.errors.length,
-                activeConnections: this.metrics.connections.size,
-                migrations: this.metrics.migrations.length
+                activeConnections: this.metrics.connections.size
             },
             performance: {},
             recentErrors: this.metrics.errors.slice(-10),
-            connections: Array.from(this.metrics.connections.values()),
-            migrations: this.metrics.migrations.slice(-5)
+            connections: Array.from(this.metrics.connections.values())
         };
         
         // Convert performance metrics to plain objects
@@ -251,7 +235,6 @@ export class PersistenceMonitor {
         this.metrics.errors = [];
         this.metrics.performance.clear();
         this.metrics.connections.clear();
-        this.metrics.migrations = [];
         
         if (this.isEnabled) {
             console.log('🧹 HTOS Persistence Monitor metrics cleared');

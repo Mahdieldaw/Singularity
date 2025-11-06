@@ -70,11 +70,6 @@ export declare class SessionManager {
   
   getTurn(sessionId: string, turnId: string): any;
   getTurns(sessionId: string): any[];
-  
-  // Migration helpers
-  getMigrationStatus(): Promise<{ total: number; migrated: number; pending: number; pendingSessions: string[]; sessions: Record<string, { hasLastPointer: boolean; latestAiId: string | null; contextsOnLatest: boolean; migrated: boolean; }> }>;
-  forceMigrateAll(): Promise<{ total: number; migrated: number; pending: number; pendingSessions: string[]; sessions: Record<string, { hasLastPointer: boolean; latestAiId: string | null; contextsOnLatest: boolean; migrated: boolean; }> }>;
-  
   getPersistenceStatus(): PersistenceStatus;
   enablePersistenceAdapter(): Promise<void>;
   disablePersistenceAdapter(): Promise<void>;

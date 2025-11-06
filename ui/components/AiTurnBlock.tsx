@@ -1,19 +1,29 @@
 // ui/components/AiTurnBlock.tsx - HYBRID COLLAPSIBLE SOLUTION
-import React from 'react';
-import { AiTurn, ProviderResponse, AppStep } from '../types';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
-import { useMemo, useState, useCallback, useRef, useEffect, useLayoutEffect } from 'react';
-import { hasComposableContent } from '../utils/composerUtils';
-import { LLM_PROVIDERS_CONFIG } from '../constants';
-import ClipsCarousel from './ClipsCarousel';
-import { ChevronDownIcon, ChevronUpIcon } from './Icons';
-import { normalizeResponseArray, getLatestResponse } from '../utils/turn-helpers';
+import React from "react";
+import { AiTurn, ProviderResponse, AppStep } from "../types";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import {
+  useMemo,
+  useState,
+  useCallback,
+  useRef,
+  useEffect,
+  useLayoutEffect,
+} from "react";
+import { hasComposableContent } from "../utils/composerUtils";
+import { LLM_PROVIDERS_CONFIG } from "../constants";
+import ClipsCarousel from "./ClipsCarousel";
+import { ChevronDownIcon, ChevronUpIcon, ListIcon } from "./Icons";
+import {
+  normalizeResponseArray,
+  getLatestResponse,
+} from "../utils/turn-helpers";
 
 function parseSynthesisResponse(response?: string | null) {
-  if (!response) return { synthesis: '', options: null };
+  if (!response) return { synthesis: "", options: null };
 
-  const separator = '===ALL AVAILABLE OPTIONS===';
+  const separator = "===ALL AVAILABLE OPTIONS===";
 
   if (response.includes(separator)) {
     const [mainSynthesis, optionsSection] = response.split(separator);
@@ -31,7 +41,7 @@ function parseSynthesisResponse(response?: string | null) {
 
   for (const pattern of optionsPatterns) {
     const match = response.match(pattern);
-    if (match && typeof match.index === 'number') {
+    if (match && typeof match.index === "number") {
       const splitIndex = match.index;
       return {
         synthesis: response.substring(0, splitIndex).trim(),
@@ -59,8 +69,10 @@ const useShorterHeight = (
   const mapRef = useRef<HTMLDivElement>(null);
 
   const [shorterHeight, setShorterHeight] = useState<number | null>(null);
-  const [shorterSection, setShorterSection] = useState<'synthesis' | 'mapping' | null>(null);
-  
+  const [shorterSection, setShorterSection] = useState<
+    "synthesis" | "mapping" | null
+  >(null);
+
   const isUserActive = useRef(false);
   const userActiveTimer = useRef<number | null>(null);
   const rafId = useRef<number | null>(null);
@@ -69,7 +81,7 @@ const useShorterHeight = (
     if (pause) return;
     const s = synthRef.current;
     const m = mapRef.current;
-    
+
     if (!hasSynthesis || !hasMapping || !s || !m) {
       setShorterHeight(null);
       setShorterSection(null);
@@ -84,11 +96,13 @@ const useShorterHeight = (
 
     const isSynthShorter = synthH <= mapH;
     const h = isSynthShorter ? synthH : mapH;
-    const sec = isSynthShorter ? 'synthesis' : 'mapping';
+    const sec = isSynthShorter ? "synthesis" : "mapping";
 
     // Only update if changed by more than 2px to avoid micro-adjustments
-    setShorterHeight(prev => (prev === null || Math.abs(prev - h) > 2) ? h : prev);
-    setShorterSection(prev => prev !== sec ? sec : prev);
+    setShorterHeight((prev) =>
+      prev === null || Math.abs(prev - h) > 2 ? h : prev
+    );
+    setShorterSection((prev) => (prev !== sec ? sec : prev));
   }, [hasSynthesis, hasMapping, pause]);
 
   const scheduleMeasure = useCallback(() => {
@@ -121,8 +135,8 @@ const useShorterHeight = (
     };
 
     // Listen for user interactions
-    const events = ['wheel', 'touchstart', 'pointerdown'];
-    events.forEach(evt => {
+    const events = ["wheel", "touchstart", "pointerdown"];
+    events.forEach((evt) => {
       s.addEventListener(evt, markUserActive, { passive: true });
       m.addEventListener(evt, markUserActive, { passive: true });
     });
@@ -133,7 +147,7 @@ const useShorterHeight = (
       ro.disconnect();
       if (rafId.current) cancelAnimationFrame(rafId.current);
       if (userActiveTimer.current) window.clearTimeout(userActiveTimer.current);
-      events.forEach(evt => {
+      events.forEach((evt) => {
         s.removeEventListener(evt, markUserActive as EventListener);
         m.removeEventListener(evt, markUserActive as EventListener);
       });
@@ -154,14 +168,18 @@ interface AiTurnBlockProps {
   isLive?: boolean;
   isReducedMotion?: boolean;
   isLoading?: boolean;
-  activeRecomputeState?: { aiTurnId: string; stepType: 'synthesis' | 'mapping'; providerId: string } | null;
+  activeRecomputeState?: {
+    aiTurnId: string;
+    stepType: "synthesis" | "mapping";
+    providerId: string;
+  } | null;
   currentAppStep?: AppStep;
   showSourceOutputs?: boolean;
   onToggleSourceOutputs?: () => void;
   onEnterComposerMode?: (aiTurn: AiTurn) => void;
   activeSynthesisClipProviderId?: string;
   activeMappingClipProviderId?: string;
-  onClipClick?: (type: 'synthesis' | 'mapping', providerId: string) => void;
+  onClipClick?: (type: "synthesis" | "mapping", providerId: string) => void;
   children?: React.ReactNode;
 }
 
@@ -182,8 +200,8 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
 }) => {
   const [isSynthesisExpanded, setIsSynthesisExpanded] = useState(true);
   const [isMappingExpanded, setIsMappingExpanded] = useState(true);
-  const [mappingTab, setMappingTab] = useState<'map' | 'options'>('map');
-  
+  const [mappingTab, setMappingTab] = useState<"map" | "options">("map");
+
   // Track which section is manually expanded (if truncated)
   const [synthExpanded, setSynthExpanded] = useState(false);
   const [mapExpanded, setMapExpanded] = useState(false);
@@ -196,7 +214,7 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
   const synthesisResponses = useMemo(() => {
     if (!aiTurn.synthesisResponses) aiTurn.synthesisResponses = {};
     const out: Record<string, ProviderResponse[]> = {};
-    LLM_PROVIDERS_CONFIG.forEach(p => (out[String(p.id)] = []));
+    LLM_PROVIDERS_CONFIG.forEach((p) => (out[String(p.id)] = []));
     Object.entries(aiTurn.synthesisResponses).forEach(([pid, resp]) => {
       out[pid] = normalizeResponseArray(resp);
     });
@@ -206,7 +224,7 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
   const mappingResponses = useMemo(() => {
     const map = aiTurn.mappingResponses || {};
     const out: Record<string, ProviderResponse[]> = {};
-    LLM_PROVIDERS_CONFIG.forEach(p => (out[String(p.id)] = []));
+    LLM_PROVIDERS_CONFIG.forEach((p) => (out[String(p.id)] = []));
     Object.entries(map).forEach(([pid, resp]) => {
       out[pid] = normalizeResponseArray(resp);
     });
@@ -214,50 +232,79 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
   }, [aiTurn.id, JSON.stringify(aiTurn.mappingResponses)]);
 
   const allSources = useMemo(() => {
-    const sources: Record<string, ProviderResponse> = { ...(aiTurn.batchResponses || {}) };
+    const sources: Record<string, ProviderResponse> = {
+      ...(aiTurn.batchResponses || {}),
+    };
     if (aiTurn.hiddenBatchOutputs) {
-      Object.entries(aiTurn.hiddenBatchOutputs).forEach(([providerId, response]) => {
-        if (!sources[providerId]) {
-          const typedResponse = response as ProviderResponse;
-          sources[providerId] = {
-            providerId,
-            text: typedResponse.text || '',
-            status: 'completed' as const,
-            createdAt: typedResponse.createdAt || Date.now(),
-            updatedAt: typedResponse.updatedAt || Date.now(),
-          } as ProviderResponse;
+      Object.entries(aiTurn.hiddenBatchOutputs).forEach(
+        ([providerId, response]) => {
+          if (!sources[providerId]) {
+            const typedResponse = response as ProviderResponse;
+            sources[providerId] = {
+              providerId,
+              text: typedResponse.text || "",
+              status: "completed" as const,
+              createdAt: typedResponse.createdAt || Date.now(),
+              updatedAt: typedResponse.updatedAt || Date.now(),
+            } as ProviderResponse;
+          }
         }
-      });
+      );
     }
     return sources;
   }, [aiTurn.batchResponses, aiTurn.hiddenBatchOutputs]);
 
   const hasSources = Object.keys(allSources).length > 0;
 
-  const providerIds = useMemo(() => LLM_PROVIDERS_CONFIG.map(p => String(p.id)), []);
+  const providerIds = useMemo(
+    () => LLM_PROVIDERS_CONFIG.map((p) => String(p.id)),
+    []
+  );
 
-  const computeActiveProvider = useCallback((
-    explicit: string | undefined,
-    map: Record<string, ProviderResponse[]>
-  ): string | undefined => {
-    if (explicit) return explicit;
-    for (const pid of providerIds) {
-      const arr = map[pid];
-      if (arr && arr.length > 0) return pid;
-    }
-    return undefined;
-  }, [providerIds]);
+  const computeActiveProvider = useCallback(
+    (
+      explicit: string | undefined,
+      map: Record<string, ProviderResponse[]>
+    ): string | undefined => {
+      if (explicit) return explicit;
+      for (const pid of providerIds) {
+        const arr = map[pid];
+        if (arr && arr.length > 0) return pid;
+      }
+      return undefined;
+    },
+    [providerIds]
+  );
 
-  const activeSynthPid = computeActiveProvider(activeSynthesisClipProviderId, synthesisResponses);
-  const activeMappingPid = computeActiveProvider(activeMappingClipProviderId, mappingResponses);
+  const activeSynthPid = computeActiveProvider(
+    activeSynthesisClipProviderId,
+    synthesisResponses
+  );
+  const activeMappingPid = computeActiveProvider(
+    activeMappingClipProviderId,
+    mappingResponses
+  );
 
-  const isSynthesisTarget = !!(activeRecomputeState && activeRecomputeState.aiTurnId === aiTurn.id && activeRecomputeState.stepType === 'synthesis' && (!activeSynthPid || activeRecomputeState.providerId === activeSynthPid));
-  const isMappingTarget = !!(activeRecomputeState && activeRecomputeState.aiTurnId === aiTurn.id && activeRecomputeState.stepType === 'mapping' && (!activeMappingPid || activeRecomputeState.providerId === activeMappingPid));
+  const isSynthesisTarget = !!(
+    activeRecomputeState &&
+    activeRecomputeState.aiTurnId === aiTurn.id &&
+    activeRecomputeState.stepType === "synthesis" &&
+    (!activeSynthPid || activeRecomputeState.providerId === activeSynthPid)
+  );
+  const isMappingTarget = !!(
+    activeRecomputeState &&
+    activeRecomputeState.aiTurnId === aiTurn.id &&
+    activeRecomputeState.stepType === "mapping" &&
+    (!activeMappingPid || activeRecomputeState.providerId === activeMappingPid)
+  );
 
-  const getSynthesisAndOptions = useCallback((take: ProviderResponse | undefined) => {
-    if (!take?.text) return { synthesis: '', options: null };
-    return parseSynthesisResponse(String(take.text));
-  }, []);
+  const getSynthesisAndOptions = useCallback(
+    (take: ProviderResponse | undefined) => {
+      if (!take?.text) return { synthesis: "", options: null };
+      return parseSynthesisResponse(String(take.text));
+    },
+    []
+  );
 
   const getOptions = useCallback((): string | null => {
     if (!activeSynthPid) return null;
@@ -272,109 +319,189 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
   }, [activeSynthPid, synthesisResponses]);
 
   const displayedSynthesisText = useMemo(() => {
-    if (!displayedSynthesisTake?.text) return '';
-    return String(getSynthesisAndOptions(displayedSynthesisTake).synthesis ?? '');
+    if (!displayedSynthesisTake?.text) return "";
+    return String(
+      getSynthesisAndOptions(displayedSynthesisTake).synthesis ?? ""
+    );
   }, [displayedSynthesisTake, getSynthesisAndOptions]);
 
   const hasSynthesis = !!(activeSynthPid && displayedSynthesisTake?.text);
-  const hasMapping = !!(activeMappingPid && getLatestResponse(mappingResponses[activeMappingPid])?.text);
+  const hasMapping = !!(
+    activeMappingPid &&
+    getLatestResponse(mappingResponses[activeMappingPid])?.text
+  );
 
   const { synthRef, mapRef, shorterHeight, shorterSection } = useShorterHeight(
     hasSynthesis,
     hasMapping,
     displayedSynthesisText,
-    (isLive || isLoading)
+    isLive || isLoading
   );
 
   // Determine if sections are truncated
-  const synthTruncated = hasSynthesis && hasMapping && shorterHeight && shorterSection === 'mapping';
-  const mapTruncated = hasSynthesis && hasMapping && shorterHeight && shorterSection === 'synthesis';
+  const synthTruncated =
+    hasSynthesis && hasMapping && shorterHeight && shorterSection === "mapping";
+  const mapTruncated =
+    hasSynthesis &&
+    hasMapping &&
+    shorterHeight &&
+    shorterSection === "synthesis";
 
-  const getSectionStyle = (section: 'synthesis' | 'mapping', isExpanded: boolean): React.CSSProperties => {
-    const isTruncated = section === 'synthesis' ? synthTruncated : mapTruncated;
+  const getSectionStyle = (
+    section: "synthesis" | "mapping",
+    isExpanded: boolean
+  ): React.CSSProperties => {
+    const isTruncated = section === "synthesis" ? synthTruncated : mapTruncated;
     const duringStreaming = isLive || isLoading;
-    
+
     return {
-      border: '1px solid #475569',
+      border: "1px solid #475569",
       borderRadius: 8,
       padding: 12,
-      flex: 1,
-      display: 'flex',
-      flexDirection: 'column',
+
+      // ✅ CRITICAL FIX: Explicit flex properties
+      flex: "1 1 0%", // Equal flex basis, ignore intrinsic width
+      minWidth: 0, // Allow shrinking below content width
+
+      display: "flex",
+      flexDirection: "column",
       minHeight: 150,
-      height: 'auto',
-      boxSizing: 'border-box',
-      maxHeight: (isTruncated && !isExpanded) ? `${shorterHeight}px` : 'none',
-      // During streaming, clamp outer section to avoid outer list reflows
-      overflow: duringStreaming ? 'hidden' : 'visible',
-      position: 'relative'
+      height: "auto",
+      boxSizing: "border-box",
+      maxHeight: isTruncated && !isExpanded ? `${shorterHeight}px` : "none",
+      overflow: duringStreaming ? "hidden" : "visible",
+      position: "relative",
     };
   };
 
   const userPrompt: string | null = ((): string | null => {
-    const maybe = (aiTurn as any);
+    const maybe = aiTurn as any;
     return maybe?.userPrompt ?? maybe?.prompt ?? maybe?.input ?? null;
   })();
 
   return (
-    <div className="turn-block" style={{ paddingBottom: '1rem', borderBottom: '1px solid #334155' }}>
+    <div
+      className="turn-block"
+      style={{ paddingBottom: "1rem", borderBottom: "1px solid #334155" }}
+    >
       {userPrompt && (
         <div className="user-prompt-block" style={{ marginBottom: 8 }}>
-          <div style={{ fontSize: 12, color: '#94a3b8', marginBottom: 6 }}>User</div>
-          <div style={{ background: '#0b1220', border: '1px solid #334155', borderRadius: 8, padding: 8, color: '#cbd5e1' }}>
+          <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 6 }}>
+            User
+          </div>
+          <div
+            style={{
+              background: "#0b1220",
+              border: "1px solid #334155",
+              borderRadius: 8,
+              padding: 8,
+              color: "#cbd5e1",
+            }}
+          >
             {userPrompt}
           </div>
         </div>
       )}
 
-      <div className="ai-turn-block" style={{ border: '1px solid #334155', borderRadius: 12, padding: 12 }}>
-        <div className="ai-turn-content" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          <div className="primaries" style={{ marginBottom: '1rem', position: 'relative' }}>
-            <div style={{ display: 'flex', flexDirection: 'row', gap: 12, alignItems: 'flex-start' }}>
-
+      <div
+        className="ai-turn-block"
+        style={{ border: "1px solid #334155", borderRadius: 12, padding: 12 }}
+      >
+        <div
+          className="ai-turn-content"
+          style={{ display: "flex", flexDirection: "column", gap: 12 }}
+        >
+          <div
+            className="primaries"
+            style={{ marginBottom: "1rem", position: "relative" }}
+          >
+            <div
+              style={{
+                display: "flex",
+                flexDirection: "row",
+                gap: 12,
+                alignItems: "flex-start",
+              }}
+            >
               {/* Synthesis Section */}
-              <div 
+              <div
                 ref={synthRef}
-                className="synthesis-section" 
-                style={getSectionStyle('synthesis', synthExpanded)}
+                className="synthesis-section"
+                style={getSectionStyle("synthesis", synthExpanded)}
               >
-                <div className="section-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, flexShrink: 0 }}>
-                  <h4 style={{ margin: 0, fontSize: 14, color: '#e2e8f0' }}>Synthesis</h4>
-                  <button onClick={() => setIsSynthesisExpanded(p => !p)} style={{ background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer', padding: 4 }}>
-                    {isSynthesisExpanded ? <ChevronUpIcon style={{width: 16, height: 16}} /> : <ChevronDownIcon style={{width: 16, height: 16}} />}
+                <div
+                  className="section-header"
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    marginBottom: 8,
+                    flexShrink: 0,
+                  }}
+                >
+                  <h4 style={{ margin: 0, fontSize: 14, color: "#e2e8f0" }}>
+                    Synthesis
+                  </h4>
+                  <button
+                    onClick={() => setIsSynthesisExpanded((p) => !p)}
+                    style={{
+                      background: "none",
+                      border: "none",
+                      color: "#94a3b8",
+                      cursor: "pointer",
+                      padding: 4,
+                    }}
+                  >
+                    {isSynthesisExpanded ? (
+                      <ChevronUpIcon style={{ width: 16, height: 16 }} />
+                    ) : (
+                      <ChevronDownIcon style={{ width: 16, height: 16 }} />
+                    )}
                   </button>
                 </div>
-                
+
                 {isSynthesisExpanded && (
-                  <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, overflow: synthTruncated && !synthExpanded ? 'hidden' : 'visible' }}>
+                  <div
+                    style={{
+                      flex: 1,
+                      display: "flex",
+                      flexDirection: "column",
+                      minHeight: 0,
+                      overflow:
+                        synthTruncated && !synthExpanded ? "hidden" : "visible",
+                    }}
+                  >
                     <div style={{ flexShrink: 0 }}>
                       <ClipsCarousel
                         providers={LLM_PROVIDERS_CONFIG}
                         responsesMap={synthesisResponses}
                         activeProviderId={activeSynthPid}
-                        onClipClick={(pid) => onClipClick?.('synthesis', pid)}
+                        onClipClick={(pid) => onClipClick?.("synthesis", pid)}
                         type="synthesis"
                       />
                     </div>
 
-                    <div 
-                      className="clip-content" 
-                      style={{ 
-                        marginTop: 12, 
-                        background: '#0f172a', 
-                        border: '1px solid #334155', 
-                        borderRadius: 8, 
+                    <div
+                      className="clip-content"
+                      style={{
+                        marginTop: 12,
+                        background: "#0f172a",
+                        border: "1px solid #334155",
+                        borderRadius: 8,
                         padding: 12,
                         flex: 1,
-                        // During streaming, keep inner area scrollable to avoid growing the outer container
-                        overflowY: (isLive || isLoading) ? 'auto' : 'visible',
-                        maxHeight: (isLive || isLoading) ? '40vh' : 'none',
-                        minHeight: 0
+                        minWidth: 0, // ← NEW
+                        wordBreak: "break-word", // ← NEW
+                        overflowWrap: "break-word", // ← NEW
+                        overflowY: isLive || isLoading ? "auto" : "visible",
+                        maxHeight: isLive || isLoading ? "40vh" : "none",
+                        minHeight: 0,
                       }}
                       onWheelCapture={(e: React.WheelEvent<HTMLDivElement>) => {
                         const el = e.currentTarget;
                         const dy = e.deltaY ?? 0;
-                        const canDown = el.scrollTop + el.clientHeight < el.scrollHeight;
+                        const canDown =
+                          el.scrollTop + el.clientHeight < el.scrollHeight;
                         const canUp = el.scrollTop > 0;
                         if ((dy > 0 && canDown) || (dy < 0 && canUp)) {
                           e.stopPropagation();
@@ -383,16 +510,22 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
                       onWheel={(e: React.WheelEvent<HTMLDivElement>) => {
                         const el = e.currentTarget;
                         const dy = e.deltaY ?? 0;
-                        const canDown = el.scrollTop + el.clientHeight < el.scrollHeight;
+                        const canDown =
+                          el.scrollTop + el.clientHeight < el.scrollHeight;
                         const canUp = el.scrollTop > 0;
                         if ((dy > 0 && canDown) || (dy < 0 && canUp)) {
                           e.stopPropagation();
                         }
                       }}
-                      onTouchStartCapture={(e: React.TouchEvent<HTMLDivElement>) => { e.stopPropagation(); }}
+                      onTouchStartCapture={(
+                        e: React.TouchEvent<HTMLDivElement>
+                      ) => {
+                        e.stopPropagation();
+                      }}
                       onTouchMove={(e: React.TouchEvent<HTMLDivElement>) => {
                         const el = e.currentTarget;
-                        const canDown = el.scrollTop + el.clientHeight < el.scrollHeight;
+                        const canDown =
+                          el.scrollTop + el.clientHeight < el.scrollHeight;
                         const canUp = el.scrollTop > 0;
                         if (canDown || canUp) {
                           e.stopPropagation();
@@ -400,12 +533,30 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
                       }}
                     >
                       {(() => {
-                        const latest = activeSynthPid ? getLatestResponse(synthesisResponses[activeSynthPid]) : undefined;
-                        const isGenerating = ((latest && (latest.status === 'streaming' || latest.status === 'pending'))) || isSynthesisTarget;
+                        const latest = activeSynthPid
+                          ? getLatestResponse(
+                              synthesisResponses[activeSynthPid]
+                            )
+                          : undefined;
+                        const isGenerating =
+                          (latest &&
+                            (latest.status === "streaming" ||
+                              latest.status === "pending")) ||
+                          isSynthesisTarget;
                         if (isGenerating) {
                           return (
-                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, color: '#94a3b8' }}>
-                              <span style={{ fontStyle: 'italic' }}>Synthesis generating</span>
+                            <div
+                              style={{
+                                display: "flex",
+                                alignItems: "center",
+                                justifyContent: "center",
+                                gap: 8,
+                                color: "#94a3b8",
+                              }}
+                            >
+                              <span style={{ fontStyle: "italic" }}>
+                                Synthesis generating
+                              </span>
                               <span className="streaming-dots" />
                             </div>
                           );
@@ -413,19 +564,55 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
                         if (activeSynthPid) {
                           const take = displayedSynthesisTake;
                           if (!take) {
-                            return <div style={{ color: '#64748b' }}>No synthesis yet for this model.</div>;
+                            return (
+                              <div style={{ color: "#64748b" }}>
+                                No synthesis yet for this model.
+                              </div>
+                            );
                           }
                           const handleCopy = async (e: React.MouseEvent) => {
                             e.stopPropagation();
-                            try { await navigator.clipboard.writeText(displayedSynthesisText); } catch (err) { console.error('Copy failed', err); }
+                            try {
+                              await navigator.clipboard.writeText(
+                                displayedSynthesisText
+                              );
+                            } catch (err) {
+                              console.error("Copy failed", err);
+                            }
                           };
                           return (
                             <div>
-                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 8 }}>
-                                <div style={{ fontSize: 12, color: '#94a3b8' }}>{activeSynthPid} · {take.status}</div>
-                                <button onClick={handleCopy} style={{ background: '#334155', border: '1px solid #475569', borderRadius: 6, padding: '4px 8px', color: '#94a3b8', fontSize: 12, cursor: 'pointer' }}>📋 Copy</button>
+                              <div
+                                style={{
+                                  display: "flex",
+                                  alignItems: "center",
+                                  justifyContent: "space-between",
+                                  gap: 8,
+                                  marginBottom: 8,
+                                }}
+                              >
+                                <div style={{ fontSize: 12, color: "#94a3b8" }}>
+                                  {activeSynthPid} · {take.status}
+                                </div>
+                                <button
+                                  onClick={handleCopy}
+                                  style={{
+                                    background: "#334155",
+                                    border: "1px solid #475569",
+                                    borderRadius: 6,
+                                    padding: "4px 8px",
+                                    color: "#94a3b8",
+                                    fontSize: 12,
+                                    cursor: "pointer",
+                                  }}
+                                >
+                                  📋 Copy
+                                </button>
                               </div>
-                              <div className="prose prose-sm max-w-none dark:prose-invert" style={{ lineHeight: 1.7, fontSize: 16 }}>
+                              <div
+                                className="prose prose-sm max-w-none dark:prose-invert"
+                                style={{ lineHeight: 1.7, fontSize: 16 }}
+                              >
                                 <ReactMarkdown remarkPlugins={[remarkGfm]}>
                                   {displayedSynthesisText}
                                 </ReactMarkdown>
@@ -434,7 +621,18 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
                           );
                         }
                         return (
-                          <div style={{ color: '#64748b', display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontStyle: 'italic' }}>Choose a model to synthesize.</div>
+                          <div
+                            style={{
+                              color: "#64748b",
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              height: "100%",
+                              fontStyle: "italic",
+                            }}
+                          >
+                            Choose a model to synthesize.
+                          </div>
                         );
                       })()}
                     </div>
@@ -442,60 +640,64 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
                     {/* Expand button for truncated content */}
                     {synthTruncated && !synthExpanded && (
                       <>
-                        <div style={{
-                          position: 'absolute',
-                          bottom: 0,
-                          left: 0,
-                          right: 0,
-                          height: 60,
-                          background: 'linear-gradient(transparent, #1e293b)',
-                          pointerEvents: 'none',
-                          borderRadius: '0 0 8px 8px'
-                        }} />
+                        <div
+                          style={{
+                            position: "absolute",
+                            bottom: 0,
+                            left: 0,
+                            right: 0,
+                            height: 60,
+                            background: "linear-gradient(transparent, #1e293b)",
+                            pointerEvents: "none",
+                            borderRadius: "0 0 8px 8px",
+                          }}
+                        />
                         <button
                           onClick={() => setSynthExpanded(true)}
                           style={{
-                            position: 'absolute',
+                            position: "absolute",
                             bottom: 12,
-                            left: '50%',
-                            transform: 'translateX(-50%)',
-                            padding: '6px 12px',
-                            background: '#334155',
-                            border: '1px solid #475569',
+                            left: "50%",
+                            transform: "translateX(-50%)",
+                            padding: "6px 12px",
+                            background: "#334155",
+                            border: "1px solid #475569",
                             borderRadius: 6,
-                            color: '#e2e8f0',
-                            cursor: 'pointer',
+                            color: "#e2e8f0",
+                            cursor: "pointer",
                             fontSize: 12,
                             zIndex: 1,
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: 4
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 4,
                           }}
                         >
-                          Show full response <ChevronDownIcon style={{ width: 14, height: 14 }} />
+                          Show full response{" "}
+                          <ChevronDownIcon style={{ width: 14, height: 14 }} />
                         </button>
                       </>
                     )}
-                    
+
                     {synthExpanded && synthTruncated && (
                       <button
                         onClick={() => setSynthExpanded(false)}
                         style={{
                           marginTop: 12,
-                          padding: '6px 12px',
-                          background: '#334155',
-                          border: '1px solid #475569',
+                          padding: "6px 12px",
+                          background: "#334155",
+                          border: "1px solid #475569",
                           borderRadius: 6,
-                          color: '#94a3b8',
-                          cursor: 'pointer',
+                          color: "#94a3b8",
+                          cursor: "pointer",
                           fontSize: 12,
-                          alignSelf: 'center',
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: 4
+                          alignSelf: "center",
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 4,
                         }}
                       >
-                        <ChevronUpIcon style={{ width: 14, height: 14 }} /> Collapse
+                        <ChevronUpIcon style={{ width: 14, height: 14 }} />{" "}
+                        Collapse
                       </button>
                     )}
                   </div>
@@ -503,197 +705,428 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
               </div>
 
               {/* Mapping Section */}
-              <div 
+              <div
                 ref={mapRef}
-                className="mapping-section" 
-                style={getSectionStyle('mapping', mapExpanded)}
+                className="mapping-section"
+                style={getSectionStyle("mapping", mapExpanded)}
               >
-                <div className="section-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, flexShrink: 0 }}>
-                  <h4 style={{ margin: 0, fontSize: 14, color: '#e2e8f0' }}>Mapping</h4>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                    <button 
-                      onClick={() => setMappingTab('map')}
+                <div
+                  className="section-header"
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    marginBottom: 8,
+                    flexShrink: 0,
+                  }}
+                >
+                  <h4 style={{ margin: 0, fontSize: 14, color: "#e2e8f0" }}>
+                    Mapping
+                  </h4>
+                  <div
+                    style={{ display: "flex", alignItems: "center", gap: 4 }}
+                  >
+                    <button
+                      onClick={() => setMappingTab("map")}
                       title="Conflict Map"
-                      style={{ 
-                        padding: 4,
-                        background: mappingTab === 'map' ? '#334155' : 'transparent',
-                        border: 'none',
+                      style={{
+                        padding: 6,
+                        background:
+                          mappingTab === "map" ? "#334155" : "transparent",
+                        border: "none",
                         borderRadius: 4,
-                        color: mappingTab === 'map' ? '#e2e8f0' : '#64748b',
-                        cursor: 'pointer'
+                        color: mappingTab === "map" ? "#e2e8f0" : "#64748b",
+                        cursor: "pointer",
+                        fontSize: 16,
                       }}
                     >
                       🗺️
                     </button>
-                    <button 
-                      onClick={() => setMappingTab('options')}
+                    <button
+                      onClick={() => setMappingTab("options")}
                       title="All Options"
-                      style={{ 
+                      style={{
                         padding: 4,
-                        background: mappingTab === 'options' ? '#334155' : 'transparent',
-                        border: 'none',
+                        background:
+                          mappingTab === "options" ? "#334155" : "transparent",
+                        border: "none",
                         borderRadius: 4,
-                        color: mappingTab === 'options' ? '#e2e8f0' : '#64748b',
-                        cursor: 'pointer'
+                        color: mappingTab === "options" ? "#e2e8f0" : "#64748b",
+                        cursor: "pointer",
+                        display: "flex", // Ensures icon is centered
+                        alignItems: "center",
+                        justifyContent: "center",
                       }}
                     >
-                      📋
+                      <ListIcon style={{ width: 16, height: 16 }} />
                     </button>
-                    <div style={{ width: 1, height: 16, background: '#475569', margin: '0 4px' }} />
-                    <button onClick={() => setIsMappingExpanded(p => !p)} style={{ background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer', padding: 4 }}>
-                      {isMappingExpanded ? <ChevronUpIcon style={{width: 16, height: 16}} /> : <ChevronDownIcon style={{width: 16, height: 16}} />}
+                    <button
+                      onClick={async () => {
+                        try {
+                          const ORDER = [
+                            "claude",
+                            "gemini-pro",
+                            "qwen",
+                            "chatgpt",
+                            "gemini",
+                          ];
+                          const nameMap = new Map(
+                            LLM_PROVIDERS_CONFIG.map((p) => [
+                              String(p.id),
+                              p.name,
+                            ])
+                          );
+
+                          const lines: string[] = [];
+
+                          // Synthesis section
+                          const synthHeaderAdded = false;
+                          ORDER.forEach((pid) => {
+                            const arr = synthesisResponses[pid] || [];
+                            const take = getLatestResponse(arr);
+                            const text = take?.text
+                              ? String(
+                                  getSynthesisAndOptions(take).synthesis || ""
+                                )
+                              : "";
+                            if (text && text.trim().length > 0) {
+                              if (!synthHeaderAdded && false) {
+                              }
+                              lines.push(
+                                `=== Synthesis • ${nameMap.get(pid) || pid} ===`
+                              );
+                              lines.push(text);
+                              lines.push("");
+                              lines.push("---");
+                              lines.push("");
+                            }
+                          });
+
+                          // Mapping section
+                          ORDER.forEach((pid) => {
+                            const arr = mappingResponses[pid] || [];
+                            const take = getLatestResponse(arr);
+                            const text = take?.text ? String(take.text) : "";
+                            if (text && text.trim().length > 0) {
+                              lines.push(
+                                `=== Mapping • ${nameMap.get(pid) || pid} ===`
+                              );
+                              lines.push(text);
+                              lines.push("");
+                              lines.push("---");
+                              lines.push("");
+                            }
+                          });
+
+                          // Batch source responses (original providers)
+                          ORDER.forEach((pid) => {
+                            const source = allSources[pid];
+                            const text = source?.text
+                              ? String(source.text)
+                              : "";
+                            if (text && text.trim().length > 0) {
+                              lines.push(`=== ${nameMap.get(pid) || pid} ===`);
+                              lines.push(text);
+                              lines.push("");
+                              lines.push("---");
+                              lines.push("");
+                            }
+                          });
+
+                          const payload = lines.join("\n");
+                          await navigator.clipboard.writeText(payload);
+                        } catch (err) {
+                          console.error("Copy All failed", err);
+                        }
+                      }}
+                      title="Copy All"
+                      style={{
+                        padding: "4px 8px",
+                        background: "#334155",
+                        border: "1px solid #475569",
+                        borderRadius: 6,
+                        color: "#94a3b8",
+                        cursor: "pointer",
+                        fontSize: 12,
+                      }}
+                    >
+                      📦 Copy All
+                    </button>
+                    <div
+                      style={{
+                        width: 1,
+                        height: 16,
+                        background: "#475569",
+                        margin: "0 4px",
+                      }}
+                    />
+                    <button
+                      onClick={() => setIsMappingExpanded((p) => !p)}
+                      style={{
+                        background: "none",
+                        border: "none",
+                        color: "#94a3b8",
+                        cursor: "pointer",
+                        padding: 4,
+                      }}
+                    >
+                      {isMappingExpanded ? (
+                        <ChevronUpIcon style={{ width: 16, height: 16 }} />
+                      ) : (
+                        <ChevronDownIcon style={{ width: 16, height: 16 }} />
+                      )}
                     </button>
                   </div>
                 </div>
-                
+
                 {isMappingExpanded && (
-                  <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: mapTruncated && !mapExpanded ? 'hidden' : 'visible', minHeight: 0 }}>
-                    {mappingTab === 'map' && (
+                  <div
+                    style={{
+                      flex: 1,
+                      display: "flex",
+                      flexDirection: "column",
+                      overflow:
+                        mapTruncated && !mapExpanded ? "hidden" : "visible",
+                      minHeight: 0,
+                    }}
+                  >
+                    {mappingTab === "map" && (
                       <ClipsCarousel
                         providers={LLM_PROVIDERS_CONFIG}
                         responsesMap={mappingResponses}
                         activeProviderId={activeMappingPid}
-                        onClipClick={(pid) => onClipClick?.('mapping', pid)}
+                        onClipClick={(pid) => onClipClick?.("mapping", pid)}
                         type="mapping"
                       />
                     )}
-                    
-                    <div 
-                      className="clip-content" 
-                      style={{ 
-                        marginTop: 12, 
-                        background: '#0f172a', 
-                        border: '1px solid #334155', 
-                        borderRadius: 8, 
+
+                    <div
+                      className="clip-content"
+                      style={{
+                        marginTop: 12,
+                        background: "#0f172a",
+                        border: "1px solid #334155",
+                        borderRadius: 8,
                         padding: 12,
                         flex: 1,
-                        overflowY: (isLive || isLoading) ? 'auto' : 'visible',
-                        maxHeight: (isLive || isLoading) ? '40vh' : 'none',
-                        minHeight: 0
+                        minWidth: 0, // ← NEW
+                        wordBreak: "break-word", // ← NEW
+                        overflowWrap: "break-word", // ← NEW
+                        overflowY: isLive || isLoading ? "auto" : "visible",
+                        maxHeight: isLive || isLoading ? "40vh" : "none",
+                        minHeight: 0,
                       }}
                     >
-                      {mappingTab === 'options' ? (
-                        (() => {
-                          const options = getOptions();
-                          if (!options) return (
-                            <div style={{ color: '#64748b' }}>
-                              {!activeSynthPid 
-                                ? 'Select a synthesis provider to see options.' 
-                                : 'No options found. Run synthesis first.'}
-                            </div>
-                          );
-                          return (
-                            <div>
-                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 8 }}>
-                                <div style={{ fontSize: 12, color: '#94a3b8' }}>
-                                  All Available Options • via {activeSynthPid}
+                      {mappingTab === "options"
+                        ? (() => {
+                            const options = getOptions();
+                            if (!options)
+                              return (
+                                <div style={{ color: "#64748b" }}>
+                                  {!activeSynthPid
+                                    ? "Select a synthesis provider to see options."
+                                    : "No options found. Run synthesis first."}
                                 </div>
-                              </div>
-                              <div className="prose prose-sm max-w-none dark:prose-invert" style={{ lineHeight: 1.7, fontSize: 14 }}>
-                                <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                                  {String(options ?? '')}
-                                </ReactMarkdown>
-                              </div>
-                            </div>
-                          );
-                        })()
-                      ) : (
-                        (() => {
-                          const latest = activeMappingPid ? getLatestResponse(mappingResponses[activeMappingPid]) : undefined;
-                          const isGenerating = ((latest && (latest.status === 'streaming' || latest.status === 'pending'))) || isMappingTarget;
-                          if (isGenerating) {
-                            return (
-                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, color: '#94a3b8' }}>
-                                <span style={{ fontStyle: 'italic' }}>Conflict map generating</span>
-                                <span className="streaming-dots" />
-                              </div>
-                            );
-                          }
-                          if (activeMappingPid) {
-                            const take = getLatestResponse(mappingResponses[activeMappingPid]);
-                            if (!take) return <div style={{ color: '#64748b' }}>No mapping yet for this model.</div>;
-                            const handleCopy = async (e: React.MouseEvent) => {
-                              e.stopPropagation();
-                              try { await navigator.clipboard.writeText(String(take.text || '')); } catch (err) { console.error('Copy failed', err); }
-                            };
+                              );
                             return (
                               <div>
-                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 8 }}>
-                                  <div style={{ fontSize: 12, color: '#94a3b8' }}>{activeMappingPid} · {take.status}</div>
-                                  <button onClick={handleCopy} style={{ background: '#334155', border: '1px solid #475569', borderRadius: 6, padding: '4px 8px', color: '#94a3b8', fontSize: 12, cursor: 'pointer' }}>📋 Copy</button>
+                                <div
+                                  style={{
+                                    display: "flex",
+                                    alignItems: "center",
+                                    justifyContent: "space-between",
+                                    gap: 8,
+                                    marginBottom: 8,
+                                  }}
+                                >
+                                  <div
+                                    style={{ fontSize: 12, color: "#94a3b8" }}
+                                  >
+                                    All Available Options • via {activeSynthPid}
+                                  </div>
                                 </div>
-                                <div className="prose prose-sm max-w-none dark:prose-invert" style={{ lineHeight: 1.7, fontSize: 16 }}>
+                                <div
+                                  className="prose prose-sm max-w-none dark:prose-invert"
+                                  style={{ lineHeight: 1.7, fontSize: 14 }}
+                                >
                                   <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                                    {String(take.text || '')}
+                                    {String(options ?? "")}
                                   </ReactMarkdown>
                                 </div>
                               </div>
                             );
-                          }
-                          return (
-                            <div style={{ color: '#64748b', display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontStyle: 'italic' }}>Choose a model to map.</div>
-                          );
-                        })()
-                      )}
+                          })()
+                        : (() => {
+                            const latest = activeMappingPid
+                              ? getLatestResponse(
+                                  mappingResponses[activeMappingPid]
+                                )
+                              : undefined;
+                            const isGenerating =
+                              (latest &&
+                                (latest.status === "streaming" ||
+                                  latest.status === "pending")) ||
+                              isMappingTarget;
+                            if (isGenerating) {
+                              return (
+                                <div
+                                  style={{
+                                    display: "flex",
+                                    alignItems: "center",
+                                    justifyContent: "center",
+                                    gap: 8,
+                                    color: "#94a3b8",
+                                  }}
+                                >
+                                  <span style={{ fontStyle: "italic" }}>
+                                    Conflict map generating
+                                  </span>
+                                  <span className="streaming-dots" />
+                                </div>
+                              );
+                            }
+                            if (activeMappingPid) {
+                              const take = getLatestResponse(
+                                mappingResponses[activeMappingPid]
+                              );
+                              if (!take)
+                                return (
+                                  <div style={{ color: "#64748b" }}>
+                                    No mapping yet for this model.
+                                  </div>
+                                );
+                              const handleCopy = async (
+                                e: React.MouseEvent
+                              ) => {
+                                e.stopPropagation();
+                                try {
+                                  await navigator.clipboard.writeText(
+                                    String(take.text || "")
+                                  );
+                                } catch (err) {
+                                  console.error("Copy failed", err);
+                                }
+                              };
+                              return (
+                                <div>
+                                  <div
+                                    style={{
+                                      display: "flex",
+                                      alignItems: "center",
+                                      justifyContent: "space-between",
+                                      gap: 8,
+                                      marginBottom: 8,
+                                    }}
+                                  >
+                                    <div
+                                      style={{ fontSize: 12, color: "#94a3b8" }}
+                                    >
+                                      {activeMappingPid} · {take.status}
+                                    </div>
+                                    <button
+                                      onClick={handleCopy}
+                                      style={{
+                                        background: "#334155",
+                                        border: "1px solid #475569",
+                                        borderRadius: 6,
+                                        padding: "4px 8px",
+                                        color: "#94a3b8",
+                                        fontSize: 12,
+                                        cursor: "pointer",
+                                      }}
+                                    >
+                                      📋 Copy
+                                    </button>
+                                  </div>
+                                  <div
+                                    className="prose prose-sm max-w-none dark:prose-invert"
+                                    style={{ lineHeight: 1.7, fontSize: 16 }}
+                                  >
+                                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                                      {String(take.text || "")}
+                                    </ReactMarkdown>
+                                  </div>
+                                </div>
+                              );
+                            }
+                            return (
+                              <div
+                                style={{
+                                  color: "#64748b",
+                                  display: "flex",
+                                  alignItems: "center",
+                                  justifyContent: "center",
+                                  height: "100%",
+                                  fontStyle: "italic",
+                                }}
+                              >
+                                Choose a model to map.
+                              </div>
+                            );
+                          })()}
                     </div>
 
                     {/* Expand button for truncated content */}
                     {mapTruncated && !mapExpanded && (
                       <>
-                        <div style={{
-                          position: 'absolute',
-                          bottom: 0,
-                          left: 0,
-                          right: 0,
-                          height: 60,
-                          background: 'linear-gradient(transparent, #1e293b)',
-                          pointerEvents: 'none',
-                          borderRadius: '0 0 8px 8px'
-                        }} />
+                        <div
+                          style={{
+                            position: "absolute",
+                            bottom: 0,
+                            left: 0,
+                            right: 0,
+                            height: 60,
+                            background: "linear-gradient(transparent, #1e293b)",
+                            pointerEvents: "none",
+                            borderRadius: "0 0 8px 8px",
+                          }}
+                        />
                         <button
                           onClick={() => setMapExpanded(true)}
                           style={{
-                            position: 'absolute',
+                            position: "absolute",
                             bottom: 12,
-                            left: '50%',
-                            transform: 'translateX(-50%)',
-                            padding: '6px 12px',
-                            background: '#334155',
-                            border: '1px solid #475569',
+                            left: "50%",
+                            transform: "translateX(-50%)",
+                            padding: "6px 12px",
+                            background: "#334155",
+                            border: "1px solid #475569",
                             borderRadius: 6,
-                            color: '#e2e8f0',
-                            cursor: 'pointer',
+                            color: "#e2e8f0",
+                            cursor: "pointer",
                             fontSize: 12,
                             zIndex: 1,
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: 4
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 4,
                           }}
                         >
-                          Show full response <ChevronDownIcon style={{ width: 14, height: 14 }} />
+                          Show full response{" "}
+                          <ChevronDownIcon style={{ width: 14, height: 14 }} />
                         </button>
                       </>
                     )}
-                    
+
                     {mapExpanded && mapTruncated && (
                       <button
                         onClick={() => setMapExpanded(false)}
                         style={{
                           marginTop: 12,
-                          padding: '6px 12px',
-                          background: '#334155',
-                          border: '1px solid #475569',
+                          padding: "6px 12px",
+                          background: "#334155",
+                          border: "1px solid #475569",
                           borderRadius: 6,
-                          color: '#94a3b8',
-                          cursor: 'pointer',
+                          color: "#94a3b8",
+                          cursor: "pointer",
                           fontSize: 12,
-                          alignSelf: 'center',
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: 4
+                          alignSelf: "center",
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 4,
                         }}
                       >
-                        <ChevronUpIcon style={{ width: 14, height: 14 }} /> Collapse
+                        <ChevronUpIcon style={{ width: 14, height: 14 }} />{" "}
+                        Collapse
                       </button>
                     )}
                   </div>
@@ -701,43 +1134,58 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
               </div>
             </div>
 
-          {hasSources && (
-            <div 
-              className="batch-filler" 
-              style={{ 
-                border: '1px solid #475569', 
-                borderRadius: 8, 
-                padding: 12 
-              }}
-            >
-              <div className="sources-wrapper">
-                <div className="sources-toggle" style={{ textAlign: 'center', marginBottom: 8 }}>
-                  <button
-                    onClick={() => onToggleSourceOutputs?.()}
-                    style={{ padding: '6px 12px', borderRadius: 8, border: '1px solid #334155', background: '#0b1220', color: '#e2e8f0', cursor: 'pointer' }}
-                  >
-                    {showSourceOutputs ? 'Hide Sources' : 'Show Sources'}
-                  </button>
-                </div>
-                {showSourceOutputs && (
-                  <div className="sources-content">
-                    {children}
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-
-          {hasComposableContent(aiTurn) && (
-            <div className="composer-entry" style={{ textAlign: 'center' }}>
-              <button
-                onClick={handleEnterComposerMode}
-                style={{ padding: '8px 12px', borderRadius: 8, border: '1px solid #334155', background: '#1d4ed8', color: '#fff', cursor: 'pointer' }}
+            {hasSources && (
+              <div
+                className="batch-filler"
+                style={{
+                  border: "1px solid #475569",
+                  borderRadius: 8,
+                  padding: 12,
+                }}
               >
-                Open in Composer
-              </button>
-            </div>
-          )}
+                <div className="sources-wrapper">
+                  <div
+                    className="sources-toggle"
+                    style={{ textAlign: "center", marginBottom: 8 }}
+                  >
+                    <button
+                      onClick={() => onToggleSourceOutputs?.()}
+                      style={{
+                        padding: "6px 12px",
+                        borderRadius: 8,
+                        border: "1px solid #334155",
+                        background: "#0b1220",
+                        color: "#e2e8f0",
+                        cursor: "pointer",
+                      }}
+                    >
+                      {showSourceOutputs ? "Hide Sources" : "Show Sources"}
+                    </button>
+                  </div>
+                  {showSourceOutputs && (
+                    <div className="sources-content">{children}</div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {hasComposableContent(aiTurn) && (
+              <div className="composer-entry" style={{ textAlign: "center" }}>
+                <button
+                  onClick={handleEnterComposerMode}
+                  style={{
+                    padding: "8px 12px",
+                    borderRadius: 8,
+                    border: "1px solid #334155",
+                    background: "#1d4ed8",
+                    color: "#fff",
+                    cursor: "pointer",
+                  }}
+                >
+                  Open in Composer
+                </button>
+              </div>
+            )}
           </div>
         </div>
       </div>

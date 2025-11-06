@@ -742,88 +742,102 @@ export class WorkflowEngine {
   // ==========================================================================
 
   /**
+   * Fire-and-forget persistence helper: batch update provider contexts and save session
+   * without blocking the workflow's resolution path.
+   */
+  _persistProviderContextsAsync(sessionId, updates) {
+    try {
+      // Defer to next tick to ensure prompt/mapping resolution proceeds immediately
+      setTimeout(() => {
+        try {
+          this.sessionManager.updateProviderContextsBatch(
+            sessionId,
+            updates,
+            true,
+            { skipSave: true }
+          );
+          this.sessionManager.saveSession(sessionId);
+        } catch (e) {
+          console.warn('[WorkflowEngine] Deferred persistence failed:', e);
+        }
+      }, 0);
+    } catch (_) {}
+  }
+
+  /**
    * Execute prompt step - FIXED to return proper format
    */
-  async executePromptStep(step, context) {
-    const { prompt, providers, useThinking, providerContexts } = step.payload;
-    
-    return new Promise((resolve, reject) => {
-      this.orchestrator.executeParallelFanout(prompt, providers, {
-        sessionId: context.sessionId,
-        useThinking,
-        providerContexts,
-        // Pass providerMeta through to orchestrator for adapters (e.g., gemini model selection)
-        providerMeta: step?.payload?.providerMeta,
-        onPartial: (providerId, chunk) => {
-          this._dispatchPartialDelta(context.sessionId, step.stepId, providerId, chunk.text, 'Prompt');
-        },
-         // ========= START: RECOMMENDED IMPLEMENTATION (STEP 3) ========= 
-         onAllComplete: (results, errors) => { 
-           // `results` now contains successfully resolved providers (including soft-errors) 
-           // `errors` contains providers that failed hard (e.g., not found, network error before streaming) 
-           
-           // Persist contexts for all successful providers in a single batch
-           const batchUpdates = {}; 
-           results.forEach((res, pid) => { batchUpdates[pid] = res; });
-           this.sessionManager.updateProviderContextsBatch(
-             context.sessionId,
-             batchUpdates,
-             true,
-             { skipSave: true }
-           );
-           this.sessionManager.saveSession(context.sessionId);
-           
-           // ... (final emission logic for non-streaming providers remains the same) ... 
- 
-           const formattedResults = {}; 
-           
-           // Process successful results 
-           results.forEach((result, providerId) => { 
-             const hasText = result.text && result.text.trim().length > 0; 
-             formattedResults[providerId] = { 
-               providerId: providerId, 
-               text: result.text || '', 
-               // A successful result from the orchestrator always has 'completed' status now 
-               status: 'completed', 
-               meta: result.meta || {}, 
-               // Explicitly include the softError if it was normalized by the orchestrator 
-               ...(result.softError ? { softError: result.softError } : {}) 
-             }; 
-           }); 
-           
-           // Process hard errors 
-           errors.forEach((error, providerId) => { 
-             formattedResults[providerId] = { 
-               providerId: providerId, 
-               text: '', 
-               status: 'failed', 
-               meta: { _rawError: error.message } 
-             }; 
-           }); 
- 
-           // Check if AT LEAST ONE provider produced usable text. 
-           const hasAnyValidResults = Object.values(formattedResults).some( 
-             r => r.status === 'completed' && r.text && r.text.trim().length > 0 
-           ); 
- 
-           if (!hasAnyValidResults) { 
-             // Only reject if the entire batch produced absolutely no text. 
-             reject(new Error('All providers failed or returned empty responses')); 
-             return; 
-           } 
-           
-           // Resolve with the complete picture of the batch execution. 
-           // Downstream steps like synthesis will naturally filter for 'completed' status. 
-           resolve({ 
-             results: formattedResults, 
-             // We can still pass along hard errors for logging if needed 
-             errors: Object.fromEntries(errors) 
-           }); 
-         } 
-         // ========= END: RECOMMENDED IMPLEMENTATION ========= 
-       });
+  /**
+ * Execute prompt step - FIXED to include synchronous in-memory update
+ */
+async executePromptStep(step, context) {
+  const { prompt, providers, useThinking, providerContexts } = step.payload;
+  
+  return new Promise((resolve, reject) => {
+    this.orchestrator.executeParallelFanout(prompt, providers, {
+      sessionId: context.sessionId,
+      useThinking,
+      providerContexts,
+      providerMeta: step?.payload?.providerMeta,
+      onPartial: (providerId, chunk) => {
+        this._dispatchPartialDelta(context.sessionId, step.stepId, providerId, chunk.text, 'Prompt');
+      },
+      onAllComplete: (results, errors) => { 
+        // Build batch updates
+        const batchUpdates = {}; 
+        results.forEach((res, pid) => { batchUpdates[pid] = res; });
+        
+        // ✅ CRITICAL: Update in-memory cache SYNCHRONOUSLY
+        this.sessionManager.updateProviderContextsBatch(
+          context.sessionId,
+          batchUpdates,
+          true, // continueThread
+          { skipSave: true } // Don't write to IndexedDB yet
+        );
+        
+        // ✅ DEFERRED: Persist to IndexedDB (non-blocking)
+        this._persistProviderContextsAsync(context.sessionId, batchUpdates);
+        
+        // Format results for workflow engine
+        const formattedResults = {}; 
+        
+        results.forEach((result, providerId) => { 
+          formattedResults[providerId] = { 
+            providerId: providerId, 
+            text: result.text || '', 
+            status: 'completed', 
+            meta: result.meta || {}, 
+            ...(result.softError ? { softError: result.softError } : {}) 
+          }; 
+        }); 
+        
+        errors.forEach((error, providerId) => { 
+          formattedResults[providerId] = { 
+            providerId: providerId, 
+            text: '', 
+            status: 'failed', 
+            meta: { _rawError: error.message } 
+          }; 
+        }); 
+
+        // Validate at least one provider succeeded
+        const hasAnyValidResults = Object.values(formattedResults).some( 
+          r => r.status === 'completed' && r.text && r.text.trim().length > 0 
+        ); 
+
+        if (!hasAnyValidResults) { 
+          reject(new Error('All providers failed or returned empty responses')); 
+          return; 
+        } 
+        
+        resolve({ 
+          results: formattedResults, 
+          errors: Object.fromEntries(errors) 
+        }); 
+      } 
     });
-  }
+  });
+}
 
   /**
    * Resolve source data - FIXED to handle new format
@@ -1165,13 +1179,11 @@ export class WorkflowEngine {
             return;
           }
 
-          this.sessionManager.updateProviderContextsBatch(
+          // Defer persistence to avoid blocking synthesis resolution
+          this._persistProviderContextsAsync(
             context.sessionId,
-            { [payload.synthesisProvider]: finalResult },
-            true,
-            { skipSave: true }
+            { [payload.synthesisProvider]: finalResult }
           );
-          this.sessionManager.saveSession(context.sessionId);
           // Update workflow-cached context for subsequent steps in the same workflow
           try {
             if (finalResult?.meta) {
@@ -1240,13 +1252,11 @@ export class WorkflowEngine {
             return;
           }
 
-          this.sessionManager.updateProviderContextsBatch(
+          // Defer persistence to avoid blocking mapping resolution
+          this._persistProviderContextsAsync(
             context.sessionId,
-            { [payload.mappingProvider]: finalResult },
-            true,
-            { skipSave: true }
+            { [payload.mappingProvider]: finalResult }
           );
-          this.sessionManager.saveSession(context.sessionId);
           // Update workflow-cached context for subsequent steps in the same workflow
           try {
             if (finalResult?.meta) {

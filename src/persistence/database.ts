@@ -143,7 +143,7 @@ export async function openDatabase(): Promise<IDBDatabase> {
         metadataStore.add(schemaVersionRecord);
       }
       
-      // Migration to v2: mark turn-scoped context migration as pending and bump schema_version
+      // Migration to v2: bump schema_version
       if (oldVersion < 2) {
         const metadataStore = transaction.objectStore('metadata');
         const now = Date.now();
@@ -157,18 +157,6 @@ export async function openDatabase(): Promise<IDBDatabase> {
             updatedAt: now
           } as any;
           metadataStore.put(rec);
-        } catch (_) {}
-
-        try {
-          // Flag application-level migration; SessionManager will complete it lazily
-          const mig: MetadataRecord = {
-            id: 'migration_1_turn_scoped_contexts',
-            key: 'migration_1_turn_scoped_contexts',
-            value: 'pending',
-            createdAt: now,
-            updatedAt: now
-          } as any;
-          metadataStore.put(mig);
         } catch (_) {}
       }
     };

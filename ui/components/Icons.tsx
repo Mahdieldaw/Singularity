@@ -1,7 +1,11 @@
+// This file is located at ui/components/Icons.tsx
+
+import React from 'react';
+
 // SendIcon is removed (using text icon ✨)
 // SparklesIcon is removed (using text icon 🧠)
 
-type IconProps = { className?: string; style?: any };
+type IconProps = { className?: string; style?: React.CSSProperties };
 
 export const MenuIcon = ({ className, style }: IconProps) => (
   <svg 
@@ -69,4 +73,33 @@ export const UserIcon = ({ className, style }: IconProps) => (
     style={style}>
     <path fillRule="evenodd" d="M7.5 6a4.5 4.5 0 119 0 4.5 4.5 0 01-9 0zM3.751 20.105a8.25 8.25 0 0116.498 0 .75.75 0 01-.437.695A18.683 18.683 0 0112 22.5c-2.786 0-5.433-.608-7.812-1.7a.75.75 0 01-.437-.695z" clipRule="evenodd" />
 </svg>
+);
+
+// This is the corrected PuzzleIcon component
+// In ui/components/Icons.tsx
+
+// ... (your existing icons like UserIcon, BotIcon, etc.)
+
+export const ListIcon = ({ className, style, size = 16 }: IconProps & { size?: number }) => (
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    strokeWidth="2"
+    stroke="currentColor"
+    fill="none"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    className={className}
+    style={style}
+  >
+    <path stroke="none" d="M0 0h24v24H0z" fill="none" />
+    <path d="M9 6l11 0" />
+    <path d="M9 12l11 0" />
+    <path d="M9 18l11 0" />
+    <path d="M5 6l0 .01" />
+    <path d="M5 12l0 .01" />
+    <path d="M5 18l0 .01" />
+  </svg>
 );
