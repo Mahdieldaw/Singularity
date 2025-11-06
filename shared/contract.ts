@@ -342,3 +342,11 @@ export function isMappingPayload(
 ): payload is MappingStepPayload {
   return "mappingProvider" in payload;
 }
+
+// Turn type guards (source of truth)
+export function isUserTurn(turn: any): turn is { type: 'user' } {
+  return !!turn && typeof turn === 'object' && turn.type === 'user';
+}
+export function isAiTurn(turn: any): turn is { type: 'ai' } {
+  return !!turn && typeof turn === 'object' && turn.type === 'ai';
+}

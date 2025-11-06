@@ -11,9 +11,11 @@ export default function HistoryPanelConnected() {
   const isOpen = useAtomValue(isHistoryPanelOpenAtom);
   const currentSessionId = useAtomValue(currentSessionIdAtom);
   const setHistorySessions = useSetAtom(historySessionsAtom);
-  const { newChat, selectChat, deleteChat } = useChat();
+  const { newChat, selectChat, deleteChat, deleteChats } = useChat();
 
   const [deletingIds, setDeletingIds] = useState<Set<string>>(new Set());
+  const [isBatchMode, setIsBatchMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
   const handleDeleteChat = async (sessionId: string) => {
     // Track pending deletion
@@ -66,6 +68,56 @@ export default function HistoryPanelConnected() {
     });
   };
 
+  const handleToggleBatchMode = () => {
+    setIsBatchMode((prev) => !prev);
+    setSelectedIds(new Set());
+  };
+
+  const handleToggleSelected = (sessionId: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(sessionId)) next.delete(sessionId); else next.add(sessionId);
+      return next;
+    });
+  };
+
+  const handleConfirmBatchDelete = async () => {
+    const ids = Array.from(selectedIds);
+    if (ids.length === 0) {
+      // If nothing selected, just exit batch mode
+      setIsBatchMode(false);
+      return;
+    }
+
+    // Optimistically remove selected sessions
+    const prevSessions = sessions;
+    setHistorySessions((draft: any) => (draft.filter((s: any) => !ids.includes(s.sessionId || s.id))));
+
+    try {
+      const { removed } = await deleteChats(ids);
+      // Revalidate list with backend
+      const response = await api.getHistoryList();
+      const refreshed = (response?.sessions || []).map((s: any) => ({
+        id: s.sessionId,
+        sessionId: s.sessionId,
+        title: s.title || 'Untitled',
+        startTime: s.startTime || Date.now(),
+        lastActivity: s.lastActivity || Date.now(),
+        messageCount: s.messageCount || 0,
+        firstMessage: s.firstMessage || '',
+        messages: []
+      }));
+      setHistorySessions(refreshed as any);
+    } catch (e) {
+      console.error('[HistoryPanel] Batch delete failed:', e);
+      // revert UI list on failure
+      setHistorySessions(prevSessions as any);
+    } finally {
+      setIsBatchMode(false);
+      setSelectedIds(new Set());
+    }
+  };
+
   return (
     <HistoryPanel
       isOpen={isOpen}
@@ -75,6 +127,11 @@ export default function HistoryPanelConnected() {
       onSelectChat={selectChat}
       onDeleteChat={handleDeleteChat}
       deletingIds={deletingIds}
+      isBatchMode={isBatchMode}
+      selectedIds={selectedIds}
+      onToggleBatchMode={handleToggleBatchMode}
+      onToggleSessionSelected={handleToggleSelected}
+      onConfirmBatchDelete={handleConfirmBatchDelete}
     />
   );
 }

@@ -305,8 +305,8 @@ const BusController = {
   },
 
   _setupBg() {
-    // Background script setup
-    console.log('[BusController] Setting up Service Worker (bg) listeners.');
+
+    
     // For blob handling with OS
     this._channel = new BroadcastChannel('htos-bus-channel');
 

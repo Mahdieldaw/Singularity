@@ -17,6 +17,7 @@ export const GET_SYSTEM_STATUS = 'GET_SYSTEM_STATUS';
 
 // Maintenance / cleanup
 export const DELETE_SESSION = 'DELETE_SESSION';
+export const DELETE_SESSIONS = 'DELETE_SESSIONS';
 
 // ChatGPT Provider Messages
 export const CHATGPT_CHECK_REQUIREMENTS = 'CHATGPT_CHECK_REQUIREMENTS';

@@ -437,7 +437,6 @@ export class ClaudeProviderController {
         // Update available models
         this.api.updateModels();
         this.initialized = true;
-        console.log('[HTOSClaude] Claude provider initialized');
     }
     // =============================================================================
     // BUS EVENT HANDLERS

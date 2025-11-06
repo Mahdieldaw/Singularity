@@ -6,6 +6,7 @@ import {
   GET_FULL_HISTORY,
   GET_HISTORY_SESSION,
   DELETE_SESSION,
+  DELETE_SESSIONS,
   GET_SYSTEM_STATUS,
 } from "../../shared/messaging";
 
@@ -201,6 +202,10 @@ class ExtensionAPI {
 
   deleteBackgroundSession(sessionId: string): Promise<{ removed: boolean }> {
     return this.queryBackend<{ removed: boolean }>({ type: DELETE_SESSION, payload: { sessionId } });
+  }
+
+  deleteBackgroundSessions(sessionIds: string[]): Promise<{ removed: number; ids: string[] }> {
+    return this.queryBackend<{ removed: number; ids: string[] }>({ type: DELETE_SESSIONS, payload: { sessionIds } });
   }
 
   // === DOCUMENT & GHOST METHODS ===

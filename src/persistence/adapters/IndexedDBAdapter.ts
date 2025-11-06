@@ -85,7 +85,7 @@ export class IndexedDBAdapter implements IPersistenceAdapter {
 
       this.emit('ready');
       
-      console.warn('persistence adapter initialized');
+      
       if (this.config.debug) {
         console.log('[IndexedDBAdapter] Initialized successfully');
       }

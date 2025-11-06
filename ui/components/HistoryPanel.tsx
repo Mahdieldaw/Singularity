@@ -10,9 +10,15 @@ interface HistoryPanelProps {
   onDeleteChat: (sessionId: string) => void;
   // IDs currently being deleted (optimistic UI feedback)
   deletingIds?: Set<string>;
+  // Batch selection mode
+  isBatchMode?: boolean;
+  selectedIds?: Set<string>;
+  onToggleBatchMode?: () => void;
+  onToggleSessionSelected?: (sessionId: string) => void;
+  onConfirmBatchDelete?: () => void;
 }
 
-const HistoryPanel = ({ isOpen, sessions, isLoading, onNewChat, onSelectChat, onDeleteChat, deletingIds }: HistoryPanelProps) => {
+const HistoryPanel = ({ isOpen, sessions, isLoading, onNewChat, onSelectChat, onDeleteChat, deletingIds, isBatchMode = false, selectedIds, onToggleBatchMode, onToggleSessionSelected, onConfirmBatchDelete }: HistoryPanelProps) => {
 
   const panelStyle: any = {
     position: 'relative',
@@ -40,6 +46,12 @@ const HistoryPanel = ({ isOpen, sessions, isLoading, onNewChat, onSelectChat, on
     marginBottom: '12px',
   };
 
+  const dangerButtonStyle: any = {
+    ...headerButtonStyle,
+    background: 'linear-gradient(180deg, rgba(239,68,68,0.18), rgba(185,28,28,0.12))',
+    border: '1px solid rgba(239,68,68,0.35)'
+  };
+
   const itemStyle: any = {
     padding: '10px 12px',
     borderRadius: '8px',
@@ -50,10 +62,10 @@ const HistoryPanel = ({ isOpen, sessions, isLoading, onNewChat, onSelectChat, on
     cursor: 'pointer',
     marginBottom: '8px',
     overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
+    textOverflow: 'clip',
+    whiteSpace: 'normal',
     display: 'flex',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     justifyContent: 'space-between',
     gap: '8px',
   };
@@ -74,9 +86,30 @@ const HistoryPanel = ({ isOpen, sessions, isLoading, onNewChat, onSelectChat, on
     <div style={panelStyle}>
       {isOpen && (
         <>
-          <button onClick={onNewChat} style={headerButtonStyle} title="Start a new chat">
-            + New Chat
-          </button>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button onClick={onNewChat} style={{ ...headerButtonStyle, flex: 1 }} title="Start a new chat">
+              + New Chat
+            </button>
+            <button
+              onClick={() => {
+                if (!isBatchMode) {
+                  onToggleBatchMode && onToggleBatchMode();
+                  return;
+                }
+                const count = selectedIds ? selectedIds.size : 0;
+                if (count > 0) {
+                  onConfirmBatchDelete && onConfirmBatchDelete();
+                } else {
+                  // If none selected, exit batch mode
+                  onToggleBatchMode && onToggleBatchMode();
+                }
+              }}
+              style={{ ...(isBatchMode ? dangerButtonStyle : headerButtonStyle), flex: 1 }}
+              title={isBatchMode ? 'Confirm delete selected chats' : 'Select chats to delete'}
+            >
+              {isBatchMode ? `Delete Selected${selectedIds && selectedIds.size ? ` (${selectedIds.size})` : ''}` : 'Delete…'}
+            </button>
+          </div>
           <div className="history-items" style={{ flexGrow: 1, overflowY: 'auto' }}>
             {isLoading ? (
               <p style={{ color: '#94a3b8', fontSize: '14px', textAlign: 'center', marginTop: '20px' }}>
@@ -96,7 +129,11 @@ const HistoryPanel = ({ isOpen, sessions, isLoading, onNewChat, onSelectChat, on
                   onClick={() => {
                     const isDeleting = !!deletingIds && (deletingIds as Set<string>).has(session.sessionId);
                     if (isDeleting) return; // disable selection while deletion is pending
-                    onSelectChat(session);
+                    if (isBatchMode) {
+                      onToggleSessionSelected && onToggleSessionSelected(session.sessionId);
+                    } else {
+                      onSelectChat(session);
+                    }
                   }}
                   style={{
                     ...itemStyle,
@@ -109,29 +146,51 @@ const HistoryPanel = ({ isOpen, sessions, isLoading, onNewChat, onSelectChat, on
                     if (e.key === 'Enter' || e.key === ' ') {
                       e.preventDefault();
                       const isDeleting = !!deletingIds && (deletingIds as Set<string>).has(session.sessionId);
-                      if (!isDeleting) onSelectChat(session);
+                      if (!isDeleting) {
+                        if (isBatchMode) {
+                          onToggleSessionSelected && onToggleSessionSelected(session.sessionId);
+                        } else {
+                          onSelectChat(session);
+                        }
+                      }
                     }
                   }}
                   title={session.title}
                 >
-                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                    {session.title}
-                  </span>
-                  <button
-                    aria-label={`Delete chat ${session.title}`}
-                    title="Delete chat"
-                    style={{
-                      ...deleteBtnStyle,
-                      cursor: (!!deletingIds && (deletingIds as Set<string>).has(session.sessionId)) ? 'not-allowed' : 'pointer',
-                    }}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onDeleteChat(session.sessionId);
-                    }}
-                    disabled={!!deletingIds && (deletingIds as Set<string>).has(session.sessionId)}
-                  >
-                    { !!deletingIds && (deletingIds as Set<string>).has(session.sessionId) ? 'Deleting…' : '🗑️' }
-                  </button>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1 }}>
+                    {isBatchMode && (
+                      <input
+                        type="checkbox"
+                        checked={!!selectedIds && (selectedIds as Set<string>).has(session.sessionId)}
+                        onChange={(e) => {
+                          e.stopPropagation();
+                          onToggleSessionSelected && onToggleSessionSelected(session.sessionId);
+                        }}
+                        aria-label={`Select ${session.title} for deletion`}
+                        style={{ flexShrink: 0 }}
+                      />
+                    )}
+                    <span style={{ overflowWrap: 'anywhere', wordBreak: 'break-word', whiteSpace: 'normal' }}>
+                      {session.title}
+                    </span>
+                  </div>
+                  {!isBatchMode && (
+                    <button
+                      aria-label={`Delete chat ${session.title}`}
+                      title="Delete chat"
+                      style={{
+                        ...deleteBtnStyle,
+                        cursor: (!!deletingIds && (deletingIds as Set<string>).has(session.sessionId)) ? 'not-allowed' : 'pointer',
+                      }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onDeleteChat(session.sessionId);
+                      }}
+                      disabled={!!deletingIds && (deletingIds as Set<string>).has(session.sessionId)}
+                    >
+                      { !!deletingIds && (deletingIds as Set<string>).has(session.sessionId) ? 'Deleting…' : '🗑️' }
+                    </button>
+                  )}
                 </div>
               ))
             )}

@@ -194,7 +194,7 @@ const ProviderResponseBlock = ({
           minWidth: '260px',
           maxWidth: '380px',
           width: '100%',
-          height: '220px',
+          height: '300px',
           display: isVisible ? 'flex' : 'none',
           flexDirection: 'column',
           background: '#1e293b',

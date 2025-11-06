@@ -93,7 +93,6 @@ async function initializePersistence() {
     ]);
     
     console.log('[SW] ✅ Persistence layer initialized');
-    console.warn('persistence adapter initialized');
     persistenceMonitor.endOperation(operationId, { success: true });
     return persistenceLayer;
   } catch (error) {
@@ -358,6 +357,7 @@ async function initializeProviders() {
     { name: 'chatgpt', Controller: ChatGPTProviderController, Adapter: ChatGPTAdapter },
     { name: 'qwen', Controller: QwenProviderController, Adapter: QwenAdapter },
   ];
+  const initialized = [];
   for (const config of providerConfigs) {
     try {
       const controller = new config.Controller();
@@ -365,10 +365,13 @@ async function initializeProviders() {
       const adapter = new config.Adapter(controller);
       if (typeof adapter.init === 'function') await adapter.init();
       providerRegistry.register(config.name, controller, adapter);
-      console.log(`[SW] ✓ ${config.name} initialized`);
+      initialized.push(config.name);
     } catch (e) {
       console.error(`[SW] Failed to initialize ${config.name}:`, e);
     }
+  }
+  if (initialized.length > 0) {
+    console.info(`[SW] ✅ Providers initialized: ${initialized.join(', ')}`);
   }
   return providerRegistry.listProviders();
 }
@@ -684,6 +687,33 @@ async function handleUnifiedMessage(message, sender, sendResponse) {
           sendResponse({ success: true, removed });
         } catch (e) {
           console.error('[SW] DELETE_SESSION failed:', e);
+          sendResponse({ success: false, error: e?.message || String(e) });
+        }
+        return true;
+      }
+      
+      case 'DELETE_SESSIONS': {
+        try {
+          const ids = (message.sessionIds || message.payload?.sessionIds || []).filter(Boolean);
+          if (!Array.isArray(ids) || ids.length === 0) {
+            sendResponse({ success: false, error: 'No sessionIds provided' });
+            return true;
+          }
+
+          const results = await Promise.all(ids.map(async (id) => {
+            try {
+              const removed = await sm.deleteSession(id);
+              return { id, removed };
+            } catch (err) {
+              console.error('[SW] DELETE_SESSIONS item failed:', id, err);
+              return { id, removed: false };
+            }
+          }));
+
+          const removedIds = results.filter(r => r.removed).map(r => r.id);
+          sendResponse({ success: true, removed: removedIds.length, ids: removedIds });
+        } catch (e) {
+          console.error('[SW] DELETE_SESSIONS failed:', e);
           sendResponse({ success: false, error: e?.message || String(e) });
         }
         return true;

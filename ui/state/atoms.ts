@@ -159,6 +159,8 @@ export const documentsRefreshTickAtom = atom<number>(0);
 export const connectionStatusAtom = atom<{ isConnected: boolean; isReconnecting: boolean }>({ isConnected: false, isReconnecting: true });
 export const alertTextAtom = atom<string | null>(null);
 export const chatInputHeightAtom = atom<number>(80);
+// Track last meaningful workflow activity to allow UI watchdogs
+export const lastActivityAtAtom = atom<number>(0);
 
 // -----------------------------
 // Derived atoms (examples)

@@ -1,13 +1,11 @@
-// ui/hooks/useRoundActions.ts - ID-BASED VERSION (avoids full UI rerender)
+// ui/hooks/useRoundActions.ts - PRIMITIVES-ALIGNED VERSION
 import { useCallback, useRef } from 'react';
 import { useAtom, useAtomValue, useSetAtom } from 'jotai';
 
 import {
   turnsMapAtom,
-  turnIdsAtom,
   synthSelectionsByRoundAtom,
   mappingSelectionByRoundAtom,
-  activeClipsAtom,
   currentSessionIdAtom,
   isLoadingAtom,
   uiPhaseAtom,
@@ -20,16 +18,14 @@ import {
 import api from '../services/extension-api';
 import { PRIMARY_STREAMING_PROVIDER_IDS } from '../constants';
 import type { ProviderKey, PrimitiveWorkflowRequest } from '../../shared/contract';
-import type { TurnMessage, UserTurn, AiTurn, ProviderResponse } from '../types';
+import type { TurnMessage, AiTurn, ProviderResponse } from '../types';
 
 export function useRoundActions() {
   const turnsMap = useAtomValue(turnsMapAtom);
-  const turnIds = useAtomValue(turnIdsAtom);
   const setTurnsMap = useSetAtom(turnsMapAtom);
 
   const [synthSelectionsByRound, setSynthSelectionsByRound] = useAtom(synthSelectionsByRoundAtom);
   const [mappingSelectionByRound, setMappingSelectionByRound] = useAtom(mappingSelectionByRoundAtom);
-  const [activeClips] = useAtom(activeClipsAtom);
   const [currentSessionId] = useAtom(currentSessionIdAtom);
   const setIsLoading = useSetAtom(isLoadingAtom);
   const setUiPhase = useSetAtom(uiPhaseAtom);
@@ -41,32 +37,28 @@ export function useRoundActions() {
 
   const isSynthRunningRef = useRef(false);
 
-  // Find primary AI turn attached to a userTurnId using id-indexed map
-  const findRoundForUserTurn = useCallback(
-    (userTurnId: string): { user?: UserTurn; ai?: AiTurn } | null => {
-      const user = turnsMap.get(userTurnId) as UserTurn | undefined;
-      if (!user || user.type !== 'user') return null;
-      // Prefer direct lookup by scanning map for ai.userTurnId match, but keep order via turnIds
-      for (const id of turnIds) {
-        const t = turnsMap.get(id);
-        if (t && t.type === 'ai' && (t as AiTurn).userTurnId === userTurnId) {
-          return { user, ai: t as AiTurn };
-        }
-      }
-      return { user, ai: undefined as any };
-    },
-    [turnsMap, turnIds]
-  );
+  // ============================================================================
+  // SYNTHESIS RECOMPUTE (Direct AI Turn Operation)
+  // ============================================================================
 
-  const runSynthesisForRound = useCallback(
-    async (userTurnId: string, providerIdOverride?: string) => {
+  /**
+   * Recompute synthesis for a specific AI turn.
+   * Uses the 'recompute' primitive which fetches frozen outputs from the backend.
+   * 
+   * @param aiTurnId - The AI turn to recompute synthesis for
+   * @param providerIdOverride - Optional: Force synthesis for a specific provider
+   */
+  const runSynthesisForAiTurn = useCallback(
+    async (aiTurnId: string, providerIdOverride?: string) => {
       if (!currentSessionId || isSynthRunningRef.current) return;
 
-      const roundInfo = findRoundForUserTurn(userTurnId);
-      if (!roundInfo || !roundInfo.user || !roundInfo.ai) return;
+      const ai = turnsMap.get(aiTurnId) as AiTurn | undefined;
+      if (!ai || ai.type !== 'ai') {
+        console.warn(`[RoundActions] AI turn ${aiTurnId} not found`);
+        return;
+      }
 
-      const { ai, user } = roundInfo;
-
+      // ✅ Validate we have enough source data for synthesis
       const outputsFromBatch = Object.values(ai.batchResponses || {}).filter(
         (r: any) => r.status === 'completed' && r.text?.trim()
       );
@@ -87,33 +79,38 @@ export function useRoundActions() {
 
       const enoughOutputs = outputsFromBatch.length >= 2 || hasCompletedSynthesis || hasCompletedMapping;
       if (!enoughOutputs) {
-        console.warn(`Not enough outputs for synthesis in round ${userTurnId}`);
+        console.warn(`[RoundActions] Not enough outputs for synthesis in turn ${aiTurnId}`);
         return;
       }
 
+      // ✅ Determine which providers to synthesize
+      // NOTE: UI state keys still use userTurnId for backward compatibility
+      const userTurnId = ai.userTurnId;
       const selected = providerIdOverride
         ? [providerIdOverride]
         : Object.entries(synthSelectionsByRound[userTurnId] || {})
             .filter(([_, on]) => on)
             .map(([pid]) => pid);
-      if (selected.length === 0) return;
+      
+      if (selected.length === 0) {
+        console.warn(`[RoundActions] No synthesis providers selected for turn ${aiTurnId}`);
+        return;
+      }
 
-      const isHistoricalRerun = !!providerIdOverride;
-
-      const clipPreferredMapping = activeClips[ai.id]?.mapping || null;
-      const perRoundMapping = mappingSelectionByRound[userTurnId] || null;
-      const preferredMappingCandidate = clipPreferredMapping || perRoundMapping;
-      const preferredMappingProvider = preferredMappingCandidate || null;
-
+      // ✅ Initialize optimistic synthesis responses in UI state
       setTurnsMap((draft: Map<string, TurnMessage>) => {
         const existing = draft.get(ai.id);
         if (!existing || existing.type !== 'ai') return;
         const aiTurn = existing as AiTurn;
         if (!aiTurn.synthesisResponses) aiTurn.synthesisResponses = {};
         const next: Record<string, ProviderResponse[]> = { ...aiTurn.synthesisResponses };
+        
         selected.forEach((pid) => {
           const arr = Array.isArray(next[pid]) ? [...next[pid]] : [];
-          const initialStatus: 'streaming' | 'pending' = PRIMARY_STREAMING_PROVIDER_IDS.includes(pid) ? 'streaming' : 'pending';
+          const initialStatus: 'streaming' | 'pending' = PRIMARY_STREAMING_PROVIDER_IDS.includes(pid) 
+            ? 'streaming' 
+            : 'pending';
+          
           arr.push({
             providerId: pid as ProviderKey,
             text: '',
@@ -125,6 +122,7 @@ export function useRoundActions() {
         aiTurn.synthesisResponses = next;
       });
 
+      // ✅ Set loading state
       setActiveAiTurnId(ai.id);
       isSynthRunningRef.current = true;
       setIsLoading(true);
@@ -132,25 +130,36 @@ export function useRoundActions() {
       setCurrentAppStep('synthesis');
 
       try {
-        // Recompute synthesis from the existing AI turn outputs, one provider at a time
+        // ✅ Execute recompute primitive for each selected provider
         for (const pid of selected) {
           // Aim recompute state precisely at the current provider/turn
-          setActiveRecomputeState({ aiTurnId: ai.id, stepType: 'synthesis', providerId: pid });
+          setActiveRecomputeState({ 
+            aiTurnId: ai.id, 
+            stepType: 'synthesis', 
+            providerId: pid 
+          });
+          
+          // ✅ Send recompute primitive - backend will fetch frozen outputs
           const primitive: PrimitiveWorkflowRequest = {
             type: 'recompute',
             sessionId: currentSessionId as string,
-            sourceTurnId: ai.id,
+            sourceTurnId: ai.id, // ✅ Direct AI turn reference - no user turn lookup needed
             stepType: 'synthesis',
             targetProvider: pid as ProviderKey,
             useThinking: !!thinkSynthByRound[userTurnId],
           };
+          
           await api.executeWorkflow(primitive);
         }
+        
+        // ✅ Persist last synthesis model preference
         if (selected.length === 1) {
-          try { localStorage.setItem('htos_last_synthesis_model', selected[0]); } catch {}
+          try { 
+            localStorage.setItem('htos_last_synthesis_model', selected[0]); 
+          } catch {}
         }
       } catch (err) {
-        console.error('Synthesis run failed:', err);
+        console.error('[RoundActions] Synthesis run failed:', err);
         setIsLoading(false);
         setUiPhase('awaiting_action');
         setActiveAiTurnId(null);
@@ -161,29 +170,40 @@ export function useRoundActions() {
     },
     [
       currentSessionId,
+      turnsMap,
       synthSelectionsByRound,
-      findRoundForUserTurn,
       thinkSynthByRound,
-      mappingSelectionByRound,
-      activeClips,
       setTurnsMap,
       setActiveAiTurnId,
       setIsLoading,
       setUiPhase,
       setCurrentAppStep,
+      setActiveRecomputeState,
     ]
   );
 
-  const runMappingForRound = useCallback(
-    async (userTurnId: string, providerIdOverride?: string) => {
+  // ============================================================================
+  // MAPPING RECOMPUTE (Direct AI Turn Operation)
+  // ============================================================================
+
+  /**
+   * Recompute mapping for a specific AI turn.
+   * Uses the 'recompute' primitive which fetches frozen outputs from the backend.
+   * 
+   * @param aiTurnId - The AI turn to recompute mapping for
+   * @param providerIdOverride - Optional: Force mapping for a specific provider
+   */
+  const runMappingForAiTurn = useCallback(
+    async (aiTurnId: string, providerIdOverride?: string) => {
       if (!currentSessionId) return;
 
-      const roundInfo = findRoundForUserTurn(userTurnId);
-      if (!roundInfo?.user || !roundInfo.ai) return;
+      const ai = turnsMap.get(aiTurnId) as AiTurn | undefined;
+      if (!ai || ai.type !== 'ai') {
+        console.warn(`[RoundActions] AI turn ${aiTurnId} not found`);
+        return;
+      }
 
-      const userTurn = roundInfo.user as UserTurn;
-      const { ai } = roundInfo;
-
+      // ✅ Validate we have enough source data for mapping
       const outputsFromBatch = Object.values(ai.batchResponses || {}).filter(
         (r: any) => r.status === 'completed' && r.text?.trim()
       );
@@ -204,26 +224,42 @@ export function useRoundActions() {
 
       const enoughOutputs = outputsFromBatch.length >= 2 || hasCompletedSynthesis || hasCompletedMapping;
       if (!enoughOutputs) {
-        console.warn(`Not enough outputs for mapping in round ${userTurnId}`);
+        console.warn(`[RoundActions] Not enough outputs for mapping in turn ${aiTurnId}`);
         return;
       }
 
+      // ✅ Determine which provider to use for mapping
+      // NOTE: UI state keys still use userTurnId for backward compatibility
+      const userTurnId = ai.userTurnId;
       const effectiveMappingProvider = providerIdOverride || mappingSelectionByRound[userTurnId];
-      if (!effectiveMappingProvider) return;
+      
+      if (!effectiveMappingProvider) {
+        console.warn(`[RoundActions] No mapping provider selected for turn ${aiTurnId}`);
+        return;
+      }
 
+      // ✅ Update UI state to track mapping selection
       setMappingSelectionByRound((draft: Record<string, string | null>) => {
         if (draft[userTurnId] === effectiveMappingProvider) return;
         draft[userTurnId] = effectiveMappingProvider;
       });
 
+      // ✅ Initialize optimistic mapping response in UI state
       setTurnsMap((draft: Map<string, TurnMessage>) => {
         const existing = draft.get(ai.id);
         if (!existing || existing.type !== 'ai') return;
         const aiTurn = existing as AiTurn;
         const prev = aiTurn.mappingResponses || {};
         const next: Record<string, ProviderResponse[]> = { ...prev };
-        const arr = Array.isArray(next[effectiveMappingProvider]) ? [...next[effectiveMappingProvider]] : [];
-        const initialStatus: 'streaming' | 'pending' = PRIMARY_STREAMING_PROVIDER_IDS.includes(effectiveMappingProvider) ? 'streaming' : 'pending';
+        
+        const arr = Array.isArray(next[effectiveMappingProvider]) 
+          ? [...next[effectiveMappingProvider]] 
+          : [];
+        
+        const initialStatus: 'streaming' | 'pending' = PRIMARY_STREAMING_PROVIDER_IDS.includes(effectiveMappingProvider) 
+          ? 'streaming' 
+          : 'pending';
+        
         arr.push({
           providerId: effectiveMappingProvider as ProviderKey,
           text: '',
@@ -234,6 +270,7 @@ export function useRoundActions() {
         aiTurn.mappingResponses = next;
       });
 
+      // ✅ Set loading state
       setActiveAiTurnId(ai.id);
       setIsLoading(true);
       setUiPhase('streaming');
@@ -241,18 +278,27 @@ export function useRoundActions() {
 
       try {
         // Aim recompute state precisely at the mapping provider
-        setActiveRecomputeState({ aiTurnId: ai.id, stepType: 'mapping', providerId: effectiveMappingProvider });
+        setActiveRecomputeState({ 
+          aiTurnId: ai.id, 
+          stepType: 'mapping', 
+          providerId: effectiveMappingProvider 
+        });
+        
+        // ✅ Send recompute primitive - backend will fetch frozen outputs
         const primitive: PrimitiveWorkflowRequest = {
           type: 'recompute',
           sessionId: currentSessionId as string,
-          sourceTurnId: ai.id,
+          sourceTurnId: ai.id, // ✅ Direct AI turn reference - no user turn lookup needed
           stepType: 'mapping',
           targetProvider: effectiveMappingProvider as ProviderKey,
-          useThinking: effectiveMappingProvider === 'chatgpt' ? !!thinkMappingByRound[userTurnId] : false,
+          useThinking: effectiveMappingProvider === 'chatgpt' 
+            ? !!thinkMappingByRound[userTurnId] 
+            : false,
         };
+        
         await api.executeWorkflow(primitive);
       } catch (err) {
-        console.error('Mapping run failed:', err);
+        console.error('[RoundActions] Mapping run failed:', err);
         setIsLoading(false);
         setUiPhase('awaiting_action');
         setActiveAiTurnId(null);
@@ -261,7 +307,7 @@ export function useRoundActions() {
     },
     [
       currentSessionId,
-      findRoundForUserTurn,
+      turnsMap,
       mappingSelectionByRound,
       setMappingSelectionByRound,
       thinkMappingByRound,
@@ -270,48 +316,18 @@ export function useRoundActions() {
       setIsLoading,
       setUiPhase,
       setCurrentAppStep,
+      setActiveRecomputeState,
     ]
   );
 
-  // ID-first helpers (direct by aiTurnId to avoid scanning arrays)
-  const runSynthesisForAiTurn = useCallback(
-    async (aiTurnId: string, providerIdOverride?: string) => {
-      const ai = turnsMap.get(aiTurnId) as AiTurn | undefined;
-      if (!ai || ai.type !== 'ai') return;
-      // Prefer canonical userTurnId from adjacency in turnIds
-      let userTurnId = ai.userTurnId;
-      const idx = turnIds.indexOf(aiTurnId);
-      if (idx > 0) {
-        const prevId = turnIds[idx - 1];
-        const prev = turnsMap.get(prevId);
-        if (prev && prev.type === 'user') {
-          userTurnId = (prev as UserTurn).id;
-        }
-      }
-      await runSynthesisForRound(userTurnId, providerIdOverride);
-    },
-    [turnsMap, turnIds, runSynthesisForRound]
-  );
+  // ============================================================================
+  // UI STATE HELPERS (For controlling per-turn settings)
+  // ============================================================================
 
-  const runMappingForAiTurn = useCallback(
-    async (aiTurnId: string, providerIdOverride?: string) => {
-      const ai = turnsMap.get(aiTurnId) as AiTurn | undefined;
-      if (!ai || ai.type !== 'ai') return;
-      // Prefer canonical userTurnId from adjacency in turnIds
-      let userTurnId = ai.userTurnId;
-      const idx = turnIds.indexOf(aiTurnId);
-      if (idx > 0) {
-        const prevId = turnIds[idx - 1];
-        const prev = turnsMap.get(prevId);
-        if (prev && prev.type === 'user') {
-          userTurnId = (prev as UserTurn).id;
-        }
-      }
-      await runMappingForRound(userTurnId, providerIdOverride);
-    },
-    [turnsMap, turnIds, runMappingForRound]
-  );
-
+  /**
+   * Toggle synthesis provider selection for a specific user turn.
+   * NOTE: This uses userTurnId as the key for backward compatibility with existing UI state.
+   */
   const toggleSynthForRound = useCallback(
     (userTurnId: string, providerId: string) => {
       setSynthSelectionsByRound((draft: Record<string, Record<string, boolean>>) => {
@@ -322,6 +338,10 @@ export function useRoundActions() {
     [setSynthSelectionsByRound]
   );
 
+  /**
+   * Select mapping provider for a specific user turn.
+   * NOTE: This uses userTurnId as the key for backward compatibility with existing UI state.
+   */
   const selectMappingForRound = useCallback(
     (userTurnId: string, providerId: string) => {
       setMappingSelectionByRound((draft: Record<string, string | null>) => {
@@ -332,10 +352,11 @@ export function useRoundActions() {
   );
 
   return {
-    runSynthesisForRound,
-    runMappingForRound,
+    // ✅ Primary operations (turn-based)
     runSynthesisForAiTurn,
     runMappingForAiTurn,
+    
+    // ✅ UI state helpers (still use userTurnId keys for backward compatibility)
     toggleSynthForRound,
     selectMappingForRound,
   };

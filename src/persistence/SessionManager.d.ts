@@ -58,26 +58,18 @@ export declare class SessionManager {
   saveSession(sessionId: string): Promise<void>;
   saveSessionWithPersistence(sessionId: string): Promise<void>;
   
-  addTurn(sessionId: string, userTurn: any, aiTurn: any, threadId?: string): Promise<void>;
-  addTurnWithPersistence(sessionId: string, userTurn: any, aiTurn: any, threadId?: string): Promise<void>;
-  
   deleteSession(sessionId: string): Promise<void>;
   deleteSessionWithPersistence(sessionId: string): Promise<void>;
   
   updateProviderContext(sessionId: string, providerId: string, result: any, preserveChat?: boolean, options?: ProviderContextOptions): Promise<void>;
   updateProviderContextWithPersistence(sessionId: string, providerId: string, result: any, preserveChat?: boolean, options?: ProviderContextOptions): Promise<void>;
+  updateProviderContextsBatch(sessionId: string, updates: Record<string, any>, preserveChat?: boolean, options?: ProviderContextOptions): Promise<void>;
+  updateProviderContextsBatchWithPersistence(sessionId: string, updates: Record<string, any>, preserveChat?: boolean, options?: ProviderContextOptions): Promise<void>;
   
   getProviderContexts(sessionId: string, threadId?: string): any;
   
-  createThread(sessionId: string, parentThreadId?: string | null, branchPointTurnId?: string | null, name?: string | null, color?: string): Promise<string>;
-  createThreadWithPersistence(sessionId: string, parentThreadId?: string | null, branchPointTurnId?: string | null, name?: string | null, color?: string): Promise<string>;
-  
-  switchThread(sessionId: string, threadId: string): Promise<void>;
-  switchThreadWithPersistence(sessionId: string, threadId: string): Promise<void>;
-  
   getTurn(sessionId: string, turnId: string): any;
   getTurns(sessionId: string): any[];
-  saveTurn(sessionId: string, userTurn: any, aiTurn: any): Promise<void>;
   
   // Migration helpers
   getMigrationStatus(): Promise<{ total: number; migrated: number; pending: number; pendingSessions: string[]; sessions: Record<string, { hasLastPointer: boolean; latestAiId: string | null; contextsOnLatest: boolean; migrated: boolean; }> }>;

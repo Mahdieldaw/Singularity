@@ -573,8 +573,7 @@ export class SessionManager {
     }
     
     this.isInitialized = true;
-    console.log('[SessionManager] Persistence layer integration successful.');
-    console.log('[SessionManager] Initialization complete');
+    
 
     // Attempt lazy data migrations after adapter is ready
     try {
@@ -665,12 +664,6 @@ export class SessionManager {
   }
 
 
-  // Legacy builder removed; sessions now use lightweight metadata only
-  async buildLegacySessionObject(sessionId) {
-    console.warn('[SessionManager] buildLegacySessionObject has been removed; returning null.');
-    return null;
-  }
-
 
   /**
    * Save session (enhanced with persistence layer support)
@@ -702,82 +695,7 @@ export class SessionManager {
   }
 
 
-  /**
-   * Add turn to session (enhanced with persistence layer support)
-   */
-  async addTurn(sessionId, userTurn, aiTurn, threadId = 'default-thread') {
-    return this.addTurnWithPersistence(sessionId, userTurn, aiTurn, threadId);
-  }
-
-  /**
-   * Add turn using new persistence layer
-   */
-  async addTurnWithPersistence(sessionId, userTurn, aiTurn, threadId = 'default-thread') {
-    try {
-      const session = await this.getOrCreateSession(sessionId);
-      
-      // Get next sequence numbers - using getAll and filtering by sessionId
-      const allTurns = await this.adapter.getAll('turns');
-      const existingTurns = allTurns.filter(turn => turn.sessionId === sessionId);
-      let nextSequence = existingTurns.length;
-      
-      // Add user turn
-      if (userTurn) {
-        const userTurnRecord = {
-          id: userTurn.id || `turn-${sessionId}-${nextSequence}`,
-          sessionId: sessionId,
-          threadId: threadId,
-          sequence: nextSequence++,
-          role: 'user',
-          content: userTurn.text || '',
-          createdAt: userTurn.createdAt || Date.now(),
-          updatedAt: Date.now()
-        };
-        
-        await this.adapter.put('turns', userTurnRecord);
-        
-        // Add to legacy session for compatibility
-        session.turns = session.turns || [];
-        session.turns.push({ ...userTurn, threadId });
-      }
-      
-      // Add AI turn
-      if (aiTurn) {
-        const aiTurnRecord = {
-          id: aiTurn.id || `turn-${sessionId}-${nextSequence}`,
-          sessionId: sessionId,
-          threadId: threadId,
-          sequence: nextSequence,
-          role: 'assistant',
-          content: aiTurn.text || '',
-          createdAt: aiTurn.createdAt || Date.now(),
-          updatedAt: Date.now()
-        };
-        
-        await this.adapter.put('turns', aiTurnRecord);
-        
-        // Add to legacy session for compatibility
-        session.turns = session.turns || [];
-        session.turns.push({ ...aiTurn, threadId, completedAt: Date.now() });
-      }
-      
-      // Update session title and activity
-      if (!session.title && userTurn?.text) {
-        session.title = String(userTurn.text).slice(0, 50);
-        const sessionRecord = await this.adapter.get('sessions', sessionId);
-        if (sessionRecord) {
-          sessionRecord.title = session.title;
-          sessionRecord.updatedAt = Date.now();
-          await this.adapter.put('sessions', sessionRecord);
-        }
-      }
-      
-      session.lastActivity = Date.now();
-      
-    } catch (error) {
-      console.error(`[SessionManager] Failed to add turn to persistence layer:`, error);
-    }
-  }
+  // addTurn() and addTurnWithPersistence() removed. Use persist() primitives.
 
 
   /**
@@ -796,19 +714,21 @@ export class SessionManager {
       await this.adapter.delete('sessions', sessionId);
       
       // Delete related data - using getAll and filtering by sessionId
+      // 1) Threads
       const allThreads = await this.adapter.getAll('threads');
       const threads = allThreads.filter(thread => thread.sessionId === sessionId);
       for (const thread of threads) {
         await this.adapter.delete('threads', thread.id);
       }
-      
+
+      // 2) Turns
       const allTurns = await this.adapter.getAll('turns');
       const turns = allTurns.filter(turn => turn.sessionId === sessionId);
       for (const turn of turns) {
         await this.adapter.delete('turns', turn.id);
       }
 
-      // Also delete provider responses associated with this session
+      // 3) Provider responses
       try {
         const allResponses = await this.adapter.getAll('provider_responses');
         const responses = allResponses.filter(resp => resp.sessionId === sessionId);
@@ -818,20 +738,68 @@ export class SessionManager {
       } catch (e) {
         console.warn('[SessionManager] Failed to delete provider responses for session', sessionId, e);
       }
-      
-      const allContexts = await this.adapter.getAll('provider_contexts');
-      const contexts = allContexts.filter(context => context.sessionId === sessionId);
-      for (const context of contexts) {
-        await this.adapter.delete('provider_contexts', context.id);
+
+      // 4) Provider contexts (composite key [sessionId, providerId])
+      try {
+        const allContexts = await this.adapter.getAll('provider_contexts');
+        const contexts = allContexts.filter(context => context.sessionId === sessionId);
+        for (const context of contexts) {
+          await this.adapter.delete('provider_contexts', [context.sessionId, context.providerId]);
+        }
+      } catch (e) {
+        console.warn('[SessionManager] Failed to delete provider contexts for session', sessionId, e);
       }
-      
-      // Delete from memory
+
+      // 5) Documents created by or associated to this session
+      try {
+        const allDocs = await this.adapter.getAll('documents');
+        const docs = allDocs.filter(doc => doc.sessionId === sessionId || doc.sourceSessionId === sessionId);
+        const deletedDocIds = [];
+        for (const doc of docs) {
+          await this.adapter.delete('documents', doc.id);
+          deletedDocIds.push(doc.id);
+        }
+
+        // 6) Canvas blocks tied to deleted documents or originating from this session
+        const allBlocks = await this.adapter.getAll('canvas_blocks');
+        const blocks = allBlocks.filter(block => 
+          deletedDocIds.includes(block.documentId) || 
+          (block?.provenance?.sessionId === sessionId)
+        );
+        for (const block of blocks) {
+          await this.adapter.delete('canvas_blocks', block.id);
+        }
+
+        // 7) Ghosts tied to deleted documents or originating from this session
+        const allGhosts = await this.adapter.getAll('ghosts');
+        const ghosts = allGhosts.filter(ghost => 
+          deletedDocIds.includes(ghost.documentId) || 
+          (ghost?.provenance?.sessionId === sessionId)
+        );
+        for (const ghost of ghosts) {
+          await this.adapter.delete('ghosts', ghost.id);
+        }
+      } catch (e) {
+        console.warn('[SessionManager] Failed to delete document-derived artifacts for session', sessionId, e);
+      }
+
+      // 8) Metadata scoped to this session (store keyPath is 'key')
+      try {
+        const allMeta = await this.adapter.getAll('metadata');
+        const metas = allMeta.filter(m => m.sessionId === sessionId);
+        for (const m of metas) {
+          // Use the actual store key 'key' for deletion
+          await this.adapter.delete('metadata', m.key);
+        }
+      } catch (e) {
+        console.warn('[SessionManager] Failed to delete session-scoped metadata', sessionId, e);
+      }
+
+      // 9) Delete lightweight cache entry
       if (this.sessions[sessionId]) {
         delete this.sessions[sessionId];
       }
-      
 
-      
       return true;
     } catch (error) {
       console.error(`[SessionManager] Failed to delete session ${sessionId} from persistence layer:`, error);
@@ -924,6 +892,77 @@ export class SessionManager {
   }
 
   /**
+   * Batch update multiple provider contexts in a single pass.
+   * updates shape: { [providerId]: { text?: string, meta?: object } }
+   */
+  async updateProviderContextsBatch(sessionId, updates, preserveChat = true, options = {}) {
+    return this.updateProviderContextsBatchWithPersistence(sessionId, updates, preserveChat, options);
+  }
+
+  async updateProviderContextsBatchWithPersistence(sessionId, updates, preserveChat = true, options = {}) {
+    const { skipSave = true } = options;
+    if (!sessionId || !updates || typeof updates !== 'object') return;
+
+    try {
+      const session = await this.getOrCreateSession(sessionId);
+      const now = Date.now();
+
+      // Load all existing contexts once and pick latest per provider for this session
+      const allContexts = await this.adapter.getAll('provider_contexts');
+      const sessionContexts = allContexts.filter(ctx => ctx.sessionId === sessionId);
+      const latestByProvider = {};
+      for (const ctx of sessionContexts) {
+        const pid = ctx.providerId;
+        const ts = (ctx.updatedAt ?? ctx.createdAt ?? 0);
+        const existing = latestByProvider[pid];
+        if (!existing || ts > (existing._ts || 0)) {
+          latestByProvider[pid] = { record: ctx, _ts: ts };
+        }
+      }
+
+      // Apply updates
+      for (const [providerId, result] of Object.entries(updates)) {
+        let contextRecord = latestByProvider[providerId]?.record;
+        if (!contextRecord) {
+          contextRecord = {
+            id: `ctx-${sessionId}-${providerId}-${now}-${Math.random().toString(36).slice(2,8)}`,
+            sessionId,
+            providerId,
+            threadId: 'default-thread',
+            contextData: {},
+            isActive: true,
+            createdAt: now,
+            updatedAt: now
+          };
+        }
+
+        const existingData = contextRecord.contextData || {};
+        contextRecord.contextData = {
+          ...existingData,
+          text: result?.text || existingData.text || '',
+          meta: { ...(existingData.meta || {}), ...(result?.meta || {}) },
+          lastUpdated: now
+        };
+        contextRecord.updatedAt = now;
+
+        // Persist updated context
+        await this.adapter.put('provider_contexts', contextRecord);
+
+        // Update legacy session cache
+        session.providers = session.providers || {};
+        session.providers[providerId] = contextRecord.contextData;
+      }
+
+      session.lastActivity = now;
+      if (!skipSave) {
+        await this.saveSession(sessionId);
+      }
+    } catch (error) {
+      console.error('[SessionManager] Failed to batch update provider contexts:', error);
+    }
+  }
+
+  /**
    * Legacy update provider context method
    */
 
@@ -981,107 +1020,7 @@ export class SessionManager {
     }
   }
 
-  /**
-   * Create thread (enhanced with persistence layer support)
-   */
-  async createThread(sessionId, parentThreadId = null, branchPointTurnId = null, name = null, color = '#8b5cf6') {
-    return this.createThreadWithPersistence(sessionId, parentThreadId, branchPointTurnId, name, color);
-  }
-
-  /**
-   * Create thread using new persistence layer
-   */
-  async createThreadWithPersistence(sessionId, parentThreadId = null, branchPointTurnId = null, name = null, color = '#8b5cf6') {
-    try {
-      const session = await this.getOrCreateSession(sessionId);
-      const threadId = `thread-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-      
-      // Get existing threads - using getAll and filtering by sessionId
-      const allThreads = await this.adapter.getAll('threads');
-      const existingThreads = allThreads.filter(thread => thread.sessionId === sessionId);
-      
-      const threadRecord = {
-        id: threadId,
-        sessionId: sessionId,
-        parentThreadId: parentThreadId,
-        branchPointTurnId: branchPointTurnId,
-        title: name || `Branch ${existingThreads.length}`,
-        isActive: false,
-        createdAt: Date.now(),
-        updatedAt: Date.now()
-      };
-      
-      await this.adapter.put('threads', threadRecord);
-      
-      // Add to legacy session for compatibility
-      session.threads = session.threads || {};
-      session.threads[threadId] = {
-        id: threadId,
-        sessionId: sessionId,
-        parentThreadId: parentThreadId,
-        branchPointTurnId: branchPointTurnId,
-        name: threadRecord.title,
-        color: color || '#8b5cf6',
-        isActive: false,
-        createdAt: threadRecord.createdAt,
-        lastActivity: threadRecord.updatedAt
-      };
-      
-      await this.saveSession(sessionId);
-      return session.threads[threadId];
-    } catch (error) {
-      console.error(`[SessionManager] Failed to create thread in persistence layer:`, error);
-      return null;
-    }
-  }
-
-  /**
-   * Legacy create thread method
-   */
-
-  /**
-   * Switch thread (enhanced with persistence layer support)
-   */
-  async switchThread(sessionId, threadId) {
-    return this.switchThreadWithPersistence(sessionId, threadId);
-  }
-
-  /**
-   * Switch thread using new persistence layer
-   */
-  async switchThreadWithPersistence(sessionId, threadId) {
-    try {
-      const session = this.sessions[sessionId];
-      if (!session || !session.threads || !session.threads[threadId]) {
-        throw new Error(`Thread ${threadId} not found in session ${sessionId}`);
-      }
-      
-      // Update all threads in persistence layer - using getAll and filtering by sessionId
-      const allThreads = await this.adapter.getAll('threads');
-      const threads = allThreads.filter(thread => thread.sessionId === sessionId);
-      
-      for (const thread of threads) {
-        const isActive = thread.id === threadId;
-        const updatedThread = {
-          ...thread,
-          isActive: isActive,
-          updatedAt: isActive ? Date.now() : thread.updatedAt
-        };
-        await this.adapter.put('threads', updatedThread);
-      }
-      
-      // Update legacy session for compatibility
-      Object.values(session.threads).forEach(thread => { thread.isActive = false; });
-      session.threads[threadId].isActive = true;
-      session.threads[threadId].lastActivity = Date.now();
-      
-      await this.saveSession(sessionId);
-      return session.threads[threadId];
-    } catch (error) {
-      console.error(`[SessionManager] Failed to switch thread in persistence layer:`, error);
-      return null;
-    }
-  }
+  // createThread* and switchThread* removed. Thread operations will be handled by persist() primitives in future phases.
 
 
   /**
@@ -1101,198 +1040,10 @@ export class SessionManager {
     if (!session) return [];
     return session.turns || [];
   }
-
-  /**
-   * Save turn (legacy compatibility method)
-   */
-  async saveTurn(sessionId, userTurn, aiTurn) {
-    // Save turn (legacy compatibility wrapper)
-    // Routes to new persist() method when possible
-    try {
-      const hasNewContexts = aiTurn?.providerContexts && Object.keys(aiTurn.providerContexts).length > 0;
-      const result = {
-        batchOutputs: aiTurn?.batchResponses || {},
-        synthesisOutputs: aiTurn?.synthesisResponses || {},
-        mappingOutputs: aiTurn?.mappingResponses || {}
-      };
-      // Determine primitive type based on session state
-      let requestType = 'extend';
-      try {
-        const s = await this.adapter.get('sessions', sessionId);
-        if (!s || !s.lastTurnId) requestType = 'initialize';
-      } catch (_) {
-        requestType = 'initialize';
-      }
-
-      if (hasNewContexts) {
-        console.log('[SessionManager] saveTurn: Detected new format, routing to persist()');
-        const request = { type: requestType, sessionId, userMessage: userTurn?.text || '' };
-        let context = null;
-        if (requestType === 'extend') {
-          // Resolve lastTurnId from persistence if possible
-          let lastTurnId = null;
-          try {
-            const allTurns = await this.adapter.getAll('turns');
-            const turns = allTurns
-              .filter(t => t.sessionId === sessionId)
-              .sort((a,b) => (a.sequence ?? a.createdAt) - (b.sequence ?? b.createdAt));
-            const latestAi = [...turns].reverse().find(t => (t.type === 'ai' || t.role === 'assistant'));
-            lastTurnId = latestAi?.id || null;
-          } catch (_) {}
-          context = { type: 'extend', sessionId, lastTurnId, providerContexts: aiTurn.providerContexts };
-        } else {
-          context = { type: 'initialize', providers: Object.keys(result.batchOutputs || {}) };
-        }
-        return await this.persist(request, context, result);
-      }
-
-      // Fall back to legacy method
-      console.log('[SessionManager] saveTurn: Using legacy persistence path');
-      return this.saveTurnWithPersistence(sessionId, userTurn, aiTurn);
-    } catch (e) {
-      console.warn('[SessionManager] saveTurn routing failed, falling back:', e);
-      return this.saveTurnWithPersistence(sessionId, userTurn, aiTurn);
-    }
-  }
+  // saveTurn() removed. Use persist() primitives.
 
 
-  /**
-   * Persist a complete user+AI turn and all provider responses
-   */
-  async saveTurnWithPersistence(sessionId, userTurn, aiTurn) {
-    console.warn('[SessionManager] DEPRECATED: saveTurnWithPersistence() called. Migrate to persist().');
-    try {
-      // Ensure session exists and is hydrated into legacy cache
-      const session = await this.getOrCreateSession(sessionId);
-
-      // Determine next sequence
-      const allTurns = await this.adapter.getAll('turns');
-      const existingTurns = allTurns.filter(t => t.sessionId === sessionId);
-      let nextSequence = existingTurns.length;
-
-      const now = Date.now();
-
-      // Persist user turn
-      if (userTurn) {
-        const userTurnRecord = {
-          id: userTurn.id || `turn-${sessionId}-${nextSequence}`,
-          type: 'user',
-          role: 'user',
-          sessionId,
-          threadId: 'default-thread',
-          createdAt: userTurn.createdAt || now,
-          updatedAt: now,
-          content: userTurn.text || '',
-          sequence: nextSequence++
-        };
-        await this.adapter.put('turns', userTurnRecord);
-
-        // Mirror in legacy cache for UI compatibility
-        session.turns = session.turns || [];
-        session.turns.push({ ...userTurn, threadId: 'default-thread' });
-      }
-
-      // Persist AI turn
-      if (aiTurn) {
-        const aiTurnId = aiTurn.id || `turn-${sessionId}-${nextSequence}`;
-        const providerResponseIds = [];
-
-        // Flatten and persist provider responses across types
-        const persistResponses = async (bucket, responseType) => {
-          if (!bucket) return;
-          const providers = Object.keys(bucket);
-          for (const providerId of providers) {
-            const entries = Array.isArray(bucket[providerId]) ? bucket[providerId] : [bucket[providerId]];
-            for (let idx = 0; idx < entries.length; idx++) {
-              const entry = entries[idx] || {};
-              const respId = `pr-${sessionId}-${aiTurnId}-${providerId}-${responseType}-${idx}-${Date.now()}`;
-              const record = {
-                id: respId,
-                sessionId,
-                aiTurnId,
-                providerId,
-                responseType,
-                responseIndex: idx,
-                text: entry.text || '',
-                status: entry.status || 'completed',
-                meta: entry.meta || {},
-                createdAt: now,
-                updatedAt: now,
-                completedAt: now
-              };
-              await this.adapter.put('provider_responses', record);
-              providerResponseIds.push(respId);
-            }
-          }
-        };
-
-      await persistResponses(aiTurn.batchResponses, 'batch');
-      await persistResponses(aiTurn.synthesisResponses, 'synthesis');
-      await persistResponses(aiTurn.mappingResponses, 'mapping');
-
-      // Build providerContexts from batch responses meta, if present
-      const providerContexts = (() => {
-        const ctx = {};
-        try {
-          const bucket = aiTurn.batchResponses || {};
-          Object.entries(bucket).forEach(([pid, r]) => {
-            if (r && r.meta && Object.keys(r.meta).length > 0) {
-              // Store raw meta under provider id
-              ctx[pid] = r.meta;
-            }
-          });
-        } catch (_) {}
-        return Object.keys(ctx).length > 0 ? ctx : undefined;
-      })();
-
-      const aiTurnRecord = {
-        id: aiTurnId,
-        type: 'ai',
-        role: 'assistant',
-        sessionId,
-        threadId: 'default-thread',
-        createdAt: aiTurn.createdAt || now,
-        updatedAt: now,
-        content: aiTurn.text || '',
-        sequence: nextSequence,
-        userTurnId: userTurn?.id,
-        providerResponseIds,
-        batchResponseCount: this.countResponses(aiTurn.batchResponses),
-        synthesisResponseCount: this.countResponses(aiTurn.synthesisResponses),
-        mappingResponseCount: this.countResponses(aiTurn.mappingResponses),
-        // NEW: Turn-scoped provider contexts captured from responses
-        providerContexts
-      };
-      await this.adapter.put('turns', aiTurnRecord);
-
-      // Mirror in legacy cache for UI compatibility
-      session.turns = session.turns || [];
-      session.turns.push({ ...aiTurn, threadId: 'default-thread', providerContexts });
-
-      // Update session lastTurnId pointer for ContextResolver and lastActivity timestamp
-      try {
-        const sessionRecord = await this.adapter.get('sessions', sessionId);
-        if (sessionRecord) {
-          // Maintain title and update pointers
-          sessionRecord.title = session.title;
-          sessionRecord.lastTurnId = aiTurnId;
-          sessionRecord.lastActivity = now;
-          sessionRecord.updatedAt = now;
-          await this.adapter.put('sessions', sessionRecord);
-        }
-        // Mirror to legacy cache
-        session.lastActivity = now;
-        session.lastTurnId = aiTurnId;
-      } catch (e) {
-        console.warn('[SessionManager] Failed to update session pointers during saveTurn:', e);
-      }
-      // Close the AI turn persistence block
-      }
-      await this.saveSession(sessionId);
-    } catch (error) {
-      console.error(`[SessionManager] Failed to save turn with persistence:`, error);
-    }
-  }
+  // saveTurnWithPersistence() removed. Use persist() primitives.
 
   /**
    * Get persistence adapter status

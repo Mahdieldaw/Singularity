@@ -294,7 +294,25 @@ export function useChat() {
     }
   }, [currentSessionId, setCurrentSessionId, setTurnsMap, setTurnIds, setActiveAiTurnId]);
 
+  const deleteChats = useCallback(async (sessionIds: string[]): Promise<{ removed: string[] }> => {
+    try {
+      const response = await api.deleteBackgroundSessions(sessionIds);
+      const removedIds = Array.isArray(response?.ids) ? response.ids : [];
+      // If active chat is among removed, clear state
+      if (currentSessionId && removedIds.includes(currentSessionId)) {
+        setCurrentSessionId(null);
+        setTurnsMap(new Map());
+        setTurnIds([]);
+        setActiveAiTurnId(null);
+      }
+      return { removed: removedIds };
+    } catch (err) {
+      console.error('Failed to batch delete sessions', err);
+      return { removed: [] };
+    }
+  }, [currentSessionId, setCurrentSessionId, setTurnsMap, setTurnIds, setActiveAiTurnId]);
+
   // Backward-compat: derive messages for consumers still expecting it
   const messages = useAtomValue(messagesAtom);
-  return { sendMessage, newChat, selectChat, deleteChat, messages };
+  return { sendMessage, newChat, selectChat, deleteChat, deleteChats, messages };
 }

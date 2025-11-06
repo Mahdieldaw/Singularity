@@ -4,6 +4,7 @@ import { useAtom, useSetAtom } from 'jotai';
 import { usePortMessageHandler } from './hooks/usePortMessageHandler';
 import { useConnectionMonitoring } from './hooks/useConnectionMonitoring';
 import { useHistoryLoader } from './hooks/useHistoryLoader';
+import { useLoadingWatchdog } from './hooks/useLoadingWatchdog';
 import ChatView from './views/ChatView';
 import Header from './components/Header';
 import HistoryPanelConnected from './components/HistoryPanelConnected';
@@ -24,6 +25,7 @@ export default function App() {
   usePortMessageHandler();
   useConnectionMonitoring();
   useHistoryLoader(isInitialized); // Pass the flag to the history loader
+  useLoadingWatchdog();
 
   const [isHistoryOpen, setIsHistoryOpen] = useAtom(isHistoryPanelOpenAtom);
   const [viewMode] = useAtom(viewModeAtom);

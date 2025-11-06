@@ -17,6 +17,7 @@ import type {
   AiTurn as ContractAiTurn,
   PortMessage
 } from '../shared/contract';
+import { isUserTurn as isUserTurnContract, isAiTurn as isAiTurnContract } from '../shared/contract';
 
 // Import types from persistence layer (schema types)
 import type { 
@@ -131,11 +132,11 @@ export interface AiTurn extends Omit<ContractAiTurn, 'type'> {
 /** The union type for any message in the chat timeline. This is the main type for the `messages` state array. */
 export type TurnMessage = UserTurn | AiTurn;
 
-/** Type guard to check if a turn is a UserTurn. */
-export const isUserTurn = (turn: TurnMessage): turn is UserTurn => turn.type === 'user';
+/** Type guard to check if a turn is a UserTurn (runtime in contract). */
+export const isUserTurn = (turn: TurnMessage): turn is UserTurn => isUserTurnContract(turn as any);
 
-/** Type guard to check if a turn is an AiTurn. */
-export const isAiTurn = (turn: TurnMessage): turn is AiTurn => turn.type === 'ai';
+/** Type guard to check if a turn is an AiTurn (runtime in contract). */
+export const isAiTurn = (turn: TurnMessage): turn is AiTurn => isAiTurnContract(turn as any);
 
 // =============================================================================
 // HISTORY & SESSION LOADING

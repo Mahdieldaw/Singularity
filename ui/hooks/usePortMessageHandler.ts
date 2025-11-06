@@ -12,7 +12,8 @@ import {
   selectedModelsAtom,
   mappingEnabledAtom,
   mappingProviderAtom,
-  synthesisProviderAtom
+  synthesisProviderAtom,
+  lastActivityAtAtom
 } from '../state/atoms';
 import { activeRecomputeStateAtom } from '../state/atoms';
 import { StreamingBuffer } from '../utils/streamingBuffer';
@@ -63,6 +64,7 @@ export function usePortMessageHandler() {
   const mappingEnabled = useAtomValue(mappingEnabledAtom);
   const mappingProvider = useAtomValue(mappingProviderAtom);
   const synthesisProvider = useAtomValue(synthesisProviderAtom);
+  const setLastActivityAt = useSetAtom(lastActivityAtAtom);
   
   const streamingBufferRef = useRef<StreamingBuffer | null>(null);
   const activeAiTurnIdRef = useRef<string | null>(null);
@@ -94,7 +96,7 @@ export function usePortMessageHandler() {
       // SESSION_STARTED is deprecated. UI now initializes session from TURN_CREATED.
 
       case 'TURN_CREATED': {
-        const { userTurnId, aiTurnId, sessionId: msgSessionId } = message;
+        const { userTurnId, aiTurnId, sessionId: msgSessionId, } = message;
 
         // Initialize session for new conversations
         if (msgSessionId && (!currentSessionId || currentSessionId === '')) {
@@ -147,6 +149,7 @@ export function usePortMessageHandler() {
           draft.push(aiTurnId);
         });
         setActiveAiTurnId(aiTurnId);
+        setLastActivityAt(Date.now());
         break;
       }
 
@@ -224,6 +227,7 @@ export function usePortMessageHandler() {
         setUiPhase('awaiting_action');
         // Clear active AI turn only after finalization (not in WORKFLOW_COMPLETE)
         setActiveAiTurnId(null);
+        setLastActivityAt(Date.now());
 
         break;
       }
@@ -291,6 +295,7 @@ export function usePortMessageHandler() {
         }
 
         streamingBufferRef.current.addDelta(pid, chunk.text, 'streaming', stepType);
+        setLastActivityAt(Date.now());
 
         // Store provider context in separate atom
         if (chunk.meta) {
@@ -316,6 +321,7 @@ export function usePortMessageHandler() {
 
         if (status === 'completed' && result) {
           streamingBufferRef.current?.flushImmediate();
+          setLastActivityAt(Date.now());
           
           // ✅ CRITICAL FIX: Properly detect step type and route completions
           const stepType = getStepType(stepId);
@@ -405,6 +411,9 @@ export function usePortMessageHandler() {
           }
         } else if (status === 'failed') {
           console.error(`[Port] Step failed: ${stepId}`, error);
+          setIsLoading(false);
+          setUiPhase('awaiting_action');
+          setLastActivityAt(Date.now());
           // On failure, clear recompute target so UI stops indicating loading
           if (message.isRecompute) {
             setActiveRecomputeState(null);
@@ -425,6 +434,7 @@ export function usePortMessageHandler() {
         // The robust TURN_FINALIZED handler will manage this state change.
         setIsLoading(false);
         setUiPhase('awaiting_action');
+        setLastActivityAt(Date.now());
         // Do NOT clear activeAiTurnId here; wait for TURN_FINALIZED
         break;
       }

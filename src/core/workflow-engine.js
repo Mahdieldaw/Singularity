@@ -179,7 +179,7 @@ if (fullText.length < prev.length) {
       lastStreamState.set(key, fullText);
       return "";
     }
-its  
+    
   // Flag & throttle: warn at most a couple of times per provider/session
   // Avoid using process.env in extension context; rely on local counters
   const now = Date.now();
@@ -254,6 +254,35 @@ export class WorkflowEngine {
     this.port = port;
     // Keep track of the most recent finalized turn to align IDs with persistence
     this._lastFinalizedTurn = null;
+  }
+
+  /**
+   * Dispatch a non-empty streaming delta to the UI port.
+   * Consolidates duplicate onPartial logic across step executors.
+   */
+  _dispatchPartialDelta(sessionId, stepId, providerId, text, label = null, isFinal = false) {
+    try {
+      const delta = makeDelta(sessionId, providerId, text);
+      if (delta && delta.length > 0) {
+        const chunk = isFinal ? { text: delta, isFinal: true } : { text: delta };
+        this.port.postMessage({
+          type: 'PARTIAL_RESULT',
+          sessionId,
+          stepId,
+          providerId,
+          chunk
+        });
+        const logLabel = label ? `${label} delta:` : 'Delta dispatched:';
+        logger.stream(logLabel, { stepId, providerId, len: delta.length });
+        return true;
+      } else {
+        logger.stream('Delta skipped (empty):', { stepId, providerId });
+        return false;
+      }
+    } catch (e) {
+      logger.warn('Delta dispatch failed:', { stepId, providerId, error: String(e) });
+      return false;
+    }
   }
 
   async execute(request, resolvedContext) {
@@ -465,20 +494,7 @@ export class WorkflowEngine {
               console.log(`[WorkflowEngine] Initialize complete: session=${persistResult.sessionId}`);
             }
 
-            // Emit TURN_CREATED with authoritative IDs from persistence for initialize/extend
-            try {
-              const isRecompute = (resolvedContext?.type === 'recompute');
-              if (!isRecompute && context.canonicalUserTurnId && context.canonicalAiTurnId) {
-                this.port.postMessage({
-                  type: 'TURN_CREATED',
-                  sessionId: context.sessionId,
-                  userTurnId: context.canonicalUserTurnId,
-                  aiTurnId: context.canonicalAiTurnId
-                });
-              }
-            } catch (emitErr) {
-              console.warn('[WorkflowEngine] Failed to emit TURN_CREATED:', emitErr);
-            }
+            
           }
         } catch (e) {
           console.error('[WorkflowEngine] Consolidated persistence failed:', e);
@@ -739,38 +755,23 @@ export class WorkflowEngine {
         // Pass providerMeta through to orchestrator for adapters (e.g., gemini model selection)
         providerMeta: step?.payload?.providerMeta,
         onPartial: (providerId, chunk) => {
-  const delta = makeDelta(context.sessionId, providerId, chunk.text);
-  
-  // ✅ Only dispatch non-empty deltas
-  if (delta && delta.length > 0) {
-    this.port.postMessage({ 
-      type: 'PARTIAL_RESULT', 
-      sessionId: context.sessionId, 
-      stepId: step.stepId, 
-      providerId, 
-      chunk: { text: delta } 
-    });
-    logger.stream('Delta dispatched:', { stepId: step.stepId, providerId, len: delta.length });
-  } else {
-    logger.stream('Delta skipped (empty):', { stepId: step.stepId, providerId });
-  }
-},
+          this._dispatchPartialDelta(context.sessionId, step.stepId, providerId, chunk.text, 'Prompt');
+        },
          // ========= START: RECOMMENDED IMPLEMENTATION (STEP 3) ========= 
          onAllComplete: (results, errors) => { 
            // `results` now contains successfully resolved providers (including soft-errors) 
            // `errors` contains providers that failed hard (e.g., not found, network error before streaming) 
            
-           // Persist contexts for all successful providers 
-           results.forEach((res, pid) => { 
-             this.sessionManager.updateProviderContext( 
-               context.sessionId, 
-               pid, 
-               res, 
-               true, 
-               { skipSave: true } 
-             ); 
-           }); 
-           this.sessionManager.saveSession(context.sessionId); 
+           // Persist contexts for all successful providers in a single batch
+           const batchUpdates = {}; 
+           results.forEach((res, pid) => { batchUpdates[pid] = res; });
+           this.sessionManager.updateProviderContextsBatch(
+             context.sessionId,
+             batchUpdates,
+             true,
+             { skipSave: true }
+           );
+           this.sessionManager.saveSession(context.sessionId);
            
            // ... (final emission logic for non-streaming providers remains the same) ... 
  
@@ -828,7 +829,7 @@ export class WorkflowEngine {
    * Resolve source data - FIXED to handle new format
    */
   async resolveSourceData(payload, context, previousResults) {
-    // removed low-value entry log
+    
 
     if (payload.sourceHistorical) {
       // Historical source
@@ -988,7 +989,6 @@ export class WorkflowEngine {
         }
 
         const { results } = stepResult.result;
-        // removed low-value current-source log
         
         // Results is now an object: { claude: {...}, gemini: {...} }
         Object.entries(results).forEach(([providerId, result]) => {
@@ -1024,7 +1024,7 @@ export class WorkflowEngine {
 
     // Look for mapping results from the current workflow
     let mappingResult = null;
-    // removed verbose payload/key echo logs
+    
     
     if (payload.mappingStepIds && payload.mappingStepIds.length > 0) {
       for (const mappingStepId of payload.mappingStepIds) {
@@ -1150,35 +1150,14 @@ export class WorkflowEngine {
         providerContexts: Object.keys(providerContexts).length ? providerContexts : undefined,
         providerMeta: step?.payload?.providerMeta,
         onPartial: (providerId, chunk) => {
-  const delta = makeDelta(context.sessionId, providerId, chunk.text);
-  
-  if (delta && delta.length > 0) {
-    this.port.postMessage({ 
-      type: 'PARTIAL_RESULT', 
-      sessionId: context.sessionId, 
-      stepId: step.stepId, 
-      providerId, 
-      chunk: { text: delta } 
-    });
-    logger.stream('Synthesis delta:', { stepId: step.stepId, providerId, len: delta.length });
-  }
-},
+          this._dispatchPartialDelta(context.sessionId, step.stepId, providerId, chunk.text, 'Synthesis');
+        },
         onAllComplete: (results) => {
           const finalResult = results.get(payload.synthesisProvider);
           
           // ✅ Ensure final emission for synthesis
           if (finalResult?.text) {
-            const delta = makeDelta(context.sessionId, payload.synthesisProvider, finalResult.text);
-            if (delta && delta.length > 0) {
-              this.port.postMessage({  
-                type: 'PARTIAL_RESULT',  
-                sessionId: context.sessionId,  
-                stepId: step.stepId,  
-                providerId: payload.synthesisProvider,  
-                chunk: { text: delta, isFinal: true }  
-              }); 
-              logger.stream('Final synthesis emission:', { providerId: payload.synthesisProvider, len: delta.length }); 
-            } 
+            this._dispatchPartialDelta(context.sessionId, step.stepId, payload.synthesisProvider, finalResult.text, 'Synthesis', true);
           }
           
           if (!finalResult || !finalResult.text) {
@@ -1186,11 +1165,10 @@ export class WorkflowEngine {
             return;
           }
 
-          this.sessionManager.updateProviderContext(
-            context.sessionId, 
-            payload.synthesisProvider, 
-            finalResult, 
-            true, 
+          this.sessionManager.updateProviderContextsBatch(
+            context.sessionId,
+            { [payload.synthesisProvider]: finalResult },
+            true,
             { skipSave: true }
           );
           this.sessionManager.saveSession(context.sessionId);
@@ -1247,35 +1225,14 @@ export class WorkflowEngine {
         providerContexts: Object.keys(providerContexts).length ? providerContexts : undefined,
         providerMeta: step?.payload?.providerMeta,
         onPartial: (providerId, chunk) => {
-  const delta = makeDelta(context.sessionId, providerId, chunk.text);
-  
-  if (delta && delta.length > 0) {
-    this.port.postMessage({ 
-      type: 'PARTIAL_RESULT', 
-      sessionId: context.sessionId, 
-      stepId: step.stepId, 
-      providerId, 
-      chunk: { text: delta } 
-    });
-    logger.stream('Mapping delta:', { stepId: step.stepId, providerId, len: delta.length });
-  }
-},
+          this._dispatchPartialDelta(context.sessionId, step.stepId, providerId, chunk.text, 'Mapping');
+        },
         onAllComplete: (results) => {
           const finalResult = results.get(payload.mappingProvider);
           
           // ✅ Ensure final emission for mapping
           if (finalResult?.text) {
-            const delta = makeDelta(context.sessionId, payload.mappingProvider, finalResult.text);
-            if (delta && delta.length > 0) {
-              this.port.postMessage({  
-                type: 'PARTIAL_RESULT',  
-                sessionId: context.sessionId,  
-                stepId: step.stepId,  
-                providerId: payload.mappingProvider,  
-                chunk: { text: delta, isFinal: true }  
-              }); 
-              logger.stream('Final mapping emission:', { providerId: payload.mappingProvider, len: delta.length }); 
-            } 
+            this._dispatchPartialDelta(context.sessionId, step.stepId, payload.mappingProvider, finalResult.text, 'Mapping', true);
           }
           
           if (!finalResult || !finalResult.text) {
@@ -1283,11 +1240,10 @@ export class WorkflowEngine {
             return;
           }
 
-          this.sessionManager.updateProviderContext(
-            context.sessionId, 
-            payload.mappingProvider, 
-            finalResult, 
-            true, 
+          this.sessionManager.updateProviderContextsBatch(
+            context.sessionId,
+            { [payload.mappingProvider]: finalResult },
+            true,
             { skipSave: true }
           );
           this.sessionManager.saveSession(context.sessionId);

@@ -322,7 +322,7 @@ export class DNRUtils {
         console.warn('Periodic DNR cleanup failed:', err));
     }, intervalMs);
     
-    console.debug('DNR: Started periodic cleanup');
+
   }
 
   /** Stop periodic cleanup */

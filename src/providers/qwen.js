@@ -218,6 +218,10 @@ export class QwenSessionApi {
                     if (line.startsWith('data:')) {
                         const payload = line.slice(5).trim();
                         if (!payload) continue;
+                        // Ignore non-JSON keepalive messages
+                        if (payload === '[heartbeat]' || payload === 'heartbeat') {
+                            continue;
+                        }
                         try {
                             const json = JSON.parse(payload);
                             if (json.errorCode === 'NOT_LOGIN') {
