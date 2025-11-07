@@ -792,10 +792,10 @@ async executePromptStep(step, context) {
           context.sessionId,
           batchUpdates,
           true, // continueThread
-          { skipSave: true } // Don't write to IndexedDB yet
+          { skipSave: true } 
         );
         
-        // ✅ DEFERRED: Persist to IndexedDB (non-blocking)
+      
         this._persistProviderContextsAsync(context.sessionId, batchUpdates);
         
         // Format results for workflow engine
@@ -975,12 +975,11 @@ async executePromptStep(step, context) {
       if (sourceArray.length === 0 && this.sessionManager?.adapter?.isReady && this.sessionManager.adapter.isReady()) {
         try {
           let responses = [];
-          if (typeof this.sessionManager.adapter.getResponsesByTurnId === 'function') {
-            responses = await this.sessionManager.adapter.getResponsesByTurnId(aiTurn.id);
-          } else {
-            const allPR = await this.sessionManager.adapter.getAll('provider_responses');
-            responses = (allPR || []).filter(r => r && r.aiTurnId === aiTurn.id);
-          }
+      if (typeof this.sessionManager.adapter.getResponsesByTurnId === 'function') {
+        responses = await this.sessionManager.adapter.getResponsesByTurnId(aiTurn.id);
+      } else {
+        responses = await this.sessionManager.adapter.getResponsesByTurnId(aiTurn.id);
+      }
           const respType = responseType || 'batch';
           sourceArray = (responses || [])
             .filter(r => r && r.responseType === respType && r.text && String(r.text).trim().length > 0)
@@ -1075,80 +1074,10 @@ async executePromptStep(step, context) {
         throw new Error('Synthesis requires a completed Map result; none found.');
       }
     } else {
-      // no mappingStepIds configured for synthesis step
-      // Historical synthesis case: attempt to retrieve a prior mapping result
-      if (!mappingResult && payload.sourceHistorical?.turnId) {
-        try {
-          const userTurnId = payload.sourceHistorical.turnId;
-          // Locate the historical AI turn (reuse logic from resolveSourceData)
-          let session = this.sessionManager.sessions[context.sessionId];
-          let aiTurn = null;
-          if (session && Array.isArray(session.turns)) {
-            const userTurnIndex = session.turns.findIndex(t => t.id === userTurnId && t.type === 'user');
-            if (userTurnIndex !== -1) {
-              aiTurn = session.turns[userTurnIndex + 1];
-            }
-          }
-          if (!aiTurn) {
-            const allSessions = this.sessionManager.sessions || {};
-            for (const [sid, s] of Object.entries(allSessions)) {
-              if (!s || !Array.isArray(s.turns)) continue;
-              const idx = s.turns.findIndex(t => t.id === userTurnId && t.type === 'user');
-              if (idx !== -1) {
-                aiTurn = s.turns[idx + 1];
-                session = s;
-                console.warn(`[WorkflowEngine] (Synthesis) Using mapping from historical session ${sid}`);
-                break;
-              }
-            }
-          }
-          if (aiTurn && aiTurn.type === 'ai') {
-            let maps = aiTurn.mappingResponses || {};
-            // Legacy fallback removed: engine trusts ResolvedContext and current session data
-            // Pick the most recent mapping entry across providers (fallback: first available)
-            let candidate = null;
-            let candidatePid = null;
-            for (const [pid, arr] of Object.entries(maps)) {
-              if (Array.isArray(arr) && arr.length > 0) {
-                const last = arr[arr.length - 1];
-                if (last && String(last.text || '').trim()) {
-                  candidate = last; candidatePid = pid;
-                }
-              }
-            }
-            if (!candidate && this.sessionManager.adapter?.isReady && this.sessionManager.adapter.isReady()) {
-              // Directly query provider_responses for this aiTurnId (prefer indexed lookup)
-              try {
-                let responses = [];
-                if (typeof this.sessionManager.adapter.getResponsesByTurnId === 'function') {
-                  responses = await this.sessionManager.adapter.getResponsesByTurnId(aiTurn.id);
-                } else {
-                  const allPR = await this.sessionManager.adapter.getAll('provider_responses');
-                  responses = (allPR || []).filter(r => r && r.aiTurnId === aiTurn.id);
-                }
-                const pMaps = responses
-                  .filter(r => r && r.responseType === 'mapping' && r.text && String(r.text).trim().length > 0)
-                  .sort((a,b) => (a.updatedAt||a.createdAt||0) - (b.updatedAt||b.createdAt||0));
-                const last = pMaps[pMaps.length - 1];
-                if (last) {
-                  candidate = { text: last.text, meta: last.meta || {} };
-                  candidatePid = last.providerId || 'unknown';
-                  console.log('[WorkflowEngine] Fallback provider_responses lookup succeeded for historical mapping');
-                }
-              } catch (e2) {
-                console.warn('[WorkflowEngine] provider_responses fallback failed:', e2);
-              }
-            }
-            if (candidate) {
-              mappingResult = { providerId: candidatePid, text: candidate.text, meta: candidate.meta };
-              console.log(`[WorkflowEngine] Attached historical mapping result from ${candidatePid} (len=${candidate.text?.length})`);
-            } else {
-              console.log(`[WorkflowEngine] No historical mapping result found for userTurn ${userTurnId}`);
-            }
-          }
-        } catch (e) {
-          console.warn('[WorkflowEngine] Failed to fetch historical mapping for synthesis:', e);
-        }
+      // Simplified recompute: use pre-fetched latestMappingOutput from resolvedContext
+      if (!mappingResult && resolvedContext?.type === 'recompute' && resolvedContext?.latestMappingOutput) {
+        mappingResult = resolvedContext.latestMappingOutput;
+        console.log(`[WorkflowEngine] Using pre-fetched historical mapping from ${mappingResult.providerId}`);
       }
     }
 

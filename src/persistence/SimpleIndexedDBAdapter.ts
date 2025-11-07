@@ -229,6 +229,21 @@ export class SimpleIndexedDBAdapter {
     return this.getByIndex('documents', 'bySourceSessionId', sessionId);
   }
 
+  async getDocumentsBySessionId(sessionId: string): Promise<SimpleRecord[]> {
+    // documents.bySessionId
+    return this.getByIndex('documents', 'bySessionId', sessionId);
+  }
+
+  async getResponsesBySessionId(sessionId: string): Promise<SimpleRecord[]> {
+    // provider_responses.bySessionId
+    return this.getByIndex('provider_responses', 'bySessionId', sessionId);
+  }
+
+  async getMetadataBySessionId(sessionId: string): Promise<SimpleRecord[]> {
+    // metadata.bySessionId
+    return this.getByIndex('metadata', 'bySessionId', sessionId);
+  }
+
   async getCanvasBlocksByDocumentId(documentId: string): Promise<SimpleRecord[]> {
     return this.getByIndex('canvas_blocks', 'byDocumentId', documentId);
   }
@@ -244,6 +259,21 @@ export class SimpleIndexedDBAdapter {
 
   async getGhostsBySessionId(sessionId: string): Promise<SimpleRecord[]> {
     return this.getByIndex('ghosts', 'bySessionId', sessionId);
+  }
+
+  async getGhostsByEntityId(entityId: string): Promise<SimpleRecord[]> {
+    // ghosts.byEntityId
+    return this.getByIndex('ghosts', 'byEntityId', entityId);
+  }
+
+  async getMetadataByEntityId(entityId: string): Promise<SimpleRecord[]> {
+    // metadata.byEntityId
+    return this.getByIndex('metadata', 'byEntityId', entityId);
+  }
+
+  async getAllSessions(): Promise<SimpleRecord[]> {
+    // Convenience wrapper for listing sessions; full-scan is acceptable for sessions catalog
+    return this.getAll('sessions');
   }
 
   /**

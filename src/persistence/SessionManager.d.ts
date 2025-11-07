@@ -35,7 +35,7 @@ export interface ProviderContextOptions {
 }
 
 export interface PersistenceStatus {
-  usePersistenceAdapter: boolean;
+  persistenceEnabled: boolean;
   isInitialized: boolean;
   adapterReady: boolean;
 }
@@ -44,13 +44,12 @@ export declare class SessionManager {
   sessions: Record<string, SessionData>;
   storageKey: string;
   isExtensionContext: boolean;
-  usePersistenceAdapter: boolean;
   adapter: any;
   isInitialized: boolean;
 
   constructor();
   
-  initialize(config?: { adapter?: any; usePersistenceAdapter?: boolean; initTimeoutMs?: number }): Promise<void>;
+  initialize(config?: { adapter?: any; initTimeoutMs?: number }): Promise<void>;
   
   getOrCreateSession(sessionId: string): Promise<SessionData>;
   getOrCreateSessionWithPersistence(sessionId: string): Promise<SessionData>;
@@ -71,8 +70,6 @@ export declare class SessionManager {
   getTurn(sessionId: string, turnId: string): any;
   getTurns(sessionId: string): any[];
   getPersistenceStatus(): PersistenceStatus;
-  enablePersistenceAdapter(): Promise<void>;
-  disablePersistenceAdapter(): Promise<void>;
 }
 
 export default SessionManager;

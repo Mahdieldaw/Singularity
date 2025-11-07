@@ -44,11 +44,11 @@ import { persistenceMonitor } from './debug/PersistenceMonitor.js';
 // FEATURE FLAGS (Source of Truth)
 // ============================================================================
 // ✅ CHANGED: Enable persistence by default for production use
-globalThis.HTOS_USE_PERSISTENCE_ADAPTER = true;
+globalThis.HTOS_PERSISTENCE_ENABLED = true;
 globalThis.HTOS_ENABLE_DOCUMENT_PERSISTENCE = true;
 globalThis.HTOS_ENABLE_PROVENANCE_TRACKING = false; // Optional advanced feature
 
-const HTOS_USE_PERSISTENCE_ADAPTER = globalThis.HTOS_USE_PERSISTENCE_ADAPTER;
+const HTOS_PERSISTENCE_ENABLED = globalThis.HTOS_PERSISTENCE_ENABLED;
 const HTOS_ENABLE_DOCUMENT_PERSISTENCE = globalThis.HTOS_ENABLE_DOCUMENT_PERSISTENCE;
 
 // ============================================================================
@@ -129,8 +129,6 @@ async function initializeSessionManager(persistenceLayer) {
     // ✅ CRITICAL: Ensure sessions reference is fresh
     sessionManager.sessions = __HTOS_SESSIONS;
 
-    // Initialize without injecting the complex IndexedDBAdapter.
-    // SessionManager will provision SimpleIndexedDBAdapter internally.
     await sessionManager.initialize({});
 
     console.log("[SW:INIT:6] ✅ Session manager initialized with persistence");
@@ -442,7 +440,7 @@ async function handleUnifiedMessage(message, sender, sendResponse) {
         let sessions = [];
         try {
           // 1. Attempt to load from the new, normalized persistence layer first.
-          const allSessions = await sm.adapter.getAll('sessions');
+          const allSessions = await sm.adapter.getAllSessions();
           if (allSessions && allSessions.length > 0) {
             sessions = allSessions.map(r => ({
             id: r.id,
@@ -485,8 +483,8 @@ async function handleUnifiedMessage(message, sender, sendResponse) {
           }
 
           // New persistence-first logic: return raw records for UI assembly
-          const useAdapter = sm.getPersistenceStatus?.().usePersistenceAdapter && sm.adapter?.isReady();
-          if (!useAdapter) {
+          const adapterIsReady = sm.getPersistenceStatus?.().adapterReady;
+          if (!adapterIsReady) {
             console.warn('[SW] Persistence adapter not ready; returning empty record sets for GET_HISTORY_SESSION');
           }
 
@@ -494,30 +492,16 @@ async function handleUnifiedMessage(message, sender, sendResponse) {
       let turns = [];
       let providerResponses = [];
 
-      if (useAdapter) {
+      if (adapterIsReady) {
         sessionRecord = await sm.adapter.get('sessions', sessionId);
         // Prefer indexed turn lookup by sessionId; fallback to full-scan
-        if (typeof sm.adapter.getTurnsBySessionId === 'function') {
-          turns = await sm.adapter.getTurnsBySessionId(sessionId);
-        } else {
-          const allTurns = await sm.adapter.getAll('turns');
-          turns = (allTurns || []).filter(t => t && t.sessionId === sessionId);
-        }
+        turns = await sm.adapter.getTurnsBySessionId(sessionId);
         turns = Array.isArray(turns)
           ? turns.sort((a, b) => (a.sequence ?? a.createdAt) - (b.sequence ?? b.createdAt))
           : [];
 
-        // Provider responses: collect per AI turn via indexed lookup; fallback to session-level full-scan
-        const aiTurns = Array.isArray(turns)
-          ? turns.filter(t => (t.type === 'ai' || t.role === 'assistant') && t.id)
-          : [];
-        if (typeof sm.adapter.getResponsesByTurnId === 'function') {
-          const lists = await Promise.all(aiTurns.map(t => sm.adapter.getResponsesByTurnId(t.id)));
-          providerResponses = lists.flat();
-        } else {
-          const allResponses = await sm.adapter.getAll('provider_responses');
-          providerResponses = (allResponses || []).filter(r => r && r.sessionId === sessionId);
-        }
+        // Provider responses: prefer single session-scoped indexed lookup; fallback to full-scan
+        providerResponses = await sm.adapter.getResponsesBySessionId(sessionId);
       }
 
           // Assemble UI-friendly rounds from raw records
@@ -607,11 +591,10 @@ async function handleUnifiedMessage(message, sender, sendResponse) {
           success: true, 
           data: { 
             availableProviders: providerRegistry.listProviders(),
-            persistenceEnabled: true,
+            persistenceEnabled: !!ps.persistenceEnabled,
             documentsEnabled: HTOS_ENABLE_DOCUMENT_PERSISTENCE,
             sessionManagerType: sm?.constructor?.name || 'unknown',
             persistenceLayerAvailable: !!layer,
-            usePersistenceAdapter: !!ps.usePersistenceAdapter,
             adapterReady: !!ps.adapterReady,
             activeMode: 'indexeddb'
           }
@@ -725,7 +708,7 @@ async function handleUnifiedMessage(message, sender, sendResponse) {
       case 'GET_PERSISTENCE_STATUS': {
         const layer = self.__HTOS_PERSISTENCE_LAYER || persistenceLayer;
         const status = {
-          persistenceEnabled: HTOS_USE_PERSISTENCE_ADAPTER,
+          persistenceEnabled: HTOS_PERSISTENCE_ENABLED,
           documentPersistenceEnabled: HTOS_ENABLE_DOCUMENT_PERSISTENCE,
           sessionManagerType: sm?.constructor?.name || 'unknown',
           persistenceLayerAvailable: !!layer,
@@ -854,12 +837,8 @@ async function handleUnifiedMessage(message, sender, sendResponse) {
             } else if (layer.adapter && typeof layer.adapter.getByIndex === 'function') {
               // Fallback to generic indexed query if available
               ghosts = await layer.adapter.getByIndex('ghosts', 'byDocumentId', message.documentId);
-            } else if (layer.adapter && typeof layer.adapter.getAll === 'function') {
-              // Last-resort full scan
-              const allGhosts = await layer.adapter.getAll('ghosts');
-              ghosts = (allGhosts || []).filter(g => g.documentId === message.documentId);
             } else {
-              throw new Error('No ghost retrieval API available on persistence layer');
+              throw new Error('Adapter method getGhostsByDocumentId is not available');
             }
             sendResponse({ success: true, ghosts });
           } catch (err) {
@@ -1085,6 +1064,7 @@ function getHealthStatus() {
   const layer = self.__HTOS_PERSISTENCE_LAYER || persistenceLayer;
   let providers = [];
   try { providers = providerRegistry.listProviders(); } catch (_) {}
+  const ps = sm?.getPersistenceStatus?.() || {};
   
   return {
     timestamp: Date.now(),
@@ -1092,13 +1072,14 @@ function getHealthStatus() {
     sessionManager: sm ? (sm.isInitialized ? 'initialized' : 'initializing') : 'missing',
     persistenceLayer: layer ? 'active' : 'disabled',
     featureFlags: {
-      persistenceAdapter: HTOS_USE_PERSISTENCE_ADAPTER,
+      persistenceEnabled: HTOS_PERSISTENCE_ENABLED,
       documentPersistence: HTOS_ENABLE_DOCUMENT_PERSISTENCE
     },
     providers,
     details: {
       sessionManagerType: sm?.constructor?.name || 'unknown',
-      usePersistenceAdapter: sm?.usePersistenceAdapter ?? false,
+      persistenceEnabled: !!ps.persistenceEnabled,
+      adapterReady: !!ps.adapterReady,
       persistenceLayerAvailable: !!layer,
       initState: self.__HTOS_INIT_STATE || null
     }
@@ -1144,7 +1125,7 @@ globalThis.__HTOS_SW = {
     // Track init state
     self.__HTOS_INIT_STATE = {
       initializedAt: Date.now(),
-      persistenceEnabled: HTOS_USE_PERSISTENCE_ADAPTER,
+      persistenceEnabled: HTOS_PERSISTENCE_ENABLED,
       documentPersistenceEnabled: HTOS_ENABLE_DOCUMENT_PERSISTENCE,
       persistenceReady: !!services.persistenceLayer,
       providers: services?.orchestrator ? providerRegistry.listProviders() : []
@@ -1152,25 +1133,11 @@ globalThis.__HTOS_SW = {
 
     // Start periodic cleanup only after init
     if (!__cleanupTimer) {
-      __cleanupTimer = setInterval(async () => {
-        try {
-          const pl = self.__HTOS_PERSISTENCE_LAYER || services.persistenceLayer;
-          if (!pl?.repositories) {
-            console.warn('[SW] Cleanup skipped - persistence layer not ready');
-            return;
-          }
-          console.log('[SW] Running periodic data cleanup...');
-          const repos = pl.repositories;
-          // Guard each cleanup with try/catch to avoid NotFoundError crash
-          let sessionsCleaned = 0;
-          let contextsCleaned = 0;
-          try { sessionsCleaned = await repos.sessions.cleanupOldSessions(30); } catch (e) { console.warn('[SW] Sessions cleanup skipped:', e?.message || e); }
-          try { contextsCleaned = await repos.providerContexts.cleanupOldContexts(30); } catch (e) { console.warn('[SW] Provider contexts cleanup skipped:', e?.message || e); }
-          console.log(`[SW] Cleanup complete. Removed ${sessionsCleaned} old sessions and ${contextsCleaned} old contexts.`);
-        } catch (error) {
-          console.error('[SW] Cleanup error:', error);
-        }
-      }, 60000 * 30); // 30 minutes
+      // Remove repository-based cleanup entirely
+__cleanupTimer = setInterval(async () => {
+  console.log('[SW] Periodic cleanup disabled (repositories removed)');
+  // Manual cleanup can be triggered via dev tools if needed
+}, 60000 * 30);
     }
   } catch (e) {
     if (e instanceof Error && e.message.includes('Initialization timed out')) {

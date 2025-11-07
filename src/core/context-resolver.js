@@ -94,6 +94,9 @@ export class ContextResolver {
       throw new Error(`[ContextResolver] Source turn ${sourceTurnId} has no batch outputs in provider_responses`);
     }
 
+    // Determine the latest valid mapping output for this source turn
+    const latestMappingOutput = this._findLatestMappingOutput(responses, request.preferredMappingProvider);
+
     const providerContextsAtSourceTurn = sourceTurn.providerContexts || {};
     const sourceUserMessage = await this._getUserMessageForTurn(sourceTurn);
 
@@ -102,6 +105,7 @@ export class ContextResolver {
       sessionId,
       sourceTurnId,
       frozenBatchOutputs,
+      latestMappingOutput,
       providerContextsAtSourceTurn,
       stepType,
       targetProvider,
@@ -181,29 +185,12 @@ export class ContextResolver {
   
   /**
    * Fetch provider responses for a given AI turn using adapter indices if available.
-   * Falls back to scanning the provider_responses store when indices aren't exposed.
+   * Simplified: always use the indexed adapter.getResponsesByTurnId for high performance.
    */
   async _getProviderResponsesForTurn(aiTurnId) {
-    try {
-      const adapter = this.sessionManager?.adapter;
-      if (!adapter || typeof adapter.isReady !== 'function' || !adapter.isReady()) {
-        return [];
-      }
-      // Prefer indexed query when supported by the adapter
-      if (typeof adapter.getResponsesByTurnId === 'function') {
-        return await adapter.getResponsesByTurnId(aiTurnId);
-      }
-      // Backward-compat: some adapters expose getProviderResponsesByTurnId
-      if (typeof adapter.getProviderResponsesByTurnId === 'function') {
-        return await adapter.getProviderResponsesByTurnId(aiTurnId);
-      }
-      // Fallback: scan the store and filter by aiTurnId
-      const all = await adapter.getAll('provider_responses');
-      return (all || []).filter(r => r && r.aiTurnId === aiTurnId);
-    } catch (e) {
-      console.warn('[ContextResolver] _getProviderResponsesForTurn failed:', e);
-      return [];
-    }
+    // No more fallbacks or readiness checks. Trust the adapter.
+    // If this fails, it should throw an error, which is the desired "fail fast" behavior.
+    return this.sessionManager.adapter.getResponsesByTurnId(aiTurnId);
   }
 
   /**
@@ -238,6 +225,44 @@ export class ContextResolver {
     } catch (e) {
       console.warn('[ContextResolver] _aggregateBatchOutputs failed:', e);
       return {};
+    }
+  }
+
+  /**
+   * Find the latest valid mapping output among provider responses for a turn.
+   * If a preferred provider is specified, use it when present; otherwise return the most recent.
+   */
+  _findLatestMappingOutput(providerResponses = [], preferredProvider) {
+    try {
+      if (!providerResponses || providerResponses.length === 0) {
+        return null;
+      }
+
+      const mappingResponses = providerResponses.filter(r =>
+        r && r.responseType === 'mapping' && r.text && String(r.text).trim().length > 0
+      );
+
+      if (mappingResponses.length === 0) {
+        return null;
+      }
+
+      // Sort by most recent update
+      mappingResponses.sort((a, b) => (b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0));
+
+      if (preferredProvider) {
+        const preferred = mappingResponses.find(r => r.providerId === preferredProvider);
+        if (preferred) {
+          console.log(`[ContextResolver] Found preferred mapping output from ${preferredProvider}`);
+          return { providerId: preferred.providerId, text: preferred.text, meta: preferred.meta || {} };
+        }
+      }
+
+      const latest = mappingResponses[0];
+      console.log(`[ContextResolver] Found latest mapping output from ${latest.providerId}`);
+      return { providerId: latest.providerId, text: latest.text, meta: latest.meta || {} };
+    } catch (e) {
+      console.warn('[ContextResolver] _findLatestMappingOutput failed:', e);
+      return null;
     }
   }
 

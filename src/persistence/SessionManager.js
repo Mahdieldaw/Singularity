@@ -11,7 +11,6 @@ export class SessionManager {
     this.sessions = __HTOS_SESSIONS;
     this.storageKey = 'htos_sessions';
     this.isExtensionContext = false;
-    this.usePersistenceAdapter = true; // always on
     
     // Persistence layer components will be injected
     this.adapter = null;
@@ -153,21 +152,25 @@ export class SessionManager {
     const lastTurn = await this.adapter.get('turns', context.lastTurnId);
     if (!lastTurn) throw new Error(`[SessionManager] Last turn ${context.lastTurnId} not found`);
 
-    // Determine next sequence using session.turnCount when available (avoids full-store scan)
+    // Determine next sequence using session.turnCount when available (avoid full-store scan)
     let nextSequence = 0;
     try {
       const session = await this.adapter.get('sessions', sessionId);
       if (session && typeof session.turnCount === 'number') {
         nextSequence = session.turnCount;
       } else {
-        // Fallback: compute from turns if session metadata is missing
-        const allTurns = await this.adapter.getAll('turns');
-        nextSequence = allTurns.filter(t => t.sessionId === sessionId).length;
+        // Indexed fallback: compute from turns using adapter.getTurnsBySessionId
+        const sessionTurns = await this.adapter.getTurnsBySessionId(sessionId);
+        nextSequence = Array.isArray(sessionTurns) ? sessionTurns.length : 0;
       }
     } catch (e) {
       // Conservative fallback on error
-      const allTurns = await this.adapter.getAll('turns');
-      nextSequence = allTurns.filter(t => t.sessionId === sessionId).length;
+      try {
+        const sessionTurns = await this.adapter.getTurnsBySessionId(sessionId);
+        nextSequence = Array.isArray(sessionTurns) ? sessionTurns.length : 0;
+      } catch (_) {
+        nextSequence = 0;
+      }
     }
 
     // 1) User turn
@@ -216,7 +219,11 @@ export class SessionManager {
     if (session) {
       session.lastTurnId = aiTurnId;
       session.lastActivity = now;
-      session.turnCount = (session.turnCount || 0) + 2;
+      // If session.turnCount was previously undefined, use nextSequence + 2 (the accurate total after this extend)
+      const computedNewCount = (typeof session.turnCount === 'number')
+        ? (session.turnCount + 2)
+        : (nextSequence + 2);
+      session.turnCount = computedNewCount;
       session.updatedAt = now;
       await this.adapter.put('sessions', session);
     }
@@ -383,26 +390,7 @@ export class SessionManager {
   
 
   /**
-   * Run pending data migrations in a lazy manner after adapter is initialized.
-   * - Ensure sessions have lastTurnId set to latest AI turn
-   * - Migrate provider contexts from provider_contexts store to latest AI turn's providerContexts if missing
-   */
-  // _runPendingMigrations removed; migration is complete and helpers are no longer needed.
-
-  /**
-   * Migration verification helper
-   * Returns overall migration status across sessions.
-   * A session is considered "migrated" when:
-   *  - It has a lastTurnId pointing to the latest AI turn, and
-   *  - The latest AI turn contains providerContexts with at least one provider
-   */
-  // getMigrationStatus removed; no longer required after migration completion.
-
-  /**
-   * Force-run migrations for all sessions.
-   * This will reset the metadata flag and invoke the pending migration routine.
-   */
-  // forceMigrateAll removed; migration controls are no longer exposed.
+ 
 
   /**
    * Helper function to count responses in a response bucket
@@ -423,8 +411,6 @@ export class SessionManager {
       initTimeoutMs = 8000
     } = config || {};
     
-    // Always use the persistence adapter
-    this.usePersistenceAdapter = true;
     console.log('[SessionManager] Initializing with persistence adapter...');
     
     if (adapter) {
@@ -587,11 +573,6 @@ export class SessionManager {
           req.onsuccess = () => resolve(req.result || []);
           req.onerror = () => reject(req.error);
         });
-        const getAllFromStore = (store) => new Promise((resolve, reject) => {
-          const req = store.getAll();
-          req.onsuccess = () => resolve(req.result || []);
-          req.onerror = () => reject(req.error);
-        });
 
         // 1) Delete session record
         await new Promise((resolve, reject) => {
@@ -614,9 +595,7 @@ export class SessionManager {
         // 3) Turns by session
         const turnsStore = tx.objectStore('turns');
         const turns = await getAllByIndex(turnsStore, 'bySessionId', sessionId);
-        const aiTurnIds = [];
         for (const turn of turns) {
-          if (turn && (turn.type === 'ai' || turn.role === 'assistant')) aiTurnIds.push(turn.id);
           await new Promise((resolve, reject) => {
             const req = turnsStore.delete(turn.id);
             req.onsuccess = () => resolve(true);
@@ -624,17 +603,15 @@ export class SessionManager {
           });
         }
 
-        // 4) Provider responses by aiTurnId
+        // 4) Provider responses by sessionId (indexed; no fallbacks)
         const responsesStore = tx.objectStore('provider_responses');
-        for (const aiTurnId of aiTurnIds) {
-          const rsps = await getAllByIndex(responsesStore, 'byAiTurnId', aiTurnId);
-          for (const r of rsps) {
-            await new Promise((resolve, reject) => {
-              const req = responsesStore.delete(r.id);
-              req.onsuccess = () => resolve(true);
-              req.onerror = () => reject(req.error);
-            });
-          }
+        const responses = await getAllByIndex(responsesStore, 'bySessionId', sessionId);
+        for (const r of responses) {
+          await new Promise((resolve, reject) => {
+            const req = responsesStore.delete(r.id);
+            req.onsuccess = () => resolve(true);
+            req.onerror = () => reject(req.error);
+          });
         }
 
         // 5) Provider contexts by session (composite key delete)
@@ -649,32 +626,26 @@ export class SessionManager {
           });
         }
 
-        // 6) Documents associated to session
+        // 6) Documents associated to session (indexed; cover both sourceSessionId and sessionId)
         const documentsStore = tx.objectStore('documents');
         const docsBySource = await getAllByIndex(documentsStore, 'bySourceSessionId', sessionId);
-        const docsAll = await getAllFromStore(documentsStore);
-        const docsDirect = (docsAll || []).filter(d => d && d.sessionId === sessionId);
-        const docs = [...docsBySource, ...docsDirect];
+        const docsBySession = await getAllByIndex(documentsStore, 'bySessionId', sessionId);
+        const uniqueDocIds = new Set([
+          ...Array.from(docsBySource || []).map(d => d.id),
+          ...Array.from(docsBySession || []).map(d => d.id)
+        ]);
         const deletedDocIds = [];
-        for (const doc of docs) {
+        for (const docId of uniqueDocIds) {
           await new Promise((resolve, reject) => {
-            const req = documentsStore.delete(doc.id);
+            const req = documentsStore.delete(docId);
             req.onsuccess = () => resolve(true);
             req.onerror = () => reject(req.error);
           });
-          deletedDocIds.push(doc.id);
+          deletedDocIds.push(docId);
         }
 
-        // 7) Canvas blocks by session and by document
+        // 7) Canvas blocks by document only (cascade via deletedDocIds)
         const blocksStore = tx.objectStore('canvas_blocks');
-        const blocksBySession = await getAllByIndex(blocksStore, 'bySessionId', sessionId);
-        for (const b of blocksBySession) {
-          await new Promise((resolve, reject) => {
-            const req = blocksStore.delete(b.id);
-            req.onsuccess = () => resolve(true);
-            req.onerror = () => reject(req.error);
-          });
-        }
         for (const docId of deletedDocIds) {
           const blocksByDoc = await getAllByIndex(blocksStore, 'byDocumentId', docId);
           for (const b of blocksByDoc) {
@@ -686,16 +657,8 @@ export class SessionManager {
           }
         }
 
-        // 8) Ghosts by session and by document
+        // 8) Ghosts by document only (cascade via deletedDocIds)
         const ghostsStore = tx.objectStore('ghosts');
-        const ghostsBySession = await getAllByIndex(ghostsStore, 'bySessionId', sessionId);
-        for (const g of ghostsBySession) {
-          await new Promise((resolve, reject) => {
-            const req = ghostsStore.delete(g.id);
-            req.onsuccess = () => resolve(true);
-            req.onerror = () => reject(req.error);
-          });
-        }
         for (const docId of deletedDocIds) {
           const ghostsByDoc = await getAllByIndex(ghostsStore, 'byDocumentId', docId);
           for (const g of ghostsByDoc) {
@@ -707,11 +670,10 @@ export class SessionManager {
           }
         }
 
-        // 9) Metadata scoped to this session (no index; filter by field if present)
+        // 9) Metadata scoped to this session (indexed by sessionId; avoid full-store scans)
         const metaStore = tx.objectStore('metadata');
-        const allMeta = await getAllFromStore(metaStore);
-        const metas = (allMeta || []).filter(m => m && (m.sessionId === sessionId || m.entityId === sessionId));
-        for (const m of metas) {
+        const metasBySession = await getAllByIndex(metaStore, 'bySessionId', sessionId);
+        for (const m of metasBySession) {
           await new Promise((resolve, reject) => {
             const req = metaStore.delete(m.key);
             req.onsuccess = () => resolve(true);
@@ -753,16 +715,10 @@ export class SessionManager {
     try {
       const session = await this.getOrCreateSession(sessionId);
       
-      // Get or create provider context - using indexed query by session
+      // Get or create provider context via indexed query by session
       let contexts = [];
       try {
-        if (typeof this.adapter.getContextsBySessionId === 'function') {
-          contexts = await this.adapter.getContextsBySessionId(sessionId);
-        } else {
-          // Fallback to scanning the store
-          const allContexts = await this.adapter.getAll('provider_contexts');
-          contexts = allContexts.filter(context => context.sessionId === sessionId);
-        }
+        contexts = await this.adapter.getContextsBySessionId(sessionId);
         // Narrow to target provider
         contexts = contexts.filter(context => context.providerId === providerId);
       } catch (e) {
@@ -846,12 +802,7 @@ export class SessionManager {
       // Load all existing contexts once using indexed query, pick latest per provider
       let sessionContexts = [];
       try {
-        if (typeof this.adapter.getContextsBySessionId === 'function') {
-          sessionContexts = await this.adapter.getContextsBySessionId(sessionId);
-        } else {
-          const allContexts = await this.adapter.getAll('provider_contexts');
-          sessionContexts = allContexts.filter(ctx => ctx.sessionId === sessionId);
-        }
+        sessionContexts = await this.adapter.getContextsBySessionId(sessionId);
       } catch (e) {
         console.warn('[SessionManager] updateProviderContextsBatch: contexts lookup failed; proceeding with empty list', e);
         sessionContexts = [];
@@ -918,61 +869,31 @@ export class SessionManager {
    */
   async getProviderContexts(sessionId, threadId = 'default-thread') {
     try {
-      if (!sessionId) return {};
-      const adapterReady = !!(this.adapter && typeof this.adapter.isReady === 'function' && this.adapter.isReady());
-      if (!adapterReady) {
-        // Fallback to whatever the cache has (may be empty in new architecture)
-        const cached = this.sessions?.[sessionId]?.providers || {};
-        const contexts = {};
-        for (const [pid, data] of Object.entries(cached)) {
-          if (data?.meta) contexts[pid] = { meta: data.meta };
-        }
-        return contexts;
+      if (!sessionId) {
+        console.warn('[SessionManager] getProviderContexts called without sessionId');
+        return {};
+      }
+      if (!this.adapter || !this.adapter.isReady()) {
+        console.warn('[SessionManager] getProviderContexts called but adapter is not ready');
+        return {}; // Return empty if DB isn't available
       }
 
-      // Prefer the lastTurnId from the lightweight cache
-      const lastTurnId = this.sessions?.[sessionId]?.lastTurnId || null;
-      let aiTurn = null;
-      if (lastTurnId) {
-        const lastTurn = await this.adapter.get('turns', lastTurnId);
-        if (lastTurn && (lastTurn.type === 'ai' || lastTurn.role === 'assistant')) {
-          aiTurn = lastTurn;
-        }
-      }
-
-      // If not found, scan turns for latest AI turn in this session
-      if (!aiTurn) {
-        let sessionTurns = [];
-        try {
-          if (typeof this.adapter.getTurnsBySessionId === 'function') {
-            sessionTurns = await this.adapter.getTurnsBySessionId(sessionId);
-          } else {
-            const allTurns = await this.adapter.getAll('turns');
-            sessionTurns = (allTurns || []).filter(t => t && t.sessionId === sessionId);
-          }
-        } catch (e) {
-          console.warn('[SessionManager] getProviderContexts: turn lookup failed', e);
-          sessionTurns = [];
-        }
-        const aiTurns = sessionTurns.filter(t => (t.type === 'ai' || t.role === 'assistant'));
-        aiTurns.sort((a, b) => {
-          const sa = (a.sequence ?? a.createdAt ?? 0);
-          const sb = (b.sequence ?? b.createdAt ?? 0);
-          return sb - sa; // newest first
-        });
-        aiTurn = aiTurns[0] || null;
-      }
+      // Use the fast, indexed method. No more turn scanning.
+      const contextRecords = await this.adapter.getContextsBySessionId(sessionId);
 
       const contexts = {};
-      const metaMap = aiTurn?.providerContexts || {};
-      for (const [pid, meta] of Object.entries(metaMap)) {
-        if (meta && typeof meta === 'object') contexts[pid] = { meta };
+      for (const record of contextRecords) {
+        // The goal is to return an object shaped like: { [providerId]: { meta: {...} } }
+        if (record.providerId && record.contextData?.meta) {
+          contexts[record.providerId] = { meta: record.contextData.meta };
+        }
       }
+      
       return contexts;
+
     } catch (e) {
-      // Non-fatal; return empty
-      console.warn('[SessionManager] getProviderContexts failed, returning empty:', e);
-      return {};
+      console.error('[SessionManager] getProviderContexts failed:', e);
+      return {}; // Return empty on error
     }
   }
 
@@ -1006,7 +927,7 @@ export class SessionManager {
    */
   getPersistenceStatus() {
     return {
-      usePersistenceAdapter: true,
+      persistenceEnabled: true,
       isInitialized: this.isInitialized,
       adapterReady: this.adapter?.isReady() || false
     };

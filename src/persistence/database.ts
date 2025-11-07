@@ -3,8 +3,8 @@
 import { StoreConfig, MetadataRecord } from './types';
 
 export const DB_NAME = 'OpusDeusDB';
-export const DB_VERSION = 2;
-export const SCHEMA_VERSION = 2;
+export const DB_VERSION = 4;
+export const SCHEMA_VERSION = 4;
 
 // Store configurations matching the schema specification
 export const STORE_CONFIGS: StoreConfig[] = [
@@ -53,7 +53,9 @@ export const STORE_CONFIGS: StoreConfig[] = [
       { name: 'byProviderId', keyPath: 'providerId', unique: false },
       { name: 'byResponseType', keyPath: 'responseType', unique: false },
       { name: 'byCompoundKey', keyPath: ['aiTurnId', 'providerId', 'responseType', 'responseIndex'], unique: true },
-      { name: 'bySessionId_providerId', keyPath: ['sessionId', 'providerId'], unique: false }
+      { name: 'bySessionId_providerId', keyPath: ['sessionId', 'providerId'], unique: false },
+      // New: direct sessionId index to support fast session-level response queries/cascade deletes
+      { name: 'bySessionId', keyPath: 'sessionId', unique: false }
     ]
   },
   
@@ -64,7 +66,9 @@ export const STORE_CONFIGS: StoreConfig[] = [
     indices: [
       { name: 'byCreatedAt', keyPath: 'createdAt', unique: false },
       { name: 'byLastModified', keyPath: 'lastModified', unique: false },
-      { name: 'bySourceSessionId', keyPath: 'sourceSessionId', unique: false }
+      { name: 'bySourceSessionId', keyPath: 'sourceSessionId', unique: false },
+      // New: allow fast lookups for documents linked by sessionId (not only sourceSessionId)
+      { name: 'bySessionId', keyPath: 'sessionId', unique: false }
     ]
   },
   
@@ -90,7 +94,9 @@ export const STORE_CONFIGS: StoreConfig[] = [
       { name: 'byDocumentId', keyPath: 'documentId', unique: false },
       { name: 'bySessionId', keyPath: 'provenance.sessionId', unique: false },
       { name: 'byAiTurnId', keyPath: 'provenance.aiTurnId', unique: false },
-      { name: 'byCreatedAt', keyPath: 'createdAt', unique: false }
+      { name: 'byCreatedAt', keyPath: 'createdAt', unique: false },
+      // New: index ghosts by entityId for fast duplicate checks
+      { name: 'byEntityId', keyPath: 'entityId', unique: false }
     ]
   },
   
@@ -108,7 +114,12 @@ export const STORE_CONFIGS: StoreConfig[] = [
   {
     name: 'metadata',
     keyPath: 'key',
-    indices: []
+    indices: [
+      // New: index metadata by sessionId to avoid full-store scans
+      { name: 'bySessionId', keyPath: 'sessionId', unique: false },
+      // New: index metadata by entityId to support cascade deletes by document/entity
+      { name: 'byEntityId', keyPath: 'entityId', unique: false }
+    ]
   }
 ];
 
@@ -158,6 +169,63 @@ export async function openDatabase(): Promise<IDBDatabase> {
           } as any;
           metadataStore.put(rec);
         } catch (_) {}
+      }
+
+      // Migration to v3: add bySessionId indexes to documents, metadata, and provider_responses
+      if (oldVersion < 3) {
+        const documentsStore = transaction.objectStore('documents');
+        const docIndexNames = Array.from(documentsStore.indexNames as any);
+        if (!docIndexNames.includes('bySessionId')) {
+          documentsStore.createIndex('bySessionId', 'sessionId', { unique: false });
+        }
+
+        const metadataStore = transaction.objectStore('metadata');
+        const metaIndexNames = Array.from(metadataStore.indexNames as any);
+        if (!metaIndexNames.includes('bySessionId')) {
+          metadataStore.createIndex('bySessionId', 'sessionId', { unique: false });
+        }
+        // Also bump schema_version metadata value to 3
+        const now = Date.now();
+        const rec: MetadataRecord = {
+          id: 'schema_version_record',
+          key: 'schema_version',
+          value: SCHEMA_VERSION,
+          createdAt: now,
+          updatedAt: now
+        } as any;
+        metadataStore.put(rec);
+
+        const responsesStore = transaction.objectStore('provider_responses');
+        const respIndexNames = Array.from(responsesStore.indexNames as any);
+        if (!respIndexNames.includes('bySessionId')) {
+          responsesStore.createIndex('bySessionId', 'sessionId', { unique: false });
+        }
+      }
+
+      // Migration to v4: add byEntityId index to ghosts and metadata
+      if (oldVersion < 4) {
+        const ghostsStore = transaction.objectStore('ghosts');
+        const ghostIndexNames = Array.from(ghostsStore.indexNames as any);
+        if (!ghostIndexNames.includes('byEntityId')) {
+          ghostsStore.createIndex('byEntityId', 'entityId', { unique: false });
+        }
+
+        const metadataStore = transaction.objectStore('metadata');
+        const metaIndexNames = Array.from(metadataStore.indexNames as any);
+        if (!metaIndexNames.includes('byEntityId')) {
+          metadataStore.createIndex('byEntityId', 'entityId', { unique: false });
+        }
+
+        // Bump schema_version metadata value to 4
+        const now = Date.now();
+        const rec: MetadataRecord = {
+          id: 'schema_version_record',
+          key: 'schema_version',
+          value: SCHEMA_VERSION,
+          createdAt: now,
+          updatedAt: now
+        } as any;
+        metadataStore.put(rec);
       }
     };
     

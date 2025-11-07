@@ -135,8 +135,7 @@ export class DocumentManager {
 
     if (includeBlocks) {
       // Reconstruct content from blocks if needed
-      const allBlocks = await this.adapter.getAll('canvasBlocks') as CanvasBlockRecord[];
-      const blocks = allBlocks.filter((block) => block.documentId === documentId);
+      const blocks = await this.adapter.getCanvasBlocksByDocumentId(documentId) as CanvasBlockRecord[];
       if (blocks.length > 0) {
         document.canvasContent = await this.reconstructContent(blocks);
       }
@@ -193,13 +192,10 @@ export class DocumentManager {
    */
   async deleteDocument(documentId: string): Promise<void> {
     // Get all blocks and ghosts for this document
-    const [allBlocks, allGhosts] = await Promise.all([
-      this.adapter.getAll('canvasBlocks') as Promise<CanvasBlockRecord[]>,
-      this.adapter.getAll('ghosts') as Promise<GhostRecord[]>
+    const [blocks, ghosts] = await Promise.all([
+      this.adapter.getCanvasBlocksByDocumentId(documentId) as Promise<CanvasBlockRecord[]>,
+      this.adapter.getGhostsByDocumentId(documentId) as Promise<GhostRecord[]>
     ]);
-
-    const blocks = (allBlocks as CanvasBlockRecord[]).filter(block => block.documentId === documentId);
-    const ghosts = (allGhosts as GhostRecord[]).filter(ghost => ghost.documentId === documentId);
 
     // Delete blocks
     for (const block of blocks) {
@@ -213,8 +209,7 @@ export class DocumentManager {
 
     // Cascade delete: remove metadata associated with this document
     try {
-      const allMetadata = await this.adapter.getAll('metadata') as any[];
-      const docMetadata = allMetadata.filter((m) => m && m.entityId === documentId);
+      const docMetadata = await this.adapter.getMetadataByEntityId(documentId) as any[];
       for (const meta of docMetadata) {
         if (meta?.id) {
           await this.adapter.delete('metadata', meta.id);
@@ -233,8 +228,7 @@ export class DocumentManager {
    */
   private async decomposeContent(documentId: string, content: SlateDescendant[]): Promise<void> {
     // Clear existing blocks
-    const allBlocks = await this.adapter.getAll('canvasBlocks') as CanvasBlockRecord[];
-    const existingBlocks = allBlocks.filter((block) => block.documentId === documentId);
+    const existingBlocks = await this.adapter.getCanvasBlocksByDocumentId(documentId) as CanvasBlockRecord[];
     for (const block of existingBlocks) {
       await this.adapter.delete('canvasBlocks', block.id);
     }
@@ -350,8 +344,7 @@ export class DocumentManager {
     }
   ): Promise<GhostRecord> {
     // Check for existing ghost with same provenance
-    const allGhosts = await this.adapter.getAll('ghosts') as GhostRecord[];
-    const existingGhosts = allGhosts.filter(ghost => ghost.entityId === provenance.aiTurnId);
+    const existingGhosts = await this.adapter.getGhostsByEntityId(provenance.aiTurnId) as GhostRecord[];
     const duplicate = existingGhosts.find(ghost => 
       ghost.documentId === documentId &&
       ghost.provenance?.providerId === provenance.providerId &&
@@ -367,6 +360,7 @@ export class DocumentManager {
       documentId,
       text,
       preview: text.substring(0, 100),
+      entityId: provenance.aiTurnId,
       provenance: {
         sessionId: provenance.sessionId,
         aiTurnId: provenance.aiTurnId,
@@ -388,8 +382,7 @@ export class DocumentManager {
    * Get all ghosts for a document
    */
   async getDocumentGhosts(documentId: string): Promise<GhostRecord[]> {
-    const allGhosts = await this.adapter.getAll('ghosts') as GhostRecord[];
-    return allGhosts.filter(ghost => ghost.documentId === documentId);
+    return await this.adapter.getGhostsByDocumentId(documentId) as GhostRecord[];
   }
 
   /**
@@ -426,8 +419,7 @@ export class DocumentManager {
     turns: TurnRecord[];
     responses: ProviderResponseRecord[];
   }> {
-    const allBlocks = await this.adapter.getAll('canvasBlocks') as CanvasBlockRecord[];
-    const blocks = allBlocks.filter((block) => block.documentId === documentId);
+    const blocks = await this.adapter.getCanvasBlocksByDocumentId(documentId) as CanvasBlockRecord[];
     
     // Extract unique session and turn IDs
     const sessionIds = new Set<string>();
