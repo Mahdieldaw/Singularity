@@ -971,12 +971,19 @@ async executePromptStep(step, context) {
           text: res.text
         }));
 
-      // If embedded responses were not present, attempt provider_responses fallback
+      // If embedded responses were not present, attempt provider_responses fallback (prefer indexed lookup)
       if (sourceArray.length === 0 && this.sessionManager?.adapter?.isReady && this.sessionManager.adapter.isReady()) {
         try {
-          const allPR = await this.sessionManager.adapter.getAll('provider_responses');
-          sourceArray = (allPR || [])
-            .filter(r => r && r.aiTurnId === aiTurn.id && r.responseType === (responseType || 'batch') && r.text && String(r.text).trim().length > 0)
+          let responses = [];
+          if (typeof this.sessionManager.adapter.getResponsesByTurnId === 'function') {
+            responses = await this.sessionManager.adapter.getResponsesByTurnId(aiTurn.id);
+          } else {
+            const allPR = await this.sessionManager.adapter.getAll('provider_responses');
+            responses = (allPR || []).filter(r => r && r.aiTurnId === aiTurn.id);
+          }
+          const respType = responseType || 'batch';
+          sourceArray = (responses || [])
+            .filter(r => r && r.responseType === respType && r.text && String(r.text).trim().length > 0)
             .sort((a, b) => (a.updatedAt || a.createdAt || 0) - (b.updatedAt || b.createdAt || 0))
             .map(r => ({ providerId: r.providerId, text: r.text }));
           if (sourceArray.length > 0) {
@@ -1110,11 +1117,17 @@ async executePromptStep(step, context) {
               }
             }
             if (!candidate && this.sessionManager.adapter?.isReady && this.sessionManager.adapter.isReady()) {
-              // Directly query provider_responses for this aiTurnId
+              // Directly query provider_responses for this aiTurnId (prefer indexed lookup)
               try {
-                const allPR = await this.sessionManager.adapter.getAll('provider_responses');
-                const pMaps = allPR
-                  .filter(r => r && r.sessionId && r.aiTurnId === aiTurn.id && r.responseType === 'mapping' && r.text && String(r.text).trim().length > 0)
+                let responses = [];
+                if (typeof this.sessionManager.adapter.getResponsesByTurnId === 'function') {
+                  responses = await this.sessionManager.adapter.getResponsesByTurnId(aiTurn.id);
+                } else {
+                  const allPR = await this.sessionManager.adapter.getAll('provider_responses');
+                  responses = (allPR || []).filter(r => r && r.aiTurnId === aiTurn.id);
+                }
+                const pMaps = responses
+                  .filter(r => r && r.responseType === 'mapping' && r.text && String(r.text).trim().length > 0)
                   .sort((a,b) => (a.updatedAt||a.createdAt||0) - (b.updatedAt||b.createdAt||0));
                 const last = pMaps[pMaps.length - 1];
                 if (last) {

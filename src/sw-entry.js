@@ -129,22 +129,9 @@ async function initializeSessionManager(persistenceLayer) {
     // ✅ CRITICAL: Ensure sessions reference is fresh
     sessionManager.sessions = __HTOS_SESSIONS;
 
-    // Always initialize with persistence adapter
-    // Use the richer IndexedDBAdapter to leverage indices (e.g., byAiTurnId)
-    const { IndexedDBAdapter } = await import(
-      "./persistence/adapters/IndexedDBAdapter.js"
-    );
-    const adapter = new IndexedDBAdapter();
-
-    console.log(
-      "[SW] Initializing IndexedDBAdapter for SessionManager..."
-    );
-    // Disable internal auto-cleanup; sw-entry manages cleanup centrally
-    await adapter.initialize({ autoCleanup: false });
-
-    await sessionManager.initialize({
-      adapter,
-    });
+    // Initialize without injecting the complex IndexedDBAdapter.
+    // SessionManager will provision SimpleIndexedDBAdapter internally.
+    await sessionManager.initialize({});
 
     console.log("[SW:INIT:6] ✅ Session manager initialized with persistence");
 
@@ -509,11 +496,28 @@ async function handleUnifiedMessage(message, sender, sendResponse) {
 
       if (useAdapter) {
         sessionRecord = await sm.adapter.get('sessions', sessionId);
-        const allTurns = await sm.adapter.getAll('turns');
-        turns = allTurns.filter(t => t && t.sessionId === sessionId)
-                        .sort((a, b) => (a.sequence ?? a.createdAt) - (b.sequence ?? b.createdAt));
-        const allResponses = await sm.adapter.getAll('provider_responses');
-        providerResponses = allResponses.filter(r => r && r.sessionId === sessionId);
+        // Prefer indexed turn lookup by sessionId; fallback to full-scan
+        if (typeof sm.adapter.getTurnsBySessionId === 'function') {
+          turns = await sm.adapter.getTurnsBySessionId(sessionId);
+        } else {
+          const allTurns = await sm.adapter.getAll('turns');
+          turns = (allTurns || []).filter(t => t && t.sessionId === sessionId);
+        }
+        turns = Array.isArray(turns)
+          ? turns.sort((a, b) => (a.sequence ?? a.createdAt) - (b.sequence ?? b.createdAt))
+          : [];
+
+        // Provider responses: collect per AI turn via indexed lookup; fallback to session-level full-scan
+        const aiTurns = Array.isArray(turns)
+          ? turns.filter(t => (t.type === 'ai' || t.role === 'assistant') && t.id)
+          : [];
+        if (typeof sm.adapter.getResponsesByTurnId === 'function') {
+          const lists = await Promise.all(aiTurns.map(t => sm.adapter.getResponsesByTurnId(t.id)));
+          providerResponses = lists.flat();
+        } else {
+          const allResponses = await sm.adapter.getAll('provider_responses');
+          providerResponses = (allResponses || []).filter(r => r && r.sessionId === sessionId);
+        }
       }
 
           // Assemble UI-friendly rounds from raw records
@@ -844,7 +848,14 @@ async function handleUnifiedMessage(message, sender, sendResponse) {
             // Prefer documentManager API if available
             if (layer.documentManager && typeof layer.documentManager.getDocumentGhosts === 'function') {
               ghosts = await layer.documentManager.getDocumentGhosts(message.documentId);
+            } else if (layer.adapter && typeof layer.adapter.getGhostsByDocumentId === 'function') {
+              // Prefer adapter convenience wrapper
+              ghosts = await layer.adapter.getGhostsByDocumentId(message.documentId);
+            } else if (layer.adapter && typeof layer.adapter.getByIndex === 'function') {
+              // Fallback to generic indexed query if available
+              ghosts = await layer.adapter.getByIndex('ghosts', 'byDocumentId', message.documentId);
             } else if (layer.adapter && typeof layer.adapter.getAll === 'function') {
+              // Last-resort full scan
               const allGhosts = await layer.adapter.getAll('ghosts');
               ghosts = (allGhosts || []).filter(g => g.documentId === message.documentId);
             } else {

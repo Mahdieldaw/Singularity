@@ -190,6 +190,10 @@ export class ContextResolver {
         return [];
       }
       // Prefer indexed query when supported by the adapter
+      if (typeof adapter.getResponsesByTurnId === 'function') {
+        return await adapter.getResponsesByTurnId(aiTurnId);
+      }
+      // Backward-compat: some adapters expose getProviderResponsesByTurnId
       if (typeof adapter.getProviderResponsesByTurnId === 'function') {
         return await adapter.getProviderResponsesByTurnId(aiTurnId);
       }

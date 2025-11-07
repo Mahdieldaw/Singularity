@@ -174,6 +174,88 @@ export class SimpleIndexedDBAdapter {
   }
 
   /**
+   * Generic indexed query helper using an object store index.
+   * Returns all matching records.
+   */
+  async getByIndex(storeName: string, indexName: string, key: IDBValidKey | IDBKeyRange): Promise<SimpleRecord[]> {
+    this.ensureReady();
+    const resolved = this.resolveStoreName(storeName);
+    try {
+      const result = await withTransaction(this.db!, [resolved], 'readonly', async (tx) => {
+        const store = tx.objectStore(resolved);
+        let index: IDBIndex;
+        try {
+          index = store.index(indexName);
+        } catch (e) {
+          console.error(`persistence:getByIndex(${resolved}.${indexName}) - missing index`, e);
+          throw e;
+        }
+        return new Promise<SimpleRecord[]>((resolve, reject) => {
+          const request = index.getAll(key);
+          request.onsuccess = () => resolve(request.result || []);
+          request.onerror = () => reject(request.error);
+        });
+      });
+      return result;
+    } catch (error) {
+      console.error(`persistence:getByIndex(${resolved}.${indexName}) - error:`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Convenience wrappers for common indexed queries
+   */
+  async getThreadsBySessionId(sessionId: string): Promise<SimpleRecord[]> {
+    return this.getByIndex('threads', 'bySessionId', sessionId);
+  }
+
+  async getTurnsBySessionId(sessionId: string): Promise<SimpleRecord[]> {
+    return this.getByIndex('turns', 'bySessionId', sessionId);
+  }
+
+  async getResponsesByTurnId(aiTurnId: string): Promise<SimpleRecord[]> {
+    // provider_responses.byAiTurnId
+    return this.getByIndex('provider_responses', 'byAiTurnId', aiTurnId);
+  }
+
+  async getContextsBySessionId(sessionId: string): Promise<SimpleRecord[]> {
+    // provider_contexts.bySessionId
+    return this.getByIndex('provider_contexts', 'bySessionId', sessionId);
+  }
+
+  async getDocumentsBySourceSessionId(sessionId: string): Promise<SimpleRecord[]> {
+    // documents.bySourceSessionId
+    return this.getByIndex('documents', 'bySourceSessionId', sessionId);
+  }
+
+  async getCanvasBlocksByDocumentId(documentId: string): Promise<SimpleRecord[]> {
+    return this.getByIndex('canvas_blocks', 'byDocumentId', documentId);
+  }
+
+  async getCanvasBlocksBySessionId(sessionId: string): Promise<SimpleRecord[]> {
+    // provenance.sessionId indexed as bySessionId
+    return this.getByIndex('canvas_blocks', 'bySessionId', sessionId);
+  }
+
+  async getGhostsByDocumentId(documentId: string): Promise<SimpleRecord[]> {
+    return this.getByIndex('ghosts', 'byDocumentId', documentId);
+  }
+
+  async getGhostsBySessionId(sessionId: string): Promise<SimpleRecord[]> {
+    return this.getByIndex('ghosts', 'bySessionId', sessionId);
+  }
+
+  /**
+   * Execute an operation inside a single transaction spanning given stores.
+   */
+  async transaction<T>(storeNames: string[], mode: 'readonly' | 'readwrite', operation: (tx: IDBTransaction) => Promise<T>): Promise<T> {
+    this.ensureReady();
+    const resolvedStores = storeNames.map((s) => this.resolveStoreName(s));
+    return withTransaction(this.db!, resolvedStores, mode, operation);
+  }
+
+  /**
    * Check if the adapter is ready for use
    */
   isReady(): boolean {

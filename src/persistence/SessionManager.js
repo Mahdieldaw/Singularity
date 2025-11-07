@@ -568,92 +568,159 @@ export class SessionManager {
    */
   async deleteSessionWithPersistence(sessionId) {
     try {
-      // Delete from persistence layer
-      await this.adapter.delete('sessions', sessionId);
-      
-      // Delete related data - using getAll and filtering by sessionId
-      // 1) Threads
-      const allThreads = await this.adapter.getAll('threads');
-      const threads = allThreads.filter(thread => thread.sessionId === sessionId);
-      for (const thread of threads) {
-        await this.adapter.delete('threads', thread.id);
-      }
+      // Perform an atomic, indexed cascade delete inside a single transaction
+      await this.adapter.transaction([
+        'sessions',
+        'threads',
+        'turns',
+        'provider_responses',
+        'provider_contexts',
+        'documents',
+        'canvas_blocks',
+        'ghosts',
+        'metadata'
+      ], 'readwrite', async (tx) => {
+        const getAllByIndex = (store, indexName, key) => new Promise((resolve, reject) => {
+          let idx;
+          try { idx = store.index(indexName); } catch (e) { return reject(e); }
+          const req = idx.getAll(key);
+          req.onsuccess = () => resolve(req.result || []);
+          req.onerror = () => reject(req.error);
+        });
+        const getAllFromStore = (store) => new Promise((resolve, reject) => {
+          const req = store.getAll();
+          req.onsuccess = () => resolve(req.result || []);
+          req.onerror = () => reject(req.error);
+        });
 
-      // 2) Turns
-      const allTurns = await this.adapter.getAll('turns');
-      const turns = allTurns.filter(turn => turn.sessionId === sessionId);
-      for (const turn of turns) {
-        await this.adapter.delete('turns', turn.id);
-      }
+        // 1) Delete session record
+        await new Promise((resolve, reject) => {
+          const req = tx.objectStore('sessions').delete(sessionId);
+          req.onsuccess = () => resolve(true);
+          req.onerror = () => reject(req.error);
+        });
 
-      // 3) Provider responses
-      try {
-        const allResponses = await this.adapter.getAll('provider_responses');
-        const responses = allResponses.filter(resp => resp.sessionId === sessionId);
-        for (const resp of responses) {
-          await this.adapter.delete('provider_responses', resp.id);
+        // 2) Threads by session
+        const threadsStore = tx.objectStore('threads');
+        const threads = await getAllByIndex(threadsStore, 'bySessionId', sessionId);
+        for (const t of threads) {
+          await new Promise((resolve, reject) => {
+            const req = threadsStore.delete(t.id);
+            req.onsuccess = () => resolve(true);
+            req.onerror = () => reject(req.error);
+          });
         }
-      } catch (e) {
-        console.warn('[SessionManager] Failed to delete provider responses for session', sessionId, e);
-      }
 
-      // 4) Provider contexts (composite key [sessionId, providerId])
-      try {
-        const allContexts = await this.adapter.getAll('provider_contexts');
-        const contexts = allContexts.filter(context => context.sessionId === sessionId);
-        for (const context of contexts) {
-          await this.adapter.delete('provider_contexts', [context.sessionId, context.providerId]);
+        // 3) Turns by session
+        const turnsStore = tx.objectStore('turns');
+        const turns = await getAllByIndex(turnsStore, 'bySessionId', sessionId);
+        const aiTurnIds = [];
+        for (const turn of turns) {
+          if (turn && (turn.type === 'ai' || turn.role === 'assistant')) aiTurnIds.push(turn.id);
+          await new Promise((resolve, reject) => {
+            const req = turnsStore.delete(turn.id);
+            req.onsuccess = () => resolve(true);
+            req.onerror = () => reject(req.error);
+          });
         }
-      } catch (e) {
-        console.warn('[SessionManager] Failed to delete provider contexts for session', sessionId, e);
-      }
 
-      // 5) Documents created by or associated to this session
-      try {
-        const allDocs = await this.adapter.getAll('documents');
-        const docs = allDocs.filter(doc => doc.sessionId === sessionId || doc.sourceSessionId === sessionId);
+        // 4) Provider responses by aiTurnId
+        const responsesStore = tx.objectStore('provider_responses');
+        for (const aiTurnId of aiTurnIds) {
+          const rsps = await getAllByIndex(responsesStore, 'byAiTurnId', aiTurnId);
+          for (const r of rsps) {
+            await new Promise((resolve, reject) => {
+              const req = responsesStore.delete(r.id);
+              req.onsuccess = () => resolve(true);
+              req.onerror = () => reject(req.error);
+            });
+          }
+        }
+
+        // 5) Provider contexts by session (composite key delete)
+        const contextsStore = tx.objectStore('provider_contexts');
+        const contexts = await getAllByIndex(contextsStore, 'bySessionId', sessionId);
+        for (const ctx of contexts) {
+          await new Promise((resolve, reject) => {
+            const key = [ctx.sessionId, ctx.providerId];
+            const req = contextsStore.delete(key);
+            req.onsuccess = () => resolve(true);
+            req.onerror = () => reject(req.error);
+          });
+        }
+
+        // 6) Documents associated to session
+        const documentsStore = tx.objectStore('documents');
+        const docsBySource = await getAllByIndex(documentsStore, 'bySourceSessionId', sessionId);
+        const docsAll = await getAllFromStore(documentsStore);
+        const docsDirect = (docsAll || []).filter(d => d && d.sessionId === sessionId);
+        const docs = [...docsBySource, ...docsDirect];
         const deletedDocIds = [];
         for (const doc of docs) {
-          await this.adapter.delete('documents', doc.id);
+          await new Promise((resolve, reject) => {
+            const req = documentsStore.delete(doc.id);
+            req.onsuccess = () => resolve(true);
+            req.onerror = () => reject(req.error);
+          });
           deletedDocIds.push(doc.id);
         }
 
-        // 6) Canvas blocks tied to deleted documents or originating from this session
-        const allBlocks = await this.adapter.getAll('canvas_blocks');
-        const blocks = allBlocks.filter(block => 
-          deletedDocIds.includes(block.documentId) || 
-          (block?.provenance?.sessionId === sessionId)
-        );
-        for (const block of blocks) {
-          await this.adapter.delete('canvas_blocks', block.id);
+        // 7) Canvas blocks by session and by document
+        const blocksStore = tx.objectStore('canvas_blocks');
+        const blocksBySession = await getAllByIndex(blocksStore, 'bySessionId', sessionId);
+        for (const b of blocksBySession) {
+          await new Promise((resolve, reject) => {
+            const req = blocksStore.delete(b.id);
+            req.onsuccess = () => resolve(true);
+            req.onerror = () => reject(req.error);
+          });
+        }
+        for (const docId of deletedDocIds) {
+          const blocksByDoc = await getAllByIndex(blocksStore, 'byDocumentId', docId);
+          for (const b of blocksByDoc) {
+            await new Promise((resolve, reject) => {
+              const req = blocksStore.delete(b.id);
+              req.onsuccess = () => resolve(true);
+              req.onerror = () => reject(req.error);
+            });
+          }
         }
 
-        // 7) Ghosts tied to deleted documents or originating from this session
-        const allGhosts = await this.adapter.getAll('ghosts');
-        const ghosts = allGhosts.filter(ghost => 
-          deletedDocIds.includes(ghost.documentId) || 
-          (ghost?.provenance?.sessionId === sessionId)
-        );
-        for (const ghost of ghosts) {
-          await this.adapter.delete('ghosts', ghost.id);
+        // 8) Ghosts by session and by document
+        const ghostsStore = tx.objectStore('ghosts');
+        const ghostsBySession = await getAllByIndex(ghostsStore, 'bySessionId', sessionId);
+        for (const g of ghostsBySession) {
+          await new Promise((resolve, reject) => {
+            const req = ghostsStore.delete(g.id);
+            req.onsuccess = () => resolve(true);
+            req.onerror = () => reject(req.error);
+          });
         }
-      } catch (e) {
-        console.warn('[SessionManager] Failed to delete document-derived artifacts for session', sessionId, e);
-      }
+        for (const docId of deletedDocIds) {
+          const ghostsByDoc = await getAllByIndex(ghostsStore, 'byDocumentId', docId);
+          for (const g of ghostsByDoc) {
+            await new Promise((resolve, reject) => {
+              const req = ghostsStore.delete(g.id);
+              req.onsuccess = () => resolve(true);
+              req.onerror = () => reject(req.error);
+            });
+          }
+        }
 
-      // 8) Metadata scoped to this session (store keyPath is 'key')
-      try {
-        const allMeta = await this.adapter.getAll('metadata');
-        const metas = allMeta.filter(m => m.sessionId === sessionId);
+        // 9) Metadata scoped to this session (no index; filter by field if present)
+        const metaStore = tx.objectStore('metadata');
+        const allMeta = await getAllFromStore(metaStore);
+        const metas = (allMeta || []).filter(m => m && (m.sessionId === sessionId || m.entityId === sessionId));
         for (const m of metas) {
-          // Use the actual store key 'key' for deletion
-          await this.adapter.delete('metadata', m.key);
+          await new Promise((resolve, reject) => {
+            const req = metaStore.delete(m.key);
+            req.onsuccess = () => resolve(true);
+            req.onerror = () => reject(req.error);
+          });
         }
-      } catch (e) {
-        console.warn('[SessionManager] Failed to delete session-scoped metadata', sessionId, e);
-      }
+      });
 
-      // 9) Delete lightweight cache entry
+      // Remove lightweight cache entry outside the transaction
       if (this.sessions[sessionId]) {
         delete this.sessions[sessionId];
       }
@@ -686,11 +753,22 @@ export class SessionManager {
     try {
       const session = await this.getOrCreateSession(sessionId);
       
-      // Get or create provider context - using getAll and filtering
-      const allContexts = await this.adapter.getAll('provider_contexts');
-      const contexts = allContexts.filter(context => 
-        context.providerId === providerId && context.sessionId === sessionId
-      );
+      // Get or create provider context - using indexed query by session
+      let contexts = [];
+      try {
+        if (typeof this.adapter.getContextsBySessionId === 'function') {
+          contexts = await this.adapter.getContextsBySessionId(sessionId);
+        } else {
+          // Fallback to scanning the store
+          const allContexts = await this.adapter.getAll('provider_contexts');
+          contexts = allContexts.filter(context => context.sessionId === sessionId);
+        }
+        // Narrow to target provider
+        contexts = contexts.filter(context => context.providerId === providerId);
+      } catch (e) {
+        console.warn('[SessionManager] updateProviderContext: contexts lookup failed, using empty set', e);
+        contexts = [];
+      }
       // Select the most recent context by updatedAt (fallback createdAt)
       let contextRecord = null;
       if (contexts.length > 0) {
@@ -765,9 +843,19 @@ export class SessionManager {
       const session = await this.getOrCreateSession(sessionId);
       const now = Date.now();
 
-      // Load all existing contexts once and pick latest per provider for this session
-      const allContexts = await this.adapter.getAll('provider_contexts');
-      const sessionContexts = allContexts.filter(ctx => ctx.sessionId === sessionId);
+      // Load all existing contexts once using indexed query, pick latest per provider
+      let sessionContexts = [];
+      try {
+        if (typeof this.adapter.getContextsBySessionId === 'function') {
+          sessionContexts = await this.adapter.getContextsBySessionId(sessionId);
+        } else {
+          const allContexts = await this.adapter.getAll('provider_contexts');
+          sessionContexts = allContexts.filter(ctx => ctx.sessionId === sessionId);
+        }
+      } catch (e) {
+        console.warn('[SessionManager] updateProviderContextsBatch: contexts lookup failed; proceeding with empty list', e);
+        sessionContexts = [];
+      }
       const latestByProvider = {};
       for (const ctx of sessionContexts) {
         const pid = ctx.providerId;
@@ -854,8 +942,18 @@ export class SessionManager {
 
       // If not found, scan turns for latest AI turn in this session
       if (!aiTurn) {
-        const allTurns = await this.adapter.getAll('turns');
-        const sessionTurns = (allTurns || []).filter(t => t && t.sessionId === sessionId);
+        let sessionTurns = [];
+        try {
+          if (typeof this.adapter.getTurnsBySessionId === 'function') {
+            sessionTurns = await this.adapter.getTurnsBySessionId(sessionId);
+          } else {
+            const allTurns = await this.adapter.getAll('turns');
+            sessionTurns = (allTurns || []).filter(t => t && t.sessionId === sessionId);
+          }
+        } catch (e) {
+          console.warn('[SessionManager] getProviderContexts: turn lookup failed', e);
+          sessionTurns = [];
+        }
         const aiTurns = sessionTurns.filter(t => (t.type === 'ai' || t.role === 'assistant'));
         aiTurns.sort((a, b) => {
           const sa = (a.sequence ?? a.createdAt ?? 0);
