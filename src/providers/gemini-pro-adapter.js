@@ -4,6 +4,10 @@
  */
 import { classifyProviderError } from "../core/request-lifecycle-manager.js";
 
+// Provider-specific adapter debug flag (off by default)
+const GEMINI_PRO_ADAPTER_DEBUG = false;
+const pad = (...args) => { if (GEMINI_PRO_ADAPTER_DEBUG) console.log(...args); };
+
 export class GeminiProAdapter {
   constructor(controller) {
     this.id = "gemini-pro";
@@ -46,7 +50,7 @@ export class GeminiProAdapter {
       );
 
       // Debug raw provider payload to help diagnose parsing mismatch
-      console.info("[GeminiProAdapter] raw result:", result);
+      if (GEMINI_PRO_ADAPTER_DEBUG) console.info("[GeminiProAdapter] raw result:", result);
 
       // Normalize text: try common shapes, then fallback to JSON string
       const normalizedText =
@@ -126,7 +130,7 @@ export class GeminiProAdapter {
         model,
       });
 
-      console.info("[GeminiProAdapter] raw continuation result:", result);
+      if (GEMINI_PRO_ADAPTER_DEBUG) console.info("[GeminiProAdapter] raw continuation result:", result);
       const normalizedText =
         result?.text ??
         (result?.candidates?.[0]?.content ??
@@ -193,7 +197,7 @@ export class GeminiProAdapter {
     try {
       const meta = providerContext?.meta || providerContext || {};
       const hasCursor = Boolean(meta.cursor || providerContext?.cursor);
-      console.log(`[ProviderAdapter] ASK_STARTED provider=${this.id} hasContext=${hasCursor}`);
+      pad(`[ProviderAdapter] ASK_STARTED provider=${this.id} hasContext=${hasCursor}`);
       let res;
       if (hasCursor) {
         res = await this.sendContinuation(prompt, providerContext, sessionId, onChunk, signal);
@@ -202,7 +206,7 @@ export class GeminiProAdapter {
       }
       try {
         const len = (res?.text || '').length;
-        console.log(`[ProviderAdapter] ASK_COMPLETED provider=${this.id} ok=${res?.ok !== false} textLen=${len}`);
+        pad(`[ProviderAdapter] ASK_COMPLETED provider=${this.id} ok=${res?.ok !== false} textLen=${len}`);
       } catch (_) {}
       return res;
     } catch (e) {

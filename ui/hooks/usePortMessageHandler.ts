@@ -344,14 +344,11 @@ export function usePortMessageHandler() {
           // 2. { providerId: 'gemini', text: '...', status: '...' } for single-provider steps
           const resultsMap = result.results || (result.providerId ? { [result.providerId]: result } : {});
           
+          const _completedProviders: string[] = [];
           Object.entries(resultsMap).forEach(([providerId, data]: [string, any]) => {
             const targetId = activeAiTurnIdRef.current;
             if (!targetId) return;
-
-            console.log(`[Port] Completing ${stepType}/${providerId} on turn ${targetId}:`, {
-              textLength: data?.text?.length,
-              status: data?.status
-            });
+            _completedProviders.push(providerId);
 
             setTurnsMap((draft: Map<string, TurnMessage>) => {
               const existing = draft.get(targetId);
@@ -408,6 +405,18 @@ export function usePortMessageHandler() {
               });
             }
           });
+
+          // Emit a single aggregated completion log for batch steps to reduce verbosity
+          try {
+            if (stepType === 'batch') {
+              const targetId = activeAiTurnIdRef.current;
+              if (targetId && _completedProviders.length > 0) {
+                console.log(
+                  `[Port] Batch step completed on turn ${targetId} with results from ${_completedProviders.length} providers: ${_completedProviders.join(', ')}`
+                );
+              }
+            }
+          } catch (_) {}
 
           if (message.isRecompute) {
             setActiveRecomputeState(null);

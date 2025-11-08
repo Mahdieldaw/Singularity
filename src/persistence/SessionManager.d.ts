@@ -30,7 +30,6 @@ export interface ThreadData {
 }
 
 export interface ProviderContextOptions {
-  preserveChat?: boolean;
   [key: string]: any;
 }
 
@@ -52,18 +51,13 @@ export declare class SessionManager {
   initialize(config?: { adapter?: any; initTimeoutMs?: number }): Promise<void>;
   
   getOrCreateSession(sessionId: string): Promise<SessionData>;
-  getOrCreateSessionWithPersistence(sessionId: string): Promise<SessionData>;
   
   saveSession(sessionId: string): Promise<void>;
-  saveSessionWithPersistence(sessionId: string): Promise<void>;
   
-  deleteSession(sessionId: string): Promise<void>;
-  deleteSessionWithPersistence(sessionId: string): Promise<void>;
+  deleteSession(sessionId: string): Promise<boolean>;
   
-  updateProviderContext(sessionId: string, providerId: string, result: any, preserveChat?: boolean, options?: ProviderContextOptions): Promise<void>;
-  updateProviderContextWithPersistence(sessionId: string, providerId: string, result: any, preserveChat?: boolean, options?: ProviderContextOptions): Promise<void>;
-  updateProviderContextsBatch(sessionId: string, updates: Record<string, any>, preserveChat?: boolean, options?: ProviderContextOptions): Promise<void>;
-  updateProviderContextsBatchWithPersistence(sessionId: string, updates: Record<string, any>, preserveChat?: boolean, options?: ProviderContextOptions): Promise<void>;
+  updateProviderContext(sessionId: string, providerId: string, result: any, options?: ProviderContextOptions): Promise<void>;
+  updateProviderContextsBatch(sessionId: string, updates: Record<string, any>, options?: ProviderContextOptions): Promise<void>;
   
   getProviderContexts(sessionId: string, threadId?: string): any;
   

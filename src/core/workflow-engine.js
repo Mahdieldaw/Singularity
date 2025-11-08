@@ -227,6 +227,8 @@ function clearDeltaCache(sessionId) {
 // =============================================================================
 
 const STREAMING_DEBUG = false; // ✅ Set to true to see streaming deltas
+const WORKFLOW_DEBUG = false; // ✅ Off-by-default verbose workflow logs
+const wdbg = (...args) => { if (WORKFLOW_DEBUG) console.log(...args); };
 
 /**
  * Filtered logger: Hides streaming noise unless explicitly enabled
@@ -358,12 +360,18 @@ export class WorkflowEngine {
             // the freshly-created conversations immediately.
             try {
               const resultsObj = result && result.results ? result.results : {};
+              const cachedProviders = [];
               Object.entries(resultsObj).forEach(([pid, data]) => {
                 if (data && data.meta && Object.keys(data.meta).length > 0) {
                   workflowContexts[pid] = data.meta;
-                  console.log(`[WorkflowEngine] Cached context for ${pid}: ${Object.keys(data.meta).join(',')}`);
+                  cachedProviders.push(pid);
                 }
               });
+              if (cachedProviders.length > 0) {
+                console.log(
+                  `[WorkflowEngine] Cached contexts for providers: ${cachedProviders.join(', ')}`
+                );
+              }
             } catch (e) { /* best-effort logging */ }
         } catch (error) {
             console.error(`[WorkflowEngine] Prompt step ${step.stepId} failed:`, error);
@@ -680,7 +688,7 @@ export class WorkflowEngine {
         continueThread: true
       };
       try {
-        console.log(`[WorkflowEngine] ${stepType} using workflow-cached context for ${providerId}: ${Object.keys(workflowContexts[providerId]).join(',')}`);
+        wdbg(`[WorkflowEngine] ${stepType} using workflow-cached context for ${providerId}: ${Object.keys(workflowContexts[providerId]).join(',')}`);
       } catch (_) {}
       return providerContexts;
     }
@@ -694,7 +702,7 @@ export class WorkflowEngine {
           continueThread: true
         };
         try {
-          console.log(`[WorkflowEngine] ${stepType} using historical context from ResolvedContext for ${providerId}`);
+          wdbg(`[WorkflowEngine] ${stepType} using historical context from ResolvedContext for ${providerId}`);
         } catch (_) {}
         return providerContexts;
       }
@@ -711,7 +719,7 @@ export class WorkflowEngine {
             continueThread: true
           };
           try {
-            console.log(`[WorkflowEngine] ${stepType} continuing conversation for ${providerId} via batch step`);
+            wdbg(`[WorkflowEngine] ${stepType} continuing conversation for ${providerId} via batch step`);
           } catch (_) {}
           return providerContexts;
         }
@@ -786,6 +794,18 @@ async executePromptStep(step, context) {
         // Build batch updates
         const batchUpdates = {}; 
         results.forEach((res, pid) => { batchUpdates[pid] = res; });
+
+        // Emit a single aggregated log summarizing cached contexts produced by providers in this batch
+        try {
+          const contextsSummary = [];
+          results.forEach((res, pid) => {
+            const keys = res?.meta ? Object.keys(res.meta) : [];
+            if (keys.length > 0) contextsSummary.push(`${pid}: ${keys.join(',')}`);
+          });
+          if (contextsSummary.length > 0) {
+            wdbg(`[WorkflowEngine] Cached context for ${contextsSummary.join('; ')}`);
+          }
+        } catch (_) {}
         
         // ✅ CRITICAL: Update in-memory cache SYNCHRONOUSLY
         this.sessionManager.updateProviderContextsBatch(
@@ -1039,8 +1059,7 @@ async executePromptStep(step, context) {
       throw new Error("No valid sources for synthesis. All providers returned empty or failed responses.");
     }
 
-    console.log(`[WorkflowEngine] Running synthesis with ${sourceData.length} sources:`, 
-      sourceData.map(s => s.providerId).join(', '));
+    wdbg(`[WorkflowEngine] Running synthesis with ${sourceData.length} sources: ${sourceData.map(s => s.providerId).join(', ')}`);
 
     // Look for mapping results from the current workflow
     let mappingResult = null;
@@ -1049,23 +1068,14 @@ async executePromptStep(step, context) {
     if (payload.mappingStepIds && payload.mappingStepIds.length > 0) {
       for (const mappingStepId of payload.mappingStepIds) {
         const mappingStepResult = previousResults.get(mappingStepId);
-        console.log(`[WorkflowEngine] Checking mapping step ${mappingStepId}:`, mappingStepResult);
+        wdbg(`[WorkflowEngine] Checking mapping step ${mappingStepId}: ${JSON.stringify({ status: mappingStepResult?.status, hasResult: !!mappingStepResult?.result })}`);
         
         if (mappingStepResult?.status === 'completed' && mappingStepResult.result?.text) {
           mappingResult = mappingStepResult.result;
-          console.log(`[WorkflowEngine] Found mapping result from step ${mappingStepId} for synthesis:`, {
-            providerId: mappingResult.providerId,
-            textLength: mappingResult.text?.length,
-            textPreview: mappingResult.text?.substring(0, 100) + '...'
-          });
+          wdbg(`[WorkflowEngine] Found mapping result from step ${mappingStepId} for synthesis: providerId=${mappingResult.providerId}, textLength=${mappingResult.text?.length}`);
           break;
         } else {
-          console.log(`[WorkflowEngine] Mapping step ${mappingStepId} not suitable:`, {
-            status: mappingStepResult?.status,
-            hasResult: !!mappingStepResult?.result,
-            hasText: !!mappingStepResult?.result?.text,
-            textLength: mappingStepResult?.result?.text?.length
-          });
+          wdbg(`[WorkflowEngine] Mapping step ${mappingStepId} not suitable: status=${mappingStepResult?.status}, hasResult=${!!mappingStepResult?.result}, hasText=${!!mappingStepResult?.result?.text}`);
         }
       }
       // Enforce presence of mapping output when mapping steps are declared
@@ -1077,7 +1087,7 @@ async executePromptStep(step, context) {
       // Simplified recompute: use pre-fetched latestMappingOutput from resolvedContext
       if (!mappingResult && resolvedContext?.type === 'recompute' && resolvedContext?.latestMappingOutput) {
         mappingResult = resolvedContext.latestMappingOutput;
-        console.log(`[WorkflowEngine] Using pre-fetched historical mapping from ${mappingResult.providerId}`);
+        wdbg(`[WorkflowEngine] Using pre-fetched historical mapping from ${mappingResult.providerId}`);
       }
     }
 
@@ -1130,7 +1140,7 @@ async executePromptStep(step, context) {
           try {
             if (finalResult?.meta) {
               workflowContexts[payload.synthesisProvider] = finalResult.meta;
-              console.log(`[WorkflowEngine] Updated workflow context for ${payload.synthesisProvider}: ${Object.keys(finalResult.meta).join(',')}`);
+              wdbg(`[WorkflowEngine] Updated workflow context for ${payload.synthesisProvider}: ${Object.keys(finalResult.meta).join(',')}`);
             }
           } catch (_) {}
           
@@ -1156,8 +1166,7 @@ async executePromptStep(step, context) {
       throw new Error("No valid sources for mapping. All providers returned empty or failed responses.");
     }
 
-    console.log(`[WorkflowEngine] Running mapping with ${sourceData.length} sources:`, 
-      sourceData.map(s => s.providerId).join(', '));
+    wdbg(`[WorkflowEngine] Running mapping with ${sourceData.length} sources: ${sourceData.map(s => s.providerId).join(', ')}`);
 
     const mappingPrompt = buildMappingPrompt(payload.originalPrompt, sourceData);
 
@@ -1203,7 +1212,7 @@ async executePromptStep(step, context) {
           try {
             if (finalResult?.meta) {
               workflowContexts[payload.mappingProvider] = finalResult.meta;
-              console.log(`[WorkflowEngine] Updated workflow context for ${payload.mappingProvider}: ${Object.keys(finalResult.meta).join(',')}`);
+              wdbg(`[WorkflowEngine] Updated workflow context for ${payload.mappingProvider}: ${Object.keys(finalResult.meta).join(',')}`);
             }
           } catch (_) {}
           

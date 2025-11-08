@@ -298,6 +298,12 @@ export class ChatGPTSessionApi {
    * Ask ChatGPT with mandatory Arkose preflight and PoW.
    */
   async ask(prompt, options = {}, onChunk = () => {}) {
+    // Provider-specific debug flags (off by default)
+    const CHATGPT_DEBUG = false; // gates verbose internal diagnostics
+    const CHATGPT_SESSION_DEBUG = false; // gates session flow logs
+    const dbg = (...args) => { if (CHATGPT_DEBUG) console.debug(...args); };
+    const sesLog = (...args) => { if (CHATGPT_SESSION_DEBUG) console.log(...args); };
+    const sesWarn = (...args) => { if (CHATGPT_SESSION_DEBUG) console.warn(...args); };
     // For log safety only: prepare a display-limited version without altering the actual prompt
     const safeDisplayPrompt =
       typeof prompt === "string"
@@ -354,8 +360,8 @@ export class ChatGPTSessionApi {
               this._offscreenEverReady = true;
               break;
             }
-          } catch (innerError) {
-            console.warn(
+            } catch (innerError) {
+            if (CHATGPT_DEBUG) console.warn(
               `[ChatGPT Debug] Poll attempt failed, retries left: ${
                 retries - 1
               }`,
@@ -369,12 +375,12 @@ export class ChatGPTSessionApi {
         }
       } catch (e) {
         if (String(e).includes("poll_timeout")) {
-          console.warn("[ChatGPT Debug] poll startup.oiReady timed out", {
+          if (CHATGPT_DEBUG) console.warn("[ChatGPT Debug] poll startup.oiReady timed out", {
             ts: Date.now(),
             dur: Date.now() - __chatgpt_offscreen_poll_start,
           });
         } else {
-          console.error("[ChatGPT Debug] poll startup.oiReady error", e, {
+          if (CHATGPT_DEBUG) console.error("[ChatGPT Debug] poll startup.oiReady error", e, {
             ts: Date.now(),
             dur: Date.now() - __chatgpt_offscreen_poll_start,
           });
@@ -382,11 +388,11 @@ export class ChatGPTSessionApi {
         __chatgpt_offscreen_ready = false;
       }
     } else {
-      console.warn("[ChatGPT Debug] No bus.poll method available");
+      if (CHATGPT_DEBUG) console.warn("[ChatGPT Debug] No bus.poll method available");
       __chatgpt_offscreen_ready = false;
     }
 
-    console.log("[ChatGPT Debug] poll startup.oiReady result", {
+    if (CHATGPT_DEBUG) console.log("[ChatGPT Debug] poll startup.oiReady result", {
       result: __chatgpt_offscreen_ready,
       ts: Date.now(),
       dur: Date.now() - __chatgpt_offscreen_poll_start,
@@ -405,22 +411,22 @@ export class ChatGPTSessionApi {
       if (__bg_bus?.poll) {
         await __bg_bus.poll("startup.oiReady");
       } else {
-        console.warn(
+        sesWarn(
           "[ChatGPT Session] No bus.poll available in background context"
         );
       }
     } catch (error) {
-      console.warn(
+      sesWarn(
         "[ChatGPT Session] Offscreen (oi) readiness check failed:",
         error
       );
     }
 
     // Ensure we have (or tried to get) access token
-    console.log("[ChatGPT Session] Ensuring access token...");
+    sesLog("[ChatGPT Session] Ensuring access token...");
     await this._ensureAccessToken();
     const hasToken = !!this._accessToken;
-    console.log(
+    sesLog(
       `[ChatGPT Session] Access token status: ${
         hasToken ? "present" : "missing"
       }`
@@ -474,7 +480,7 @@ export class ChatGPTSessionApi {
       signal,
     });
 
-    console.log(`[ChatGPT Session] Response status: ${res.status}`);
+    sesLog(`[ChatGPT Session] Response status: ${res.status}`);
 
     if (res.status !== 200) {
       const errJson = await this._safeJson(res);
@@ -495,7 +501,7 @@ export class ChatGPTSessionApi {
 
     // Prefer SSE path
     if (ct.includes("text/event-stream")) {
-      console.log("[ChatGPT Session] Processing SSE stream...");
+      sesLog("[ChatGPT Session] Processing SSE stream...");
       const reader = res.body.getReader();
       let carry = "";
       let aggText = "";
@@ -531,7 +537,7 @@ export class ChatGPTSessionApi {
             }
           }
         }
-        console.log(
+        sesLog(
           `[ChatGPT Session] SSE stream completed. Total chunks: ${chunkCount}, final text length: ${aggText.length}`
         );
       } catch (e) {
@@ -737,7 +743,7 @@ export class ChatGPTSessionApi {
     const attempt = async () => {
       try {
         const truncatedPayload = JSON.stringify(payload).slice(0, 200) + "...";
-        console.log(
+        sesLog(
           `[ChatGPT Session] Bus call: ${action} payload=${truncatedPayload}`
         );
         const bus = this._getHtosBus();
@@ -751,7 +757,7 @@ export class ChatGPTSessionApi {
         const res = await Promise.race([sendPromise, timeoutPromise]);
         return res;
       } catch (e) {
-        console.log(`[ChatGPT Session] Bus response: ${action} result=error`);
+        sesLog(`[ChatGPT Session] Bus response: ${action} result=error`);
         console.warn(
           `[ChatGPTSessionApi] BusController.send failed: ${action}`,
           e
@@ -767,7 +773,7 @@ export class ChatGPTSessionApi {
       } catch (e) {
         lastErr = e;
         if (i < retries) {
-          console.log(
+          sesLog(
             `[ChatGPTSessionApi] Retrying BusController.send ${action} (attempt ${
               i + 2
             })`
@@ -806,7 +812,7 @@ export class ChatGPTSessionApi {
         scripts,
         dpl,
       };
-      console.log("[ChatGPT Debug] about to call ai.generateProofToken", {
+      if (CHATGPT_DEBUG) console.log("[ChatGPT Debug] about to call ai.generateProofToken", {
         ts: Date.now(),
         payload: { seed, difficulty, scripts: scripts?.length || 0, dpl },
       });
@@ -816,13 +822,14 @@ export class ChatGPTSessionApi {
         __chatgpt_gen_payload,
         { timeoutMs: 15000, retries: 2 }
       ).catch((e) => {
-        console.error("[ChatGPT Debug] ai.generateProofToken error", e, {
+        // Always surface errors; debug gating should not suppress failures
+        console.error("[ChatGPT] ai.generateProofToken error", e, {
           ts: Date.now(),
           dur: Date.now() - __chatgpt_gen_start,
         });
         throw e;
       });
-      console.log("[ChatGPT Debug] ai.generateProofToken response", {
+      if (CHATGPT_DEBUG) console.log("[ChatGPT Debug] ai.generateProofToken response", {
         res: __chatgpt_gen_res,
         ts: Date.now(),
         dur: Date.now() - __chatgpt_gen_start,
@@ -927,7 +934,7 @@ export class ChatGPTSessionApi {
         accessToken: this._accessToken, // Pass the access token.
       };
 
-      console.log("[ChatGPT Debug] about to call ai.retrieveArkoseToken", {
+      if (CHATGPT_DEBUG) console.log("[ChatGPT Debug] about to call ai.retrieveArkoseToken", {
         ts: Date.now(),
         payload: {
           dx: "<redacted-for-logs>",
@@ -943,14 +950,15 @@ export class ChatGPTSessionApi {
         payload,
         { timeoutMs: 15000, retries: 2 }
       ).catch((e) => {
-        console.error("[ChatGPT Debug] ai.retrieveArkoseToken error", e, {
+        // Always surface errors; debug gating should not suppress failures
+        console.error("[ChatGPT] ai.retrieveArkoseToken error", e, {
           ts: Date.now(),
           dur: Date.now() - __chatgpt_ret_start,
         });
         throw e;
       });
 
-      console.log("[ChatGPT Debug] ai.retrieveArkoseToken response", {
+      if (CHATGPT_DEBUG) console.log("[ChatGPT Debug] ai.retrieveArkoseToken response", {
         res: __chatgpt_ret_res,
         ts: Date.now(),
         dur: Date.now() - __chatgpt_ret_start,
@@ -979,7 +987,7 @@ export class ChatGPTSessionApi {
     // PoW header - fail fast if required but generation fails
     const pow = requirements?.[AE_CONFIG.pow.$proofofwork];
     if (pow?.[AE_CONFIG.pow.$required]) {
-      console.log("[ChatGPT Session] PoW token required, generating...");
+      sesLog("[ChatGPT Session] PoW token required, generating...");
       const seed = pow?.[AE_CONFIG.pow.$seed];
       const difficulty = pow?.[AE_CONFIG.pow.$difficulty];
 
@@ -1000,6 +1008,7 @@ export class ChatGPTSessionApi {
         }
         headers[AE_CONFIG.pow.headerName] = token;
       } catch (e) {
+        // Keep error logs visible regardless of debug flag
         console.error("[ChatGPT Session] PoW token generation failed:", e);
         const isTimeout = String(e).toLowerCase().includes("timeout");
         throw new ChatGPTProviderError(
@@ -1017,7 +1026,7 @@ export class ChatGPTSessionApi {
       AE_CONFIG.requirements.arkoseRequiredPath
     );
     if (arkoseRequired) {
-      console.log("[ChatGPT Session] Arkose token required, retrieving...");
+      sesLog("[ChatGPT Session] Arkose token required, retrieving...");
       const dx = this._get(requirements, AE_CONFIG.requirements.dxPath);
 
       if (!dx) {
@@ -1037,6 +1046,7 @@ export class ChatGPTSessionApi {
         }
         headers[AE_CONFIG.headerName] = arkoseToken;
       } catch (e) {
+        // Keep error logs visible regardless of debug flag
         console.error("[ChatGPT Session] Arkose token retrieval failed:", e);
         const isTimeout = String(e).toLowerCase().includes("timeout");
         throw new ChatGPTProviderError(

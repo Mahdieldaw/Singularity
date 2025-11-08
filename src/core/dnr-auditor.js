@@ -10,12 +10,16 @@
  * DNR Rule Auditor for debugging rule behavior
  */
 export class DNRRuleAuditor {
+    /** Helper: gated debug logger (off by default) */
+    static dbg(...args) {
+        if (DNRUtils?.debugEnabled) console.debug(...args);
+    }
     /**
      * Enable the DNR rule auditor (debug mode only)
      */
     static async enableAuditor() {
         if (this.isEnabled) {
-            console.debug('DNR Auditor: Already enabled');
+            this.dbg('DNR Auditor: Already enabled');
             return true;
         }
         // Check if declarativeNetRequestFeedback permission is available
@@ -33,7 +37,7 @@ export class DNRRuleAuditor {
             // Add listener
             chrome.declarativeNetRequest.onRuleMatchedDebug.addListener(this.listener);
             this.isEnabled = true;
-            console.debug('DNR Auditor: Enabled successfully');
+            this.dbg('DNR Auditor: Enabled successfully');
             return true;
         }
         catch (error) {
@@ -53,7 +57,7 @@ export class DNRRuleAuditor {
         }
         this.listener = null;
         this.isEnabled = false;
-        console.debug('DNR Auditor: Disabled');
+        this.dbg('DNR Auditor: Disabled');
     }
     /**
      * Record a rule match event
@@ -76,7 +80,7 @@ export class DNRRuleAuditor {
             this.matches = this.matches.slice(-this.MAX_STORED_MATCHES);
         }
         // Log the match for immediate visibility
-        console.debug('DNR Rule Match:', {
+        this.dbg('DNR Rule Match:', {
             ruleId: matchEvent.ruleId,
             provider: matchEvent.providerId,
             url: matchEvent.url,
@@ -149,7 +153,7 @@ export class DNRRuleAuditor {
      */
     static clearHistory() {
         this.matches = [];
-        console.debug('DNR Auditor: Match history cleared');
+        this.dbg('DNR Auditor: Match history cleared');
     }
     /**
      * Check if auditor is currently enabled
@@ -210,3 +214,4 @@ DNRRuleAuditor.isEnabled = false;
 DNRRuleAuditor.matches = [];
 DNRRuleAuditor.MAX_STORED_MATCHES = 1000;
 DNRRuleAuditor.listener = null;
+import { DNRUtils } from './dnr-utils.js';

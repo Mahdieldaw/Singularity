@@ -6,6 +6,10 @@
  */
 import { classifyProviderError } from "../core/request-lifecycle-manager.js";
 
+// Provider-specific adapter debug flag (off by default)
+const CHATGPT_ADAPTER_DEBUG = false;
+const pad = (...args) => { if (CHATGPT_ADAPTER_DEBUG) console.log(...args); };
+
 export class ChatGPTAdapter {
   constructor(controller) {
     this.id = "chatgpt";
@@ -28,7 +32,7 @@ export class ChatGPTAdapter {
     try {
       const meta = providerContext?.meta || providerContext || {};
       const hasContinuation = Boolean(meta.conversationId || meta.parentMessageId || meta.messageId);
-      console.log(`[ProviderAdapter] ASK_STARTED provider=${this.id} hasContext=${hasContinuation}`);
+      pad(`[ProviderAdapter] ASK_STARTED provider=${this.id} hasContext=${hasContinuation}`);
       let res;
       if (hasContinuation) {
         res = await this.sendContinuation(prompt, meta, sessionId, onChunk, signal);
@@ -37,7 +41,7 @@ export class ChatGPTAdapter {
       }
       try {
         const len = (res?.text || '').length;
-        console.log(`[ProviderAdapter] ASK_COMPLETED provider=${this.id} ok=${res?.ok !== false} textLen=${len}`);
+        pad(`[ProviderAdapter] ASK_COMPLETED provider=${this.id} ok=${res?.ok !== false} textLen=${len}`);
       } catch (_) {}
       return res;
     } catch (e) {
@@ -84,7 +88,7 @@ export class ChatGPTAdapter {
   async sendPrompt(req, onChunk, signal) {
     const startTime = Date.now();
     // Confirmation-only log: do not print prompt contents to console to avoid clogging logs or exposing data.
-    console.log(`[ChatGPT Adapter] sendPrompt started (provider=${this.id})`);
+    pad(`[ChatGPT Adapter] sendPrompt started (provider=${this.id})`);
     
     try {
       // If Thinking mode requested, route to thinkAsk backend which streams NDJSON
@@ -136,7 +140,7 @@ export class ChatGPTAdapter {
               parentMessageId: lastMessageId || undefined,
             },
           };
-          console.log(`[ChatGPT Adapter] providerComplete (thinking via session): chatgpt status=success, latencyMs=${response.latencyMs}, textLen=${response.text.length}`);
+          pad(`[ChatGPT Adapter] providerComplete (thinking via session): chatgpt status=success, latencyMs=${response.latencyMs}, textLen=${response.text.length}`);
           return response;
         } catch (e) {
           console.warn('[ChatGPT Adapter] think-mode via session failed, falling back to non-think ask()', e);
@@ -191,7 +195,7 @@ export class ChatGPTAdapter {
       };
       
       // Log only the final completion to reduce log volume
-      console.log(`[ChatGPT Adapter] providerComplete: chatgpt status=success, latencyMs=${response.latencyMs}, textLen=${response.text.length}`);
+      pad(`[ChatGPT Adapter] providerComplete: chatgpt status=success, latencyMs=${response.latencyMs}, textLen=${response.text.length}`);
       return response;
       
     } catch (error) {
@@ -207,7 +211,7 @@ export class ChatGPTAdapter {
         latencyMs: Date.now() - startTime
       });
       
-      console.log(`[ChatGPT Session] providerComplete: chatgpt status=failure`);
+      pad(`[ChatGPT Session] providerComplete: chatgpt status=failure`);
       const classification = classifyProviderError("openai-session", error);
       const errorCode = classification.type || "unknown";
       return {
@@ -231,7 +235,7 @@ export class ChatGPTAdapter {
     const conversationIdIn = meta.conversationId;
     const parentMessageIdIn = meta.parentMessageId || meta.messageId;
 
-    console.log('[ChatGPT Session] Starting continuation with context:', {
+    pad('[ChatGPT Session] Starting continuation with context:', {
       hasConversationId: !!conversationIdIn,
       hasParentId: !!parentMessageIdIn
     });
@@ -244,7 +248,7 @@ export class ChatGPTAdapter {
 
     // If no conversation context, fall back to new prompt via sendPrompt
     if (!conversationIdIn) {
-      console.log('[ChatGPT Session] No conversation context found, falling back to sendPrompt');
+      pad('[ChatGPT Session] No conversation context found, falling back to sendPrompt');
       return this.sendPrompt(
         { originalPrompt: prompt, sessionId, meta },
         onChunk,
@@ -298,7 +302,7 @@ export class ChatGPTAdapter {
         },
       };
 
-      console.log(`[ChatGPT Session] Continuation completed in ${response.latencyMs}ms, response length: ${response.text.length}`);
+      pad(`[ChatGPT Session] Continuation completed in ${response.latencyMs}ms, response length: ${response.text.length}`);
       return response;
 
     } catch (error) {

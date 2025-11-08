@@ -223,7 +223,7 @@ export class GeminiSessionApi {
       this._throw("failedToReadResponse", { step: "answer", error: p });
     }
 
-    console.info("[Gemini] Response received:", {
+    if (GEMINI_DEBUG) console.info("[Gemini] Response received:", {
       hasText: !!u?.text,
       textLength: u?.text?.length || 0,
       status: response?.status || "unknown",
@@ -399,3 +399,5 @@ if (typeof window !== "undefined") {
   window.HTOS = window.HTOS || {};
   window.HTOS.GeminiProvider = GeminiProviderController;
 }
+// Provider-specific debug flag (off by default)
+const GEMINI_DEBUG = false;

@@ -5,6 +5,10 @@
  * Build-phase safe: emitted to dist/adapters/*
  */
 import { classifyProviderError } from '../core/request-lifecycle-manager.js';
+
+// Provider-specific adapter debug flag (off by default)
+const CLAUDE_ADAPTER_DEBUG = false;
+const pad = (...args) => { if (CLAUDE_ADAPTER_DEBUG) console.log(...args); };
 export class ClaudeAdapter {
     constructor(controller) {
         this.id = 'claude';
@@ -149,8 +153,8 @@ export class ClaudeAdapter {
             // Ensure final text is returned
             aggregatedText = result?.text ?? aggregatedText;
 
-            // Log only the final completion to reduce log volume
-            console.log(`[ClaudeAdapter] providerComplete: claude status=success, latencyMs=${Date.now() - startTime}, textLen=${(aggregatedText || '').length}`);
+            // Log only the final completion to reduce log volume (gated)
+            pad(`[ClaudeAdapter] providerComplete: claude status=success, latencyMs=${Date.now() - startTime}, textLen=${(aggregatedText || '').length}`);
 
              // Return final result with preserved/updated context
              return {
@@ -196,7 +200,7 @@ export class ClaudeAdapter {
         try {
             const meta = providerContext?.meta || providerContext || {};
             const hasChat = Boolean(meta.chatId || providerContext?.chatId || providerContext?.threadUrl);
-            console.log(`[ProviderAdapter] ASK_STARTED provider=${this.id} hasContext=${hasChat}`);
+            pad(`[ProviderAdapter] ASK_STARTED provider=${this.id} hasContext=${hasChat}`);
             let res;
             if (hasChat) {
                 res = await this.sendContinuation(prompt, providerContext, sessionId, onChunk, signal);
@@ -205,7 +209,7 @@ export class ClaudeAdapter {
             }
             try {
                 const len = (res?.text || '').length;
-                console.log(`[ProviderAdapter] ASK_COMPLETED provider=${this.id} ok=${res?.ok !== false} textLen=${len}`);
+                pad(`[ProviderAdapter] ASK_COMPLETED provider=${this.id} ok=${res?.ok !== false} textLen=${len}`);
             } catch (_) {}
             return res;
         } catch (e) {

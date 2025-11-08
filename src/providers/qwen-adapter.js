@@ -4,6 +4,10 @@
  */
 import { classifyProviderError } from '../core/request-lifecycle-manager.js';
 
+// Provider-specific adapter debug flag (off by default)
+const QWEN_ADAPTER_DEBUG = false;
+const pad = (...args) => { if (QWEN_ADAPTER_DEBUG) console.log(...args); };
+
 export class QwenAdapter {
     constructor(controller) {
         this.id = 'qwen';
@@ -143,7 +147,7 @@ export class QwenAdapter {
         try {
             const meta = providerContext?.meta || providerContext || {};
             const hasContinuation = Boolean(meta.sessionId || meta.parentMsgId);
-            console.log(`[ProviderAdapter] ASK_STARTED provider=${this.id} hasContext=${hasContinuation}`);
+            pad(`[ProviderAdapter] ASK_STARTED provider=${this.id} hasContext=${hasContinuation}`);
             let res;
             if (hasContinuation) {
                 res = await this.sendContinuation(prompt, meta, sessionId, onChunk, signal);
@@ -152,7 +156,7 @@ export class QwenAdapter {
             }
             try {
                 const len = (res?.text || '').length;
-                console.log(`[ProviderAdapter] ASK_COMPLETED provider=${this.id} ok=${res?.ok !== false} textLen=${len}`);
+                pad(`[ProviderAdapter] ASK_COMPLETED provider=${this.id} ok=${res?.ok !== false} textLen=${len}`);
             } catch (_) {}
             return res;
         } catch (e) {

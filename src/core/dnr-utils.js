@@ -17,6 +17,11 @@ export class DNRUtils {
   static initialized = false;
   static STORAGE_KEY = 'dnr_rules_backup';
 
+  // Gated debug logger (off by default)
+  static dbg(...args) {
+    if (this.debugEnabled) console.debug(...args);
+  }
+
   /** Register a tab-scoped DNR rule */
   static async registerTabScoped(tabId, rule, providerId) {
     const ruleId = this.ruleIdCounter++;
@@ -26,7 +31,7 @@ export class DNRUtils {
       this.scopedRules.set(ruleId, { id: ruleId, tabId, providerId, rule: fullRule });
       // Persist updated counter and rule tracking so SW restarts do not collide IDs
       try { await this.persistRules(); } catch (e) { console.warn('DNR: persist after registerTabScoped failed', e); }
-      console.debug(`DNR: Registered tab-scoped rule ${ruleId} for tab ${tabId}`, providerId ? `(${providerId})` : '');
+      this.dbg(`DNR: Registered tab-scoped rule ${ruleId} for tab ${tabId}`, providerId ? `(${providerId})` : '');
       return ruleId;
     } catch (error) {
       console.error('Failed to register tab-scoped DNR rule:', error);
@@ -48,7 +53,7 @@ export class DNRUtils {
       setTimeout(() => {
         this.removeRule(ruleId).catch(err => console.warn(`Failed to auto-remove expired DNR rule ${ruleId}:`, err));
       }, durationMs);
-      console.debug(`DNR: Registered temporary rule ${ruleId} (expires in ${durationMs}ms)`, providerId ? `(${providerId})` : '');
+      this.dbg(`DNR: Registered temporary rule ${ruleId} (expires in ${durationMs}ms)`, providerId ? `(${providerId})` : '');
       return ruleId;
     } catch (error) {
       console.error('Failed to register temporary DNR rule:', error);
@@ -86,7 +91,7 @@ export class DNRUtils {
         sessionRuleIds.forEach(id => this.sessionRules.delete(id));
       }
       
-      console.debug(`DNR: Cleaned up ${totalExpired} expired rules (${expiredDynamicRules.length} dynamic, ${expiredSessionRules.length} session)`);
+      this.dbg(`DNR: Cleaned up ${totalExpired} expired rules (${expiredDynamicRules.length} dynamic, ${expiredSessionRules.length} session)`);
     } catch (error) {
       console.error('Failed to cleanup expired DNR rules:', error);
     }
@@ -144,7 +149,7 @@ export class DNRUtils {
       // Persist rules for service worker restart recovery
       await this.persistRules();
 
-      console.debug(`DNR: Registered header rule ${finalRuleId} for ${headerName}=${headerValue}`, 
+      this.dbg(`DNR: Registered header rule ${finalRuleId} for ${headerName}=${headerValue}`, 
         `(${useSessionRules ? 'session' : 'dynamic'}, ${providerId || 'no-provider'})`);
       
       // Schedule cleanup for temporary rules
@@ -199,7 +204,7 @@ export class DNRUtils {
       // Persist updated rules
       await this.persistRules();
       
-      console.debug(`DNR: Removed rule ${ruleId}`);
+      this.dbg(`DNR: Removed rule ${ruleId}`);
     } catch (error) {
       console.error(`Failed to remove DNR rule ${ruleId}:`, error);
       throw error;
@@ -229,7 +234,7 @@ export class DNRUtils {
       if (totalRemoved > 0) {
         // Persist updated rules
         await this.persistRules();
-        console.debug(`DNR: Removed ${totalRemoved} rules for provider ${providerId}`);
+        this.dbg(`DNR: Removed ${totalRemoved} rules for provider ${providerId}`);
       }
     } catch (error) {
       console.error(`Failed to remove provider rules for ${providerId}:`, error);
@@ -269,7 +274,7 @@ export class DNRUtils {
   /** Enable debug mode with rule match logging */
   static enableDebugMode() {
     if (this.debugEnabled) {
-      console.debug('DNR: Debug mode already enabled');
+      this.dbg('DNR: Debug mode already enabled');
       return;
     }
     
@@ -279,7 +284,7 @@ export class DNRUtils {
     }
     
     this.debugListener = (info) => {
-      console.debug('DNR Rule Match:', {
+      this.dbg('DNR Rule Match:', {
         ruleId: info.rule.ruleId,
         tabId: info.request.tabId,
         url: info.request.url,
@@ -292,13 +297,13 @@ export class DNRUtils {
     
     chrome.declarativeNetRequest.onRuleMatchedDebug.addListener(this.debugListener);
     this.debugEnabled = true;
-    console.debug('DNR: Debug mode enabled');
+    this.dbg('DNR: Debug mode enabled');
   }
 
   /** Disable debug mode */
   static disableDebugMode() {
     if (!this.debugEnabled) {
-      console.debug('DNR: Debug mode already disabled');
+      this.dbg('DNR: Debug mode already disabled');
       return;
     }
     
@@ -308,7 +313,7 @@ export class DNRUtils {
     
     this.debugListener = null;
     this.debugEnabled = false;
-    console.debug('DNR: Debug mode disabled');
+    this.dbg('DNR: Debug mode disabled');
   }
 
   /** Start periodic cleanup of expired rules */
@@ -330,7 +335,7 @@ export class DNRUtils {
     if (this.cleanupInterval) {
       clearInterval(this.cleanupInterval);
       this.cleanupInterval = null;
-      console.debug('DNR: Stopped periodic cleanup');
+      this.dbg('DNR: Stopped periodic cleanup');
     }
   }
 
@@ -346,7 +351,7 @@ export class DNRUtils {
       this.startPeriodicCleanup();
       
       this.initialized = true;
-      console.debug('DNR: Initialized successfully');
+      this.dbg('DNR: Initialized successfully');
     } catch (error) {
       console.error('DNR: Initialization failed:', error);
     }
@@ -394,7 +399,7 @@ export class DNRUtils {
       // Clean up expired rules immediately
       await this.cleanupExpiredRules();
       
-      console.debug('DNR: Restored persisted rules');
+      this.dbg('DNR: Restored persisted rules');
     } catch (error) {
       console.warn('DNR: Failed to restore persisted rules:', error);
     }
@@ -404,7 +409,7 @@ export class DNRUtils {
   static async clearPersistedRules() {
     try {
       await chrome.storage.local.remove(this.STORAGE_KEY);
-      console.debug('DNR: Cleared persisted rules');
+      this.dbg('DNR: Cleared persisted rules');
     } catch (error) {
       console.warn('DNR: Failed to clear persisted rules:', error);
     }
@@ -417,10 +422,10 @@ export class ProviderDNRGate {
 
   /** Ensure provider prerequisites are met before network operations */
   static async ensureProviderDnrPrereqs(providerId, tabId) {
-    console.debug(`DNR Gate: Ensuring prerequisites for ${providerId}`);
+    DNRUtils.dbg(`DNR Gate: Ensuring prerequisites for ${providerId}`);
     const rules = this.getProviderRules(providerId);
     if (rules.length === 0) {
-      console.debug(`DNR Gate: No prerequisites needed for ${providerId}`);
+      DNRUtils.dbg(`DNR Gate: No prerequisites needed for ${providerId}`);
       return;
     }
     const ruleIds = [];
@@ -438,7 +443,7 @@ export class ProviderDNRGate {
       }
       const existingRules = this.providerRules.get(providerId) || [];
       this.providerRules.set(providerId, [...existingRules, ...ruleIds]);
-      console.debug(`DNR Gate: Activated ${ruleIds.length} rules for ${providerId}`);
+      DNRUtils.dbg(`DNR Gate: Activated ${ruleIds.length} rules for ${providerId}`);
     } catch (error) {
       for (const ruleId of ruleIds) {
         await DNRUtils.removeRule(ruleId).catch(() => {});

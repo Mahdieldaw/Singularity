@@ -432,35 +432,26 @@ export class SessionManager {
   
 
   /**
-   * Get or create a session (enhanced with persistence layer support)
+   * Get or create a session (persistence-backed with cache)
    */
   async getOrCreateSession(sessionId) {
     if (!sessionId) throw new Error('sessionId required');
-    // 1. Check cache first to avoid redundant DB reads
-    if (this.sessions && this.sessions[sessionId]) {
+    
+    // 1. Check in-memory cache first
+    if (this.sessions?.[sessionId]) {
       console.log(`[SessionManager] Cache hit for session: ${sessionId}`);
       return this.sessions[sessionId];
     }
+    
     // 2. Fallback to persistence-backed retrieval/creation
     console.log(`[SessionManager] Cache miss for session: ${sessionId}. Fetching from DB...`);
-    return this.getOrCreateSessionWithPersistence(sessionId);
-  }
-
-  /**
-   * Get or create session using new persistence layer
-   */
-  async getOrCreateSessionWithPersistence(sessionId) {
+    
     try {
-      // Prefer cached session if present
-      if (this.sessions && this.sessions[sessionId]) {
-        console.log(`[SessionManager] (WithPersistence) Cache hit for session: ${sessionId}`);
-        return this.sessions[sessionId];
-      }
-      // Try to get existing session
+      // Try to get existing session from DB
       let sessionRecord = await this.adapter.get('sessions', sessionId);
       
+      // Create new session if doesn't exist
       if (!sessionRecord) {
-        // Create new session
         sessionRecord = {
           id: sessionId,
           userId: 'default-user',
@@ -490,7 +481,7 @@ export class SessionManager {
         await this.adapter.put('threads', defaultThread);
       }
       
-      // Build lightweight session metadata for UI
+      // Build lightweight session metadata for cache/UI
       const lightweightSession = {
         id: sessionRecord.id,
         title: sessionRecord.title,
@@ -499,7 +490,10 @@ export class SessionManager {
         lastTurnId: sessionRecord.lastTurnId || null,
         lastActivity: sessionRecord.lastActivity || sessionRecord.updatedAt || sessionRecord.createdAt
       };
+      
+      // Update cache
       this.sessions[sessionId] = lightweightSession;
+      
       return lightweightSession;
     } catch (error) {
       console.error(`[SessionManager] Failed to get/create session ${sessionId}:`, error);
@@ -507,19 +501,14 @@ export class SessionManager {
     }
   }
 
+  
+
 
 
   /**
    * Save session (enhanced with persistence layer support)
    */
   async saveSession(sessionId) {
-    return this.saveSessionWithPersistence(sessionId);
-  }
-
-  /**
-   * Save session using new persistence layer
-   */
-  async saveSessionWithPersistence(sessionId) {
     try {
       const session = this.sessions[sessionId];
       if (!session) return;
@@ -538,6 +527,8 @@ export class SessionManager {
     }
   }
 
+  
+
 
   // addTurn() and addTurnWithPersistence() removed. Use persist() primitives.
 
@@ -546,13 +537,6 @@ export class SessionManager {
    * Delete session (enhanced with persistence layer support)
    */
   async deleteSession(sessionId) {
-    return this.deleteSessionWithPersistence(sessionId);
-  }
-
-  /**
-   * Delete session using new persistence layer
-   */
-  async deleteSessionWithPersistence(sessionId) {
     try {
       // Perform an atomic, indexed cascade delete inside a single transaction
       await this.adapter.transaction([
@@ -694,6 +678,8 @@ export class SessionManager {
     }
   }
 
+  
+
   /**
    * Legacy delete session method
    */
@@ -701,14 +687,7 @@ export class SessionManager {
   /**
    * Update provider context (enhanced with persistence layer support)
    */
-  async updateProviderContext(sessionId, providerId, result, preserveChat = true, options = {}) {
-    return this.updateProviderContextWithPersistence(sessionId, providerId, result, preserveChat, options);
-  }
-
-  /**
-   * Update provider context using new persistence layer
-   */
-  async updateProviderContextWithPersistence(sessionId, providerId, result, preserveChat = true, options = {}) {
+  async updateProviderContext(sessionId, providerId, result = true, options = {}) {
     const { skipSave = true } = options;
     if (!sessionId || !providerId) return;
     
@@ -783,15 +762,13 @@ export class SessionManager {
     }
   }
 
+  
+
   /**
    * Batch update multiple provider contexts in a single pass.
    * updates shape: { [providerId]: { text?: string, meta?: object } }
    */
-  async updateProviderContextsBatch(sessionId, updates, preserveChat = true, options = {}) {
-    return this.updateProviderContextsBatchWithPersistence(sessionId, updates, preserveChat, options);
-  }
-
-  async updateProviderContextsBatchWithPersistence(sessionId, updates, preserveChat = true, options = {}) {
+  async updateProviderContextsBatch(sessionId, updates = true, options = {}) {
     const { skipSave = true } = options;
     if (!sessionId || !updates || typeof updates !== 'object') return;
 
@@ -858,6 +835,8 @@ export class SessionManager {
       console.error('[SessionManager] Failed to batch update provider contexts:', error);
     }
   }
+
+  
 
   /**
    * Legacy update provider context method

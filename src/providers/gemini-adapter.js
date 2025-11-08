@@ -6,6 +6,10 @@
  */
 import { classifyProviderError } from "../core/request-lifecycle-manager.js";
 
+// Provider-specific adapter debug flag (off by default)
+const GEMINI_ADAPTER_DEBUG = false;
+const pad = (...args) => { if (GEMINI_ADAPTER_DEBUG) console.log(...args); };
+
 export class GeminiAdapter {
   constructor(controller) {
     this.id = "gemini";
@@ -46,7 +50,7 @@ export class GeminiAdapter {
       // Extract model from request metadata (defaults to "gemini-flash")
       const model = req.meta?.model || "gemini-flash";
 
-      console.log(`[GeminiAdapter] Sending prompt with model: ${model}`);
+      pad(`[GeminiAdapter] Sending prompt with model: ${model}`);
 
       // Send prompt to Gemini with model selection
       const result = await this.controller.geminiSession.ask(
@@ -145,9 +149,7 @@ export class GeminiAdapter {
         );
       }
 
-      console.log(
-        `[GeminiAdapter] Continuing chat with cursor and model: ${model}`
-      );
+      pad(`[GeminiAdapter] Continuing chat with cursor and model: ${model}`);
 
       // Send continuation to Gemini with existing cursor and model
       const result = await this.controller.geminiSession.ask(prompt, {
@@ -221,7 +223,7 @@ export class GeminiAdapter {
     try {
       const meta = providerContext?.meta || providerContext || {};
       const hasCursor = Boolean(meta.cursor || providerContext?.cursor);
-      console.log(`[ProviderAdapter] ASK_STARTED provider=${this.id} hasContext=${hasCursor}`);
+      pad(`[ProviderAdapter] ASK_STARTED provider=${this.id} hasContext=${hasCursor}`);
       let res;
       if (hasCursor) {
         res = await this.sendContinuation(prompt, providerContext, sessionId, onChunk, signal);
@@ -230,7 +232,7 @@ export class GeminiAdapter {
       }
       try {
         const len = (res?.text || '').length;
-        console.log(`[ProviderAdapter] ASK_COMPLETED provider=${this.id} ok=${res?.ok !== false} textLen=${len}`);
+        pad(`[ProviderAdapter] ASK_COMPLETED provider=${this.id} ok=${res?.ok !== false} textLen=${len}`);
       } catch (_) {}
       return res;
     } catch (e) {

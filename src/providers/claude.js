@@ -238,7 +238,7 @@ try {
 const result = { orgId, chatId, text: fullText };
 if (softError) {
   result.softError = softError;
-  console.info('[Claude] Completed with soft-error:', softError.error?.message || 'unknown');
+    if (CLAUDE_DEBUG) console.info('[Claude] Completed with soft-error:', softError.error?.message || 'unknown');
 }
 return result;
     }
@@ -300,7 +300,7 @@ return result;
         if (parsedData.type === "error") { 
           if (hasAccumulatedText) { 
             error = parsedData; 
-            console.warn('[Claude] Trailing error frame (ignored):', parsedData.error?.message || parsedData); 
+    console.warn('[Claude] Trailing error frame (ignored):', parsedData.error?.message || parsedData);
           } else { 
             this._throw("failedToReadResponse", parsedData); 
           } 
@@ -478,3 +478,5 @@ if (typeof window !== 'undefined') {
     window.HTOSClaudeSessionApi = ClaudeSessionApi;
     window.HTOSClaudeModels = ClaudeModels;
 }
+// Provider-specific debug flag (off by default)
+const CLAUDE_DEBUG = false;
