@@ -59,12 +59,12 @@ export function usePortMessageHandler() {
   const activeAiTurnId = useAtomValue(activeAiTurnIdAtom);
   const setActiveAiTurnId = useSetAtom(activeAiTurnIdAtom);
   const setProviderContexts = useSetAtom(providerContextsAtom);
-  const turnsMap = useAtomValue(turnsMapAtom);
   const selectedModels = useAtomValue(selectedModelsAtom);
   const mappingEnabled = useAtomValue(mappingEnabledAtom);
   const mappingProvider = useAtomValue(mappingProviderAtom);
   const synthesisProvider = useAtomValue(synthesisProviderAtom);
   const setLastActivityAt = useSetAtom(lastActivityAtAtom);
+  // Note: We rely on Jotai's per-atom update serialization; no manual pending cache
   
   const streamingBufferRef = useRef<StreamingBuffer | null>(null);
   const activeAiTurnIdRef = useRef<string | null>(null);
@@ -110,44 +110,52 @@ export function usePortMessageHandler() {
           return;
         }
 
-        // Use the hook value, not get(turnsMapAtom)
-        const existingUser = turnsMap.get(userTurnId) as UserTurn | undefined;
-        if (!existingUser) {
-          console.error('[Port] Could not find user turn:', userTurnId);
-          return;
-        }
-
-        // Backfill sessionId on user turn if missing
-        const userTurn: UserTurn = { ...existingUser, sessionId: existingUser.sessionId || msgSessionId || null };
-        if (!existingUser.sessionId && msgSessionId) {
-          setTurnsMap((draft: Map<string, TurnMessage>) => {
-            draft.set(userTurnId, userTurn);
-          });
-        }
-
-        // Use selectedModels hook value to compute active providers
+        // Compute active providers at the time of creation
         const activeProviders = LLM_PROVIDERS_CONFIG
           .filter(p => selectedModels[p.id])
           .map(p => p.id as ProviderKey);
 
-        const aiTurn = createOptimisticAiTurn(
-          aiTurnId,
-          userTurn,
-          activeProviders,
-          !!synthesisProvider,
-          !!mappingEnabled && !!mappingProvider,
-          synthesisProvider || undefined,
-          mappingProvider || undefined,
-          Date.now(),
-          userTurn.id
-        );
-
+        // Single atomic update to turnsMap ensures we read the latest user turn
         setTurnsMap((draft: Map<string, TurnMessage>) => {
+          const existing = draft.get(userTurnId);
+          if (!existing || existing.type !== 'user') {
+            // Under Jotai's per-atom serialization, the user turn should be present.
+            // If not, avoid creating the AI turn prematurely.
+            console.error('[Port] TURN_CREATED: user turn missing in updater for', userTurnId);
+            return;
+          }
+          const existingUser = existing as UserTurn;
+          const ensuredUser: UserTurn = {
+            ...existingUser,
+            sessionId: existingUser.sessionId || msgSessionId || currentSessionId || null,
+          };
+          // Backfill sessionId if it was missing
+          draft.set(userTurnId, ensuredUser);
+
+          const aiTurn = createOptimisticAiTurn(
+            aiTurnId,
+            ensuredUser,
+            activeProviders,
+            !!synthesisProvider,
+            !!mappingEnabled && !!mappingProvider,
+            synthesisProvider || undefined,
+            mappingProvider || undefined,
+            Date.now(),
+            ensuredUser.id,
+            {
+              synthesis: !!synthesisProvider,
+              mapping: !!mappingEnabled && !!mappingProvider,
+            }
+          );
           draft.set(aiTurnId, aiTurn);
         });
-        setTurnIds((draft: string[]) => {
-          draft.push(aiTurnId);
+
+        // Ensure ordering in ID list (user first, then AI)
+        setTurnIds((idsDraft: string[]) => {
+          if (!idsDraft.includes(userTurnId)) idsDraft.push(userTurnId);
+          if (!idsDraft.includes(aiTurnId)) idsDraft.push(aiTurnId);
         });
+
         setActiveAiTurnId(aiTurnId);
         setLastActivityAt(Date.now());
         break;
@@ -406,6 +414,87 @@ export function usePortMessageHandler() {
           }
         } else if (status === 'failed') {
           console.error(`[Port] Step failed: ${stepId}`, error);
+          // Update the corresponding response entry to reflect the error
+          try {
+            const stepType = getStepType(stepId);
+            if (stepType) {
+              let providerId: string | null | undefined = result?.providerId;
+              if ((!providerId || typeof providerId !== 'string') && (stepType === 'synthesis' || stepType === 'mapping')) {
+                providerId = extractProviderFromStepId(stepId, stepType);
+              }
+              const targetId = activeRecomputeRef.current?.aiTurnId || activeAiTurnIdRef.current;
+              if (targetId && providerId) {
+                setTurnsMap((draft: Map<string, TurnMessage>) => {
+                  const existing = draft.get(targetId);
+                  if (!existing || existing.type !== 'ai') return;
+                  const aiTurn = existing as AiTurn;
+                  const errText = typeof error === 'string' ? error : (result?.text || '');
+                  const now = Date.now();
+                  if (stepType === 'synthesis') {
+                    const arr = Array.isArray(aiTurn.synthesisResponses?.[providerId!])
+                      ? [...(aiTurn.synthesisResponses![providerId!] as any[])]
+                      : [];
+                    if (arr.length > 0) {
+                      const latest = arr[arr.length - 1] as any;
+                      arr[arr.length - 1] = {
+                        ...latest,
+                        status: 'error',
+                        text: errText || (latest?.text ?? ''),
+                        updatedAt: now,
+                      };
+                    } else {
+                      arr.push({
+                        providerId: providerId!,
+                        text: errText || '',
+                        status: 'error',
+                        createdAt: now,
+                        updatedAt: now,
+                      } as any);
+                    }
+                    aiTurn.synthesisResponses = { ...(aiTurn.synthesisResponses || {}), [providerId!]: arr as any };
+                  } else if (stepType === 'mapping') {
+                    const arr = Array.isArray(aiTurn.mappingResponses?.[providerId!])
+                      ? [...(aiTurn.mappingResponses![providerId!] as any[])]
+                      : [];
+                    if (arr.length > 0) {
+                      const latest = arr[arr.length - 1] as any;
+                      arr[arr.length - 1] = {
+                        ...latest,
+                        status: 'error',
+                        text: errText || (latest?.text ?? ''),
+                        updatedAt: now,
+                      };
+                    } else {
+                      arr.push({
+                        providerId: providerId!,
+                        text: errText || '',
+                        status: 'error',
+                        createdAt: now,
+                        updatedAt: now,
+                      } as any);
+                    }
+                    aiTurn.mappingResponses = { ...(aiTurn.mappingResponses || {}), [providerId!]: arr as any };
+                  } else if (stepType === 'batch') {
+                    const existingBatch = (aiTurn.batchResponses || {})[providerId!];
+                    aiTurn.batchResponses = {
+                      ...(aiTurn.batchResponses || {}),
+                      [providerId!]: {
+                        providerId: providerId!,
+                        text: errText || (existingBatch?.text || ''),
+                        status: 'error',
+                        createdAt: existingBatch?.createdAt || now,
+                        updatedAt: now,
+                        meta: existingBatch?.meta || {},
+                      },
+                    } as any;
+                  }
+                });
+              }
+            }
+          } catch (e) {
+            console.warn('[Port] Failed to tag error state on turn response', e);
+          }
+
           setIsLoading(false);
           setUiPhase('awaiting_action');
           setLastActivityAt(Date.now());
@@ -443,7 +532,6 @@ export function usePortMessageHandler() {
     setUiPhase,
     setActiveAiTurnId,
     setProviderContexts,
-    turnsMap,
     selectedModels,
     mappingEnabled,
     mappingProvider,

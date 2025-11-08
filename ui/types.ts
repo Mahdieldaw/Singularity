@@ -1,17 +1,15 @@
 // src/ui/types.ts
 
 /**
- * UI-LAYER TYPES ,/bn
- * 
+ * UI-LAYER TYPES
+ *
  * This file serves as the single source of truth for all UI type definitions.
  * It imports types from the shared contract and persistence layers, then re-exports
  * them along with UI-specific types to create a unified type system.
  */
 
-import type { Descendant } from 'slate';
-
 // Import types from shared contract (runtime types)
-import type { 
+import type {
   ProviderKey,
   ProviderResponse as ContractProviderResponse,
   AiTurn as ContractAiTurn,
@@ -20,7 +18,7 @@ import type {
 import { isUserTurn as isUserTurnContract, isAiTurn as isAiTurnContract } from '../shared/contract';
 
 // Import types from persistence layer (schema types)
-import type { 
+import type {
   DocumentRecord as SchemaDocumentRecord,
   CanvasBlockRecord,
   GhostRecord,
@@ -31,7 +29,8 @@ import type {
   AiTurnRecord,
   ProviderResponseRecord
 } from '../src/persistence/types';
-// UI typing for canvas tabs
+
+// Import UI typing for Tiptap editor content
 import type { JSONContent } from '@tiptap/react';
 
 // UI typing for canvas tabs
@@ -47,7 +46,6 @@ export interface CanvasTabData {
 // RE-EXPORTED TYPES FROM SHARED CONTRACT
 // =============================================================================
 
-// Core provider and workflow types
 export type { ProviderKey, PortMessage } from '../shared/contract';
 
 // Provider response type (unified from contract)
@@ -58,8 +56,7 @@ export type ProviderResponseStatus = ProviderResponse['status'];
 // RE-EXPORTED TYPES FROM PERSISTENCE LAYER
 // =============================================================================
 
-// Re-export persistence types for UI use
-export type { 
+export type {
   SessionRecord,
   ThreadRecord,
   TurnRecord,
@@ -102,7 +99,7 @@ export interface LLMProvider {
 // UNIFIED TURN TYPES (UI-ADAPTED FROM CONTRACT)
 // =============================================================================
 
-/** Represents a turn initiated by the user (UI-adapted). */
+/** Represents a turn initiated by the user. */
 export interface UserTurn {
   type: 'user';
   id: string;
@@ -111,31 +108,23 @@ export interface UserTurn {
   sessionId: string | null;
 }
 
-/** 
- * Represents a turn from the AI, containing all provider responses (UI-adapted).
+/**
+ * Represents a turn from the AI, containing all provider responses.
  * This extends the contract AiTurn with UI-specific properties.
  */
 export interface AiTurn extends Omit<ContractAiTurn, 'type'> {
   type: 'ai';
-  // Add UI-specific properties
   composerState?: ComposerState;
   hiddenBatchOutputs?: Record<string, ProviderResponse>;
-  
-  // DEPRECATED BUT KEPT FOR TRANSITION:
-  /** @deprecated Use `batchResponses`, `synthesisResponses`, or `mappingResponses` instead. */
-  providerResponses?: Record<string, ProviderResponse>;
-  isSynthesisAnswer?: boolean;
-  isMappingAnswer?: boolean;
-  isHidden?: boolean;
 }
 
 /** The union type for any message in the chat timeline. This is the main type for the `messages` state array. */
 export type TurnMessage = UserTurn | AiTurn;
 
-/** Type guard to check if a turn is a UserTurn (runtime in contract). */
+/** Type guard to check if a turn is a UserTurn. */
 export const isUserTurn = (turn: TurnMessage): turn is UserTurn => isUserTurnContract(turn as any);
 
-/** Type guard to check if a turn is an AiTurn (runtime in contract). */
+/** Type guard to check if a turn is an AiTurn. */
 export const isAiTurn = (turn: TurnMessage): turn is AiTurn => isAiTurnContract(turn as any);
 
 // =============================================================================
@@ -154,17 +143,12 @@ export interface HistorySessionSummary {
   messages?: TurnMessage[];
 }
 
-/** ALIAS: This keeps `App.tsx` working without needing to find/replace `ChatSession` everywhere yet. */
-export type ChatSession = HistorySessionSummary;
-
 /** The shape of the API response when fetching the list of chat sessions. */
 export interface HistoryApiResponse {
   sessions: HistorySessionSummary[];
 }
 
-/** 
- * The shape of the API response when fetching a full session to load into the UI.
- */
+/** The shape of the API response when fetching a full session to load into the UI. */
 export interface FullSessionPayload {
   id: string;
   sessionId: string;
@@ -175,24 +159,10 @@ export interface FullSessionPayload {
   providerContexts: Record<string, any>;
 }
 
-/** ALIAS: This keeps `App.tsx` working without needing to find/replace `BackendFullSession` yet. */
-export type BackendFullSession = FullSessionPayload;
-
-/** DEPRECATED: Old message format from legacy port communication. Replaced by contract.ts types. */
-/** @deprecated Replaced by the PortMessage types in `shared/contract.ts` */
-export interface BackendMessage {
-  type: string;
-  sessionId: string;
-  [key: string]: any;
-}
-
 // =============================================================================
 // COMPOSER MODE TYPE DEFINITIONS
 // =============================================================================
 
-export type SlateDescendant = Descendant;
-
-// Unified Provenance type (combining UI and persistence layer concepts)
 export interface Provenance {
   sessionId: string;
   aiTurnId: string;
@@ -202,12 +172,10 @@ export interface Provenance {
   textRange?: [number, number];
 }
 
-// Unified DocumentRecord that extends persistence schema but uses Slate types
 export interface DocumentRecord extends Omit<SchemaDocumentRecord, 'canvasContent' | 'canvasTabs'> {
-  canvasContent: SlateDescendant[];
+  canvasContent: JSONContent;
   canvasTabs?: CanvasTabData[];
   activeTabId?: string;
-  // Add temporary storage flag for enhanced document store
   _tempStorage?: boolean;
 }
 
@@ -244,7 +212,6 @@ export interface ExportEntry {
   metadata?: Record<string, any>;
 }
 
-// Unified Ghost type (UI-adapted from persistence layer)
 export interface Ghost {
   id: string;
   text: string;
@@ -256,7 +223,7 @@ export interface Ghost {
 }
 
 export interface ComposerState {
-  canvasContent: SlateDescendant[];
+  canvasContent: JSONContent;
   granularity: 'full' | 'paragraph' | 'sentence';
   sourceMap: ContentSourceMap;
   isDirty: boolean;
@@ -267,8 +234,7 @@ export interface ComposerState {
   exportHistory: ExportEntry[];
   ghosts: Ghost[];
   documentId?: string;
-  // Add content property for compatibility
-  content: SlateDescendant[];
+  content: JSONContent;
 }
 
 export interface GranularUnit {
@@ -291,10 +257,10 @@ export interface ComposableSource {
 
 export interface ComposerContextValue {
   activeAiTurn: AiTurn | null;
-  canvasContent: SlateDescendant[];
+  canvasContent: JSONContent;
   granularityLevel: 'full' | 'paragraph' | 'sentence';
   selectedSources: ComposableSource[];
-  updateCanvas: (content: SlateDescendant[]) => void;
+  updateCanvas: (content: JSONContent) => void;
   persistComposerState: () => void;
   setGranularity: (level: 'full' | 'paragraph' | 'sentence') => void;
 }

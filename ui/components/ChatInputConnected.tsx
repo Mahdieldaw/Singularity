@@ -18,7 +18,7 @@ const ChatInputConnected = () => {
   const [isVisibleMode] = useAtom(isVisibleModeAtom as any) as [boolean, any];
   const [isReducedMotion] = useAtom(isReducedMotionAtom as any) as [boolean, any];
   const [, setChatInputHeight] = useAtom(chatInputHeightAtom);  // ← ADD THIS
-  const { sendMessage } = useChat();
+  const { sendMessage, abort } = useChat();
 
   const handleSend = useCallback((prompt: string) => {
     void sendMessage(prompt, 'new');
@@ -27,11 +27,15 @@ const ChatInputConnected = () => {
   const handleCont = useCallback((prompt: string) => {
     void sendMessage(prompt, 'continuation');
   }, [sendMessage]);
+  const handleAbort = useCallback(() => {
+    void abort();
+  }, [abort]);
 
   return (
     <ChatInput
       onSendPrompt={handleSend}
       onContinuation={handleCont}
+      onAbort={handleAbort}
       isLoading={isLoading}
       isReducedMotion={isReducedMotion}
       activeProviderCount={activeProviderCount}

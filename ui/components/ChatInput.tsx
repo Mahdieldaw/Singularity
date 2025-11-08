@@ -3,6 +3,8 @@ import { useState, useEffect, useRef } from 'react';
 interface ChatInputProps {
   onSendPrompt: (prompt: string) => void;
   onContinuation: (prompt: string) => void;
+  // Abort/Stop current workflow
+  onAbort?: () => void;
   isLoading: boolean;
   isReducedMotion?: boolean;
   activeProviderCount: number;
@@ -19,6 +21,7 @@ interface ChatInputProps {
 const ChatInput = ({
     onSendPrompt,
     onContinuation,
+  onAbort,
   isLoading,
   isReducedMotion = false,
   activeProviderCount,
@@ -90,6 +93,7 @@ const ChatInput = ({
   const buttonText = isContinuationMode ? 'Continue' : 'Send';
   const isDisabled = isLoading || mappingActive || !prompt.trim();
   const showMappingBtn = canShowMapping && !!prompt.trim();
+  const showAbortBtn = !!onAbort && isLoading;
 
   // Status color for system pill
   const statusColor = isLoading ? '#f59e0b' : '#10b981';
@@ -196,6 +200,26 @@ const ChatInput = ({
             </>
           )}
         </button>
+
+        {/* Abort/Stop Button - visible while loading */}
+        {showAbortBtn && (
+          <button
+            type="button"
+            onClick={() => onAbort?.()}
+            title="Stop current workflow"
+            className="stop-button"
+            style={{
+              padding: '0px 12px', height: '38px',
+              background: 'rgba(239, 68, 68, 0.15)', border: '1px solid rgba(239, 68, 68, 0.45)',
+              borderRadius: '16px', color: '#fecaca', fontWeight: 600, cursor: 'pointer',
+              transition: isReducedMotion ? undefined : 'all 0.2s ease', display: 'flex', alignItems: 'center', gap: '8px',
+              minWidth: '90px', justifyContent: 'center'
+            }}
+          >
+            <span style={{ fontSize: '16px' }}>⏹️</span>
+            <span>Stop</span>
+          </button>
+        )}
         
         {/* Mapping Button (ChatInput path) */}
         {showMappingBtn && (

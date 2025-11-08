@@ -21,7 +21,7 @@ import {
   isHistoryPanelOpenAtom 
 } from '../state/atoms';
 // Optimistic AI turn creation is now handled upon TURN_CREATED from backend
-import type { ExecuteWorkflowRequest, ProviderKey, PrimitiveWorkflowRequest } from '../../shared/contract';
+import type { ProviderKey, PrimitiveWorkflowRequest } from '../../shared/contract';
 import { LLM_PROVIDERS_CONFIG } from '../constants';
 import { computeThinkFlag } from '../../src/think/lib/think/computeThinkFlag.js';
 
@@ -89,6 +89,7 @@ export function useChat() {
     setTurnIds((draft: string[]) => {
       draft.push(userTurn.id);
     });
+    // No pending cache: rely on Jotai atom serialization across updaters
 
     try {
       const shouldUseSynthesis = !!(synthesisProvider && activeProviders.length > 1);
@@ -127,7 +128,6 @@ export function useChat() {
             synthesizer: shouldUseSynthesis ? (synthesisProvider as ProviderKey) : undefined,
             mapper: shouldUseMapping ? (effectiveMappingProvider as ProviderKey) : undefined,
             useThinking: computeThinkFlag({ modeThinkButtonOn: thinkOnChatGPT, input: prompt }),
-            providerModes: {},
             providerMeta: {},
             clientUserTurnId: userTurnId,
           };
@@ -312,7 +312,24 @@ export function useChat() {
     }
   }, [currentSessionId, setCurrentSessionId, setTurnsMap, setTurnIds, setActiveAiTurnId]);
 
+  const abort = useCallback(async (): Promise<void> => {
+    try {
+      const sid = currentSessionId;
+      if (!sid) {
+        console.warn('[useChat] abort() called but no currentSessionId');
+      } else {
+        await api.abortWorkflow(sid);
+      }
+    } catch (err) {
+      console.error('[useChat] Failed to abort workflow:', err);
+    } finally {
+      // Immediately reflect stop intent in UI; backend will send finalization if applicable
+      setIsLoading(false);
+      setUiPhase('awaiting_action');
+    }
+  }, [currentSessionId, setIsLoading, setUiPhase]);
+
   // Backward-compat: derive messages for consumers still expecting it
   const messages = useAtomValue(messagesAtom);
-  return { sendMessage, newChat, selectChat, deleteChat, deleteChats, messages };
+  return { sendMessage, newChat, selectChat, deleteChat, deleteChats, abort, messages };
 }

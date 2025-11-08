@@ -4,7 +4,7 @@ import { useAtom, useSetAtom } from 'jotai';
 import { usePortMessageHandler } from './hooks/usePortMessageHandler';
 import { useConnectionMonitoring } from './hooks/useConnectionMonitoring';
 import { useHistoryLoader } from './hooks/useHistoryLoader';
-import { useLoadingWatchdog } from './hooks/useLoadingWatchdog';
+import { useResponsiveLoadingGuard } from './hooks/useLoadingWatchdog';
 import ChatView from './views/ChatView';
 import Header from './components/Header';
 import HistoryPanelConnected from './components/HistoryPanelConnected';
@@ -25,7 +25,8 @@ export default function App() {
   usePortMessageHandler();
   useConnectionMonitoring();
   useHistoryLoader(isInitialized); // Pass the flag to the history loader
-  useLoadingWatchdog();
+  // Non-destructive loading guard: surfaces alerts when idle while loading
+  useResponsiveLoadingGuard({ idleWarnMs: 15000, idleCriticalMs: 45000 });
 
   const [isHistoryOpen, setIsHistoryOpen] = useAtom(isHistoryPanelOpenAtom);
   const [viewMode] = useAtom(viewModeAtom);

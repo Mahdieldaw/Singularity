@@ -331,6 +331,12 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
     getLatestResponse(mappingResponses[activeMappingPid])?.text
   );
 
+  // Respect requested features intent (backward-compatible default true)
+  const requestedSynth = (aiTurn.meta as any)?.requestedFeatures?.synthesis;
+  const requestedMap = (aiTurn.meta as any)?.requestedFeatures?.mapping;
+  const wasSynthRequested = requestedSynth === undefined ? true : !!requestedSynth;
+  const wasMapRequested = requestedMap === undefined ? true : !!requestedMap;
+
   const { synthRef, mapRef, shorterHeight, shorterSection } = useShorterHeight(
     hasSynthesis,
     hasMapping,
@@ -533,6 +539,14 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
                       }}
                     >
                       {(() => {
+                        // If synthesis was not requested for this turn, show a clear placeholder
+                        if (!wasSynthRequested) {
+                          return (
+                            <div style={{ color: "#64748b", fontStyle: "italic", textAlign: "center" }}>
+                              Synthesis not enabled for this turn.
+                            </div>
+                          );
+                        }
                         const latest = activeSynthPid
                           ? getLatestResponse(
                               synthesisResponses[activeSynthPid]
@@ -563,6 +577,30 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
                         }
                         if (activeSynthPid) {
                           const take = displayedSynthesisTake;
+                          // Error rendering for synthesis
+                          if (take && take.status === "error") {
+                            const errText = String(take.text || "Synthesis failed");
+                            return (
+                              <div
+                                style={{
+                                  background: "#1f2937",
+                                  border: "1px solid #ef4444",
+                                  color: "#fecaca",
+                                  borderRadius: 8,
+                                  padding: 12,
+                                }}
+                              >
+                                <div style={{ fontSize: 12, marginBottom: 8 }}>
+                                  {activeSynthPid} · error
+                                </div>
+                                <div className="prose prose-sm max-w-none dark:prose-invert" style={{ lineHeight: 1.7, fontSize: 14 }}>
+                                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                                    {errText}
+                                  </ReactMarkdown>
+                                </div>
+                              </div>
+                            );
+                          }
                           if (!take) {
                             return (
                               <div style={{ color: "#64748b" }}>
@@ -746,14 +784,13 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
                       onClick={() => setMappingTab("options")}
                       title="All Options"
                       style={{
-                        padding: 4,
-                        background:
-                          mappingTab === "options" ? "#334155" : "transparent",
-                        border: "none",
-                        borderRadius: 4,
+                        padding: "4px 8px",
+                        background: "#334155",
+                        border: "1px solid #475569",
+                        borderRadius: 6,
                         color: mappingTab === "options" ? "#e2e8f0" : "#64748b",
                         cursor: "pointer",
-                        display: "flex", // Ensures icon is centered
+                        display: "flex",
                         alignItems: "center",
                         justifyContent: "center",
                       }}
@@ -957,6 +994,14 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
                             );
                           })()
                         : (() => {
+                            // Respect mapping request intent
+                            if (!wasMapRequested) {
+                              return (
+                                <div style={{ color: "#64748b", fontStyle: "italic", textAlign: "center" }}>
+                                  Mapping not enabled for this turn.
+                                </div>
+                              );
+                            }
                             const latest = activeMappingPid
                               ? getLatestResponse(
                                   mappingResponses[activeMappingPid]
@@ -989,6 +1034,30 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
                               const take = getLatestResponse(
                                 mappingResponses[activeMappingPid]
                               );
+                              // Error rendering for mapping
+                              if (take && take.status === "error") {
+                                const errText = String(take.text || "Mapping failed");
+                                return (
+                                  <div
+                                    style={{
+                                      background: "#1f2937",
+                                      border: "1px solid #ef4444",
+                                      color: "#fecaca",
+                                      borderRadius: 8,
+                                      padding: 12,
+                                    }}
+                                  >
+                                    <div style={{ fontSize: 12, marginBottom: 8 }}>
+                                      {activeMappingPid} · error
+                                    </div>
+                                    <div className="prose prose-sm max-w-none dark:prose-invert" style={{ lineHeight: 1.7, fontSize: 14 }}>
+                                      <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                                        {errText}
+                                      </ReactMarkdown>
+                                    </div>
+                                  </div>
+                                );
+                              }
                               if (!take)
                                 return (
                                   <div style={{ color: "#64748b" }}>

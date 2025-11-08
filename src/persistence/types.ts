@@ -1,4 +1,4 @@
-// IndexedDB Schema Type Definitions for HTOS Document Composition System
+// src/persistence/types.ts
 
 // Store configuration types
 export interface StoreConfig {
@@ -17,17 +17,15 @@ export interface IndexConfig {
 
 // 1. Sessions Store
 export interface SessionRecord {
-  id: string;                    // sessionId
+  id: string;
   title: string;
   createdAt: number;
   lastActivity: number;
-  defaultThreadId: string;        // Always 'default-thread'
-  activeThreadId: string;         // Currently active thread
-  turnCount: number;              // Denormalized for performance
-  isActive: boolean;              // Missing property causing errors
-  lastTurnId?: string;            // NEW: pointer to latest AI turn for ContextResolver
-  
-  // ADD THESE NEW FIELDS:
+  defaultThreadId: string;
+  activeThreadId: string;
+  turnCount: number;
+  isActive: boolean;
+  lastTurnId?: string;
   updatedAt: number;
   userId?: string;
   provider?: string;
@@ -41,17 +39,15 @@ export interface ThreadRecord {
   parentThreadId: string | null;
   branchPointTurnId: string | null;
   name: string;
-  title: string;                  // Missing property causing errors
+  title: string;
   color: string;
   isActive: boolean;
   createdAt: number;
   lastActivity: number;
-  
-  // ADD THESE NEW FIELDS:
   updatedAt: number;
   userId?: string;
   turnCount?: number;
-  metadata?: Record<string, any>;  // Missing property causing errors
+  metadata?: Record<string, any>;
 }
 
 // 3. Turns Store
@@ -61,9 +57,7 @@ export interface BaseTurnRecord {
   sessionId: string;
   threadId: string;
   createdAt: number;
-  isDeleted?: boolean;            // Soft delete flag
-  
-  // ADD THESE NEW FIELDS:
+  isDeleted?: boolean;
   updatedAt: number;
   userId?: string;
   role?: string;
@@ -85,11 +79,9 @@ export interface AiTurnRecord extends BaseTurnRecord {
     replacesId?: string;
     isHistoricalRerun?: boolean;
   };
-  // Response counts for quick access
   batchResponseCount: number;
   synthesisResponseCount: number;
   mappingResponseCount: number;
-  // NEW: Turn-scoped provider contexts captured during prompt step
   providerContexts?: Record<string, any>;
 }
 
@@ -97,24 +89,22 @@ export type TurnRecord = UserTurnRecord | AiTurnRecord;
 
 // 4. Provider Responses Store
 export interface ProviderResponseRecord {
-  id: string;                     // CHANGED: was number, now string
-  sessionId: string;               // Denormalized for efficient queries
+  id: string;
+  sessionId: string;
   aiTurnId: string;
-  providerId: string;              // 'claude' | 'gemini' | 'chatgpt' | 'qwen'
+  providerId: string;
   responseType: 'batch' | 'synthesis' | 'mapping' | 'hidden';
-  responseIndex: number;           // 0 for batch, 0+ for synthesis/mapping arrays
+  responseIndex: number;
   text: string;
-  status: 'pending' | 'streaming' | 'completed' | 'error' | 'cancelled'; // ADDED: cancelled
+  status: 'pending' | 'streaming' | 'completed' | 'error' | 'cancelled';
   meta?: any;
   attemptNumber?: number;
   createdAt: number;
   updatedAt: number;
-  
-  // ADD THESE NEW FIELDS:
   completedAt?: number;
   error?: string;
   content?: string;
-  metadata?: Record<string, any>;  // Missing property causing errors
+  metadata?: Record<string, any>;
   tokenUsage?: {
     promptTokens: number;
     completionTokens: number;
@@ -147,25 +137,20 @@ export interface DocumentSnapshot {
 export interface DocumentRecord {
   id: string;
   title: string;
-  sourceSessionId?: string;        // Primary session this doc was created from
-  sessionId?: string;              // Added to fix DocumentsRepository error
-  canvasContent: any[];            // Full Slate.js JSON structure
-  // Tabs state for the canvas editor
+  sourceSessionId?: string;
+  sessionId?: string;
+  canvasContent: any[];
   canvasTabs?: any[];
   activeTabId?: string;
   granularity: 'full' | 'paragraph' | 'sentence';
   isDirty: boolean;
   createdAt: number;
   lastModified: number;
-  version: number;                 // For optimistic locking
-  blockCount: number;              // Denormalized for quick stats
-  
-  // Document metadata
+  version: number;
+  blockCount: number;
   refinementHistory: RefinementEntry[];
   exportHistory: ExportEntry[];
   snapshots: DocumentSnapshot[];
-  
-  // ADD THESE NEW FIELDS:
   updatedAt: number;
   content?: string;
   metadata?: Record<string, any>;
@@ -174,28 +159,24 @@ export interface DocumentRecord {
 
 // 6. Canvas Blocks Store
 export interface CanvasBlockRecord {
-  id: string;                      // Block UUID
+  id: string;
   documentId: string;
-  order: number;                   // Position in document
-  nodeType: string;                // Slate node type
-  text: string;                    // Extracted plain text for search
-  slateNode: any;                  // Full Slate node JSON
-  
+  order: number;
+  nodeType: string;
+  text: string;
+  slateNode: any;
   provenance: {
     sessionId: string;
     aiTurnId: string;
     providerId: string;
     responseType: 'batch' | 'synthesis' | 'mapping' | 'hidden';
     responseIndex: number;
-    textRange?: [number, number];  // Character range if partial
+    textRange?: [number, number];
   };
-  
-  cachedSourceText?: string;       // Cached for orphan resilience
-  isOrphaned?: boolean;            // True if source was deleted
+  cachedSourceText?: string;
+  isOrphaned?: boolean;
   createdAt: number;
   updatedAt: number;
-  
-  // ADD THESE NEW FIELDS:
   parentId?: string;
   children?: string[];
   content?: string;
@@ -206,10 +187,9 @@ export interface CanvasBlockRecord {
 // 7. Ghosts Store
 export interface GhostRecord {
   id: string;
-  documentId: string;               // Document this ghost belongs to
-  text: string;                     // Full cached text (resilience > references)
-  preview: string;                  // First 200 chars for display
-  
+  documentId: string;
+  text: string;
+  preview: string;
   provenance: {
     sessionId: string;
     aiTurnId: string;
@@ -218,12 +198,9 @@ export interface GhostRecord {
     responseIndex: number;
     textRange?: [number, number];
   };
-  
-  order: number;                   // Position in ghost rail
+  order: number;
   createdAt: number;
   isPinned: boolean;
-  
-  // ADD THESE NEW FIELDS:
   timestamp?: number;
   entityId?: string;
   entityType?: string;
@@ -235,17 +212,15 @@ export interface GhostRecord {
 
 // 8. Provider Contexts Store
 export interface ProviderContextRecord {
-  id: string;                      // Missing property causing errors
+  id: string;
   sessionId: string;
   providerId: string;
-  threadId?: string;               // Missing property causing errors
-  meta: any;                       // Provider-specific state
-  text?: string;                   // System message or context
+  threadId?: string;
+  meta: any;
+  text?: string;
   lastUpdated: number;
-  createdAt: number;               // Missing property causing errors
-  updatedAt: number;               // Missing property causing errors
-  
-  // ADD THESE NEW FIELDS:
+  createdAt: number;
+  updatedAt: number;
   isActive?: boolean;
   contextData?: any;
   metadata?: Record<string, any>;
@@ -253,12 +228,12 @@ export interface ProviderContextRecord {
 
 // 9. Metadata Store
 export interface MetadataRecord {
-  id: string;                      // Missing property causing errors
-  key: string;                     // 'schema_version' | 'last_migration' | etc.
-  entityId?: string;               // Missing property causing errors
-  entityType?: string;             // Missing property causing errors
-  sessionId?: string;              // Missing property causing errors
-  createdAt: number;              // Missing property causing errors
+  id: string;
+  key: string;
+  entityId?: string;
+  entityType?: string;
+  sessionId?: string;
+  createdAt: number;
   value: any;
   updatedAt: number;
 }

@@ -33,7 +33,8 @@ export function createOptimisticAiTurn(
   synthesisProvider?: string,
   mappingProvider?: string,
   timestamp?: number,
-  explicitUserTurnId?: string
+  explicitUserTurnId?: string,
+  requestedFeatures?: { synthesis: boolean; mapping: boolean }
 ): AiTurn {
   const now = timestamp || Date.now();
   
@@ -86,7 +87,8 @@ export function createOptimisticAiTurn(
     synthesisResponses,
     mappingResponses,
     meta: {
-      isOptimistic: true
+      isOptimistic: true,
+      ...(requestedFeatures ? { requestedFeatures } : {})
     }
   };
 }

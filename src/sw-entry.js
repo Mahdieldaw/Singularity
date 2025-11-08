@@ -511,46 +511,70 @@ async function handleUnifiedMessage(message, sender, sendResponse) {
               : [];
 
             const rounds = [];
+
+            // Pre-index provider responses by aiTurnId for efficient merging
+            const responsesByAi = new Map();
+            for (const r of (providerResponses || [])) {
+              if (!r || !r.aiTurnId) continue;
+              if (!responsesByAi.has(r.aiTurnId)) responsesByAi.set(r.aiTurnId, []);
+              responsesByAi.get(r.aiTurnId).push(r);
+            }
+
             for (let i = 0; i < sortedTurns.length; i++) {
               const user = sortedTurns[i];
               if (!user || !(user.type === 'user' || user.role === 'user')) continue;
-              // Prefer the immediate next assistant turn or one linked by userTurnId
-              let ai = sortedTurns[i + 1] && (sortedTurns[i + 1].type === 'ai' || sortedTurns[i + 1].role === 'assistant')
-                ? sortedTurns[i + 1]
-                : sortedTurns.find(t => (t.type === 'ai' || t.role === 'assistant') && t.userTurnId === user.id) || null;
-              if (!ai) continue;
 
-              const responsesForAi = (providerResponses || []).filter(r => r && r.aiTurnId === ai.id)
-                .sort((a, b) => (a.responseIndex ?? 0) - (b.responseIndex ?? 0));
+              // Collect all AI turns associated with this user turn (including historical reruns)
+              const allAiForUser = sortedTurns.filter(t => (t.type === 'ai' || t.role === 'assistant') && (t.userTurnId === user.id));
+              if (!allAiForUser || allAiForUser.length === 0) continue;
 
+              // Determine the primary AI turn (the one that is on-timeline)
+              let primaryAi = null;
+              // Prefer immediate next assistant
+              const nextTurn = sortedTurns[i + 1];
+              if (nextTurn && (nextTurn.type === 'ai' || nextTurn.role === 'assistant') && nextTurn.userTurnId === user.id && !(nextTurn?.meta && nextTurn.meta.isHistoricalRerun) && nextTurn.sequence !== -1) {
+                primaryAi = nextTurn;
+              } else {
+                // Otherwise, choose the first AI without isHistoricalRerun flag (sequence != -1)
+                primaryAi = allAiForUser.find(t => !(t?.meta && t.meta.isHistoricalRerun) && t.sequence !== -1) || allAiForUser[0];
+              }
+
+              const createdAt = user.createdAt || user.updatedAt || Date.now();
+              const completedAt = Math.max(...allAiForUser.map(ai => ai.updatedAt || ai.createdAt || createdAt), createdAt);
+
+              // Aggregate provider responses across all AI turns for this user
               const providers = {};
               const synthesisResponses = {};
               const mappingResponses = {};
-              const createdAt = user.createdAt || user.updatedAt || Date.now();
-              const completedAt = ai.updatedAt || ai.createdAt || createdAt;
 
-              for (const r of responsesForAi) {
-                const pid = r.providerId;
-                const baseResp = {
-                  providerId: pid,
-                  text: r.text || '',
-                  status: r.status || 'completed',
-                  meta: r.meta || {},
-                  createdAt: r.createdAt || createdAt,
-                  updatedAt: r.updatedAt || completedAt
-                };
-                if (r.responseType === 'batch') {
-                  providers[pid] = baseResp;
-                } else if (r.responseType === 'synthesis') {
-                  (synthesisResponses[pid] = synthesisResponses[pid] || []).push(baseResp);
-                } else if (r.responseType === 'mapping') {
-                  (mappingResponses[pid] = mappingResponses[pid] || []).push(baseResp);
+              for (const ai of allAiForUser) {
+                const responses = (responsesByAi.get(ai.id) || []).sort((a, b) => (a.responseIndex ?? 0) - (b.responseIndex ?? 0));
+                for (const r of responses) {
+                  const pid = r.providerId;
+                  const baseResp = {
+                    providerId: pid,
+                    text: r.text || '',
+                    status: r.status || 'completed',
+                    meta: r.meta || {},
+                    createdAt: r.createdAt || createdAt,
+                    updatedAt: r.updatedAt || completedAt
+                  };
+                  if (r.responseType === 'batch') {
+                    // Only take batch responses from the primary AI turn
+                    if (ai.id === primaryAi.id) {
+                      providers[pid] = baseResp;
+                    }
+                  } else if (r.responseType === 'synthesis') {
+                    (synthesisResponses[pid] = synthesisResponses[pid] || []).push(baseResp);
+                  } else if (r.responseType === 'mapping') {
+                    (mappingResponses[pid] = mappingResponses[pid] || []).push(baseResp);
+                  }
                 }
               }
 
               rounds.push({
                 userTurnId: user.id,
-                aiTurnId: ai.id,
+                aiTurnId: primaryAi.id,
                 user: { id: user.id, text: user.text || user.content || '', createdAt },
                 providers,
                 synthesisResponses,

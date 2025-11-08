@@ -1,5 +1,4 @@
 // src/ui/services/extension-api.ts
-// Streamlined API with document & ghost helpers + hardened queryBackend
 
 import {
   EXECUTE_WORKFLOW,
@@ -7,18 +6,15 @@ import {
   GET_HISTORY_SESSION,
   DELETE_SESSION,
   DELETE_SESSIONS,
-  GET_SYSTEM_STATUS,
 } from "../../shared/messaging";
 
-import type { HistorySessionSummary, HistoryApiResponse } from "../types";
-import type { ExecuteWorkflowRequest, PrimitiveWorkflowRequest } from "../../shared/contract";
+import type { HistorySessionSummary, HistoryApiResponse, DocumentRecord } from "../types";
+import type { PrimitiveWorkflowRequest } from "../../shared/contract";
 import { PortHealthManager } from './port-health-manager';
-import type { DocumentRecord } from '../types';
 
 interface BackendApiResponse<T = any> {
   success: boolean;
   data?: T;
-  // Some handlers return fields at top-level (e.g. { success: true, documents: [...] })
   [key: string]: any;
 }
 
@@ -27,10 +23,8 @@ let EXTENSION_ID: string | null = null;
 class ExtensionAPI {
   private portHealthManager: PortHealthManager | null = null;
   private connectionStateCallbacks: Set<(connected: boolean) => void> = new Set();
-  private sessionId: string | null = null;
   private port: chrome.runtime.Port | null = null;
   private portMessageHandler: ((message: any) => void) | null = null;
-  private static DEBUG_PORT_LOGS = false;
 
   constructor() {
     this.portHealthManager = new PortHealthManager('htos-popup', {
@@ -39,21 +33,18 @@ class ExtensionAPI {
       onReconnect: () => this.notifyConnectionState(true),
     });
 
-    // Ensure we cleanly disconnect the port when the UI unloads (tab closed, navigate away)
     try {
-      window.addEventListener('beforeunload', () => {
-        try { this.portHealthManager?.disconnect(); } catch {}
-        try { this.port?.disconnect(); } catch {}
-        this.port = null;
-      });
-      window.addEventListener('unload', () => {
-        try { this.portHealthManager?.disconnect(); } catch {}
-        try { this.port?.disconnect(); } catch {}
-        this.port = null;
-      });
+      window.addEventListener('beforeunload', () => this.disconnectAll());
+      window.addEventListener('unload', () => this.disconnectAll());
     } catch (e) {
       console.warn('[ExtensionAPI] Failed to attach unload handlers', e);
     }
+  }
+
+  private disconnectAll() {
+    try { this.portHealthManager?.disconnect(); } catch {}
+    try { this.port?.disconnect(); } catch {}
+    this.port = null;
   }
 
   onConnectionStateChange(callback: (connected: boolean) => void): () => void {
@@ -89,67 +80,62 @@ class ExtensionAPI {
 
   async ensurePort(options: { sessionId?: string; force?: boolean } = {}): Promise<chrome.runtime.Port> {
     const { sessionId, force = false } = options;
-    if (sessionId) this.sessionId = sessionId;
-
-    if (this.port && !force) {
-      const status = this.portHealthManager?.getStatus();
-      if (status?.isConnected) return this.port;
+    if (this.port && !force && this.portHealthManager?.getStatus().isConnected) {
+      return this.port;
     }
 
     if (this.portHealthManager && this.portMessageHandler) {
       this.port = this.portHealthManager.connect(
-        (message) => { if (this.portMessageHandler) this.portMessageHandler(message); },
-        () => { console.warn('[ExtensionAPI] Port disconnected'); this.port = null; }
+        this.portMessageHandler,
+        () => {
+          console.warn('[ExtensionAPI] Port disconnected via callback');
+          this.port = null;
+        }
       );
       return this.port;
     }
 
-    // Fallback
+    // Fallback if manager isn't ready
     if (!EXTENSION_ID) throw new Error('Extension ID not set. Call setExtensionId() on startup.');
     this.port = chrome.runtime.connect(EXTENSION_ID, { name: 'htos-popup' });
-    this.port.onMessage.addListener((message) => { if (this.portMessageHandler) this.portMessageHandler(message); });
-    this.port.onDisconnect.addListener(() => { console.warn('[ExtensionAPI] Port disconnected (fallback)'); this.port = null; });
+    this.port.onMessage.addListener((msg) => this.portMessageHandler?.(msg));
+    this.port.onDisconnect.addListener(() => {
+      console.warn('[ExtensionAPI] Port disconnected (fallback)');
+      this.port = null;
+    });
     return this.port;
   }
 
   setPortMessageHandler(handler: ((message: any) => void) | null): void {
     this.portMessageHandler = handler;
-    if (ExtensionAPI.DEBUG_PORT_LOGS) {
-      console.log("[API] Port message handler registered.");
+  }
+
+  async executeWorkflow(request: PrimitiveWorkflowRequest): Promise<void> {
+    try {
+      const port = await this.ensurePort();
+      this.portHealthManager?.checkHealth();
+      port.postMessage({
+        type: EXECUTE_WORKFLOW,
+        payload: request
+      });
+    } catch (error) {
+      console.error('[ExtensionAPI] Failed to post executeWorkflow message, attempting reconnect:', error);
+      // Attempt a single reconnect and retry
+      const newPort = await this.ensurePort({ force: true });
+      newPort.postMessage({ type: EXECUTE_WORKFLOW, payload: request });
     }
   }
 
-  async executeWorkflow(request: ExecuteWorkflowRequest | PrimitiveWorkflowRequest): Promise<void> {
-    const sid = (request as any)?.sessionId as (string | undefined);
-    const port = await this.ensurePort({ sessionId: typeof sid === 'string' ? sid : undefined });
-    this.portHealthManager?.checkHealth();
-    return new Promise((resolve, reject) => {
-      try {
-        port.postMessage({
-          type: EXECUTE_WORKFLOW,
-          payload: request
-        });
-        resolve();
-      } catch (error) {
-        console.error('[ExtensionAPI] Failed to execute workflow:', error);
-        // Try one reconnect attempt
-        this.ensurePort({ force: true }).then(() => {
-          try {
-            this.port?.postMessage({ type: EXECUTE_WORKFLOW, payload: request });
-            resolve();
-          } catch (retryError) {
-            reject(retryError);
-          }
-        }).catch(reject);
-      }
-    });
+  async abortWorkflow(sessionId: string): Promise<void> {
+    try {
+      const port = await this.ensurePort();
+      port.postMessage({ type: 'abort', sessionId });
+      console.log(`[ExtensionAPI] Sent abort signal for session ${sessionId}`);
+    } catch (error) {
+      console.error('[ExtensionAPI] Failed to send abort signal:', error);
+    }
   }
 
-    // ...
-  /**
-   * queryBackend: Robust handling for different SW response shapes
-   * Accepts both { success: true, data: ... } and { success: true, <top-level fields>... }.
-   */
   async queryBackend<T = any>(message: { type: string; [key: string]: any }): Promise<T> {
     if (!EXTENSION_ID) throw new Error("Extension not connected. Please call setExtensionId on startup or reload the extension.");
 
@@ -181,8 +167,8 @@ class ExtensionAPI {
           }
 
           console.error("[API] Backend error for", message.type, ":", response?.error);
-          const errMsg = response?.error?.message || (response as any)?.error || "Unknown backend error. See extension logs.";
-          return reject(new Error(errMsg));
+          const errMsg = (response?.error as any)?.message || response?.error || "Unknown backend error. See extension logs.";
+          return reject(new Error(errMsg as string));
         });
       } catch (err) {
         console.error("[API] Fatal extension error:", err);
@@ -209,7 +195,6 @@ class ExtensionAPI {
   }
 
   // === DOCUMENT & GHOST METHODS ===
-
   async saveDocument(doc: DocumentRecord): Promise<void> {
     await this.queryBackend<void>({
       type: 'SAVE_DOCUMENT',
@@ -225,7 +210,6 @@ class ExtensionAPI {
       documentId: id,
       reconstructContent: true
     });
-    // backend may return { document: ... } or document directly
     if (!response) return null;
     return response.document ?? response;
   }
@@ -235,9 +219,9 @@ class ExtensionAPI {
       type: 'LIST_DOCUMENTS'
     }).catch((e) => {
       console.error('[API] listDocuments failed:', e);
-      return { documents: [] } as any;
+      return { documents: [] };
     });
-    return (response && (response.documents || response)) || [];
+    return response?.documents || [];
   }
 
   async deleteDocument(id: string): Promise<void> {
@@ -251,7 +235,7 @@ class ExtensionAPI {
       text,
       provenance
     });
-    return response.ghost ?? response;
+    return response?.ghost;
   }
 
   async getDocumentGhosts(documentId: string): Promise<any[]> {
@@ -260,31 +244,22 @@ class ExtensionAPI {
       documentId
     }).catch((e) => {
       console.error('[API] getDocumentGhosts failed:', e);
-      return { ghosts: [] } as any;
+      return { ghosts: [] };
     });
-
-    // Normalize to an array
-    const ghosts = (response && (response.ghosts ?? response)) as any[];
-    return ghosts || [];
+    return response?.ghosts || [];
   }
-  
-
 
   async deleteGhost(ghostId: string): Promise<void> {
     await this.queryBackend<void>({ type: 'DELETE_GHOST', ghostId });
   }
 
-  // deprecation & no-op helpers
+  // === DEPRECATED & NO-OP HELPERS ===
   setSessionId(sessionId: string): void {
-    console.log(`[API] setSessionId called for ${sessionId}, but sync is now implicit.`);
+    console.log(`[API] setSessionId called for ${sessionId}, but this is now handled automatically.`);
   }
 
   updateProviderContext(providerId: string, context: any): void {
     console.warn("`updateProviderContext` is deprecated. Context is managed by the backend.");
-  }
-
-  clearSession(sessionId: string): void {
-    console.log(`Clearing UI-related state for session ${sessionId}`);
   }
 }
 
