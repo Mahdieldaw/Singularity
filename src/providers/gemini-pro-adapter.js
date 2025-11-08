@@ -184,4 +184,30 @@ export class GeminiProAdapter {
       };
     }
   }
+
+  /**
+   * Unified ask API: prefer continuation when cursor exists, else start new.
+   * ask(prompt, providerContext?, sessionId?, onChunk?, signal?)
+   */
+  async ask(prompt, providerContext = null, sessionId = undefined, onChunk = undefined, signal = undefined) {
+    try {
+      const meta = providerContext?.meta || providerContext || {};
+      const hasCursor = Boolean(meta.cursor || providerContext?.cursor);
+      console.log(`[ProviderAdapter] ASK_STARTED provider=${this.id} hasContext=${hasCursor}`);
+      let res;
+      if (hasCursor) {
+        res = await this.sendContinuation(prompt, providerContext, sessionId, onChunk, signal);
+      } else {
+        res = await this.sendPrompt({ originalPrompt: prompt, sessionId, meta }, onChunk, signal);
+      }
+      try {
+        const len = (res?.text || '').length;
+        console.log(`[ProviderAdapter] ASK_COMPLETED provider=${this.id} ok=${res?.ok !== false} textLen=${len}`);
+      } catch (_) {}
+      return res;
+    } catch (e) {
+      console.warn(`[ProviderAdapter] ASK_FAILED provider=${this.id}:`, e?.message || String(e));
+      throw e;
+    }
+  }
 }

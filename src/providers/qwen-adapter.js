@@ -134,4 +134,30 @@ export class QwenAdapter {
             };
         }
     }
+
+    /**
+     * Unified ask API: prefer continuation when sessionId/parentMsgId exists, else start new.
+     * ask(prompt, providerContext?, sessionId?, onChunk?, signal?)
+     */
+    async ask(prompt, providerContext = null, sessionId = undefined, onChunk = undefined, signal = undefined) {
+        try {
+            const meta = providerContext?.meta || providerContext || {};
+            const hasContinuation = Boolean(meta.sessionId || meta.parentMsgId);
+            console.log(`[ProviderAdapter] ASK_STARTED provider=${this.id} hasContext=${hasContinuation}`);
+            let res;
+            if (hasContinuation) {
+                res = await this.sendContinuation(prompt, meta, sessionId, onChunk, signal);
+            } else {
+                res = await this.sendPrompt({ originalPrompt: prompt, sessionId, meta }, onChunk, signal);
+            }
+            try {
+                const len = (res?.text || '').length;
+                console.log(`[ProviderAdapter] ASK_COMPLETED provider=${this.id} ok=${res?.ok !== false} textLen=${len}`);
+            } catch (_) {}
+            return res;
+        } catch (e) {
+            console.warn(`[ProviderAdapter] ASK_FAILED provider=${this.id}:`, e?.message || String(e));
+            throw e;
+        }
+    }
 }

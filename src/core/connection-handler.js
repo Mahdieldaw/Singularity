@@ -70,7 +70,9 @@ export class ConnectionHandler {
     return async (message) => {
       if (!message || !message.type) return;
 
-      console.log(`[ConnectionHandler] Received: ${message.type}`);
+      if (message.type !== "keepalive_ping") {
+        console.log(`[ConnectionHandler] Received: ${message.type}`);
+      }
 
       try {
         switch (message.type) {

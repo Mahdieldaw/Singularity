@@ -74,7 +74,6 @@ class ExtensionAPI {
   setExtensionId(id: string): void {
     if (!EXTENSION_ID) {
       EXTENSION_ID = id;
-      console.log("[ExtensionAPI] setExtensionId:", EXTENSION_ID);
     }
   }
 

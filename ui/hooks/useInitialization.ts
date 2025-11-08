@@ -10,67 +10,69 @@ import {
   activeClipsAtom,
 } from '../state/atoms';
 import api from '../services/extension-api';
-import { LLM_PROVIDERS_CONFIG } from '../constants';
 
-// This hook now returns a single boolean: `isInitialized`
+// 1. Module-level flag → survives React StrictMode double-mount
+let hasModuleInitialized = false;
+
 export function useInitialization(): boolean {
   const [isInitialized, setIsInitialized] = useState(false);
 
-  // Get setters for all atoms that need to be reset
-  const setTurnsMap = useSetAtom(turnsMapAtom);
-  const setTurnIds = useSetAtom(turnIdsAtom);
-  const setCurrentSessionId = useSetAtom(currentSessionIdAtom);
-  const setSelectedModels = useSetAtom(selectedModelsAtom);
+  // Setters for all atoms we need to reset
+  const setTurnsMap           = useSetAtom(turnsMapAtom);
+  const setTurnIds            = useSetAtom(turnIdsAtom);
+  const setCurrentSessionId   = useSetAtom(currentSessionIdAtom);
+  const setSelectedModels     = useSetAtom(selectedModelsAtom);
   const setIsHistoryPanelOpen = useSetAtom(isHistoryPanelOpenAtom);
-  const setActiveClips = useSetAtom(activeClipsAtom);
+  const setActiveClips        = useSetAtom(activeClipsAtom);
 
   useEffect(() => {
-    // Prevent this from running more than once
-    if (isInitialized) return;
+    if (hasModuleInitialized) return;          // already done
+    hasModuleInitialized = true;               // reserve slot immediately
 
     const initialize = async () => {
-      // --- Stage 1: Connection Handshake (from your old API init hook) ---
-      // This MUST happen first.
+      // --- Stage 1: Connection handshake ---
       if (typeof chrome !== 'undefined' && chrome.runtime?.id) {
         api.setExtensionId(chrome.runtime.id);
         console.log('[Init] Extension ID set.');
       } else {
-        console.error('[Init] CRITICAL: Could not get chrome.runtime.id. API calls will fail.');
-        // In a real app, you might want to show a permanent error screen here.
-        return; 
+        throw new Error('CRITICAL: chrome.runtime.id unavailable – API calls will fail.');
       }
 
-      // --- Stage 2: State Reset & Defaulting ---
-      // Clear Map-based chat state to ensure a clean start
-      setTurnsMap((draft) => { draft.clear(); });
-      setTurnIds((draft) => { draft.length = 0; });
-      setCurrentSessionId(null); // Critical: Start with no session
-      
+      // --- Stage 2: Reset all UI state ---
+      setTurnsMap(draft => draft.clear());
+      setTurnIds(draft => { draft.length = 0; });
+      setCurrentSessionId(null);
       setActiveClips({});
-      
-      // Restore last-used selected models if available; otherwise respect atom default
+
+      // --- Stage 3: Restore user preferences (best-effort) ---
       try {
         const raw = localStorage.getItem('htos_selected_models');
-        if (raw) {
-          const parsed = JSON.parse(raw);
-          if (parsed && typeof parsed === 'object') {
-            setSelectedModels(parsed);
-          }
-        }
-      } catch (_) {
-        // best-effort only
-      }
-      setIsHistoryPanelOpen(false);
-      console.log('[Init] UI state has been reset to defaults.');
+        if (raw) setSelectedModels(JSON.parse(raw));
+      } catch { /* ignore */ }
 
-      // --- Stage 3: Mark Initialization as Complete ---
-      // This unblocks the rest of the application.
-      setIsInitialized(true);
-      console.log('[Init] Initialization complete. Application is ready.');
+      setIsHistoryPanelOpen(false);
+      console.log('[Init] UI state reset to defaults.');
     };
 
-    initialize();
-  }, [isInitialized, setTurnsMap, setTurnIds, setCurrentSessionId, setSelectedModels, setIsHistoryPanelOpen, setActiveClips]);
+    // --- Stage 4: Run init and handle success/failure ---
+    (async () => {
+      try {
+        await initialize();          // real work
+        setIsInitialized(true);      // mark hook-level success
+        console.log('[Init] Initialization complete. Application is ready.');
+      } catch (err) {
+        console.error('[Init] Initialization failed:', err);
+        hasModuleInitialized = false; // allow retry on next mount
+      }
+    })();
+  }, [
+    setTurnsMap,
+    setTurnIds,
+    setCurrentSessionId,
+    setSelectedModels,
+    setIsHistoryPanelOpen,
+    setActiveClips,
+  ]);
 
   return isInitialized;
 }

@@ -20,6 +20,32 @@ export class ChatGPTAdapter {
     this.controller = controller;
   }
 
+  /**
+   * Unified ask API: prefer continuation when context identifiers exist, else start new.
+   * ask(prompt, providerContext?, sessionId?, onChunk?, signal?)
+   */
+  async ask(prompt, providerContext = null, sessionId = undefined, onChunk = undefined, signal = undefined) {
+    try {
+      const meta = providerContext?.meta || providerContext || {};
+      const hasContinuation = Boolean(meta.conversationId || meta.parentMessageId || meta.messageId);
+      console.log(`[ProviderAdapter] ASK_STARTED provider=${this.id} hasContext=${hasContinuation}`);
+      let res;
+      if (hasContinuation) {
+        res = await this.sendContinuation(prompt, meta, sessionId, onChunk, signal);
+      } else {
+        res = await this.sendPrompt({ originalPrompt: prompt, sessionId, meta }, onChunk, signal);
+      }
+      try {
+        const len = (res?.text || '').length;
+        console.log(`[ProviderAdapter] ASK_COMPLETED provider=${this.id} ok=${res?.ok !== false} textLen=${len}`);
+      } catch (_) {}
+      return res;
+    } catch (e) {
+      console.warn(`[ProviderAdapter] ASK_FAILED provider=${this.id}:`, e?.message || String(e));
+      throw e;
+    }
+  }
+
   // Compatibility shim: delegate adapter._getAccessToken to controller
   async _getAccessToken() {
     try {

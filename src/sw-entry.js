@@ -229,6 +229,15 @@ class FaultTolerantOrchestrator {
         }
 
         let aggregatedText = ""; // Buffer for this provider's partials
+        const startTime = Date.now();
+        let firstPartialAt = null;
+
+        // Uniform dispatch-start log for cross-provider timing comparison
+        try {
+          const metaKeys = Object.keys((providerContexts[providerId]?.meta) || (providerContexts[providerId] || {}));
+          const modelOverride = (providerMeta?.[providerId] || {}).model || (providerContexts[providerId]?.model) || (providerContexts[providerId]?.meta?.model) || 'auto';
+          console.log(`[Fanout] DISPATCH_STARTED provider=${providerId} sessionId=${sessionId} useThinking=${useThinking ? 'true' : 'false'} model=${modelOverride} contextKeys=${metaKeys.join('|')}`);
+        } catch (_) {}
 
         // If we have a provider-specific context, attempt a continuation.
         // Each adapter's sendContinuation will gracefully fall back to sendPrompt
@@ -245,25 +254,56 @@ class FaultTolerantOrchestrator {
         };
 
         try {
-          // Favor "send prompt with context" as the single path for both new and continued chats.
-          // When context exists, it's already merged into request.meta above.
-          const result = await adapter.sendPrompt(
-            request,
-            (chunk) => {
-              const textChunk = typeof chunk === 'string' ? chunk : chunk.text;
-              if (textChunk) aggregatedText += textChunk;
-              onPartial(providerId, typeof chunk === 'string' ? { text: chunk } : chunk);
-            },
-            abortController.signal
-          );
+          // Favor unified ask() if available; fall back to sendPrompt().
+          // ask(prompt, providerContext?, sessionId?, onChunk, signal)
+          const providerContext = providerContexts[providerId] || providerContexts[providerId]?.meta || null;
+          const onChunkWrapped = (chunk) => {
+            const textChunk = typeof chunk === 'string' ? chunk : chunk.text;
+            if (textChunk) aggregatedText += textChunk;
+            if (!firstPartialAt) {
+              firstPartialAt = Date.now();
+              try {
+                const preview = (textChunk || '').slice(0, 80);
+                console.log(`[Fanout] FIRST_PARTIAL provider=${providerId} t=${firstPartialAt - startTime}ms preview=${JSON.stringify(preview)}`);
+              } catch (_) {}
+            }
+            onPartial(providerId, typeof chunk === 'string' ? { text: chunk } : chunk);
+          };
+
+          let result;
+          if (typeof adapter.ask === 'function') {
+            result = await adapter.ask(
+              request.originalPrompt,
+              providerContexts[providerId] || null,
+              sessionId,
+              onChunkWrapped,
+              abortController.signal
+            );
+          } else {
+            // When context exists, it's already merged into request.meta above.
+            result = await adapter.sendPrompt(
+              request,
+              onChunkWrapped,
+              abortController.signal
+            );
+          }
           
           if (!result.text && aggregatedText) {
             result.text = aggregatedText;
           }
+          try {
+            const latency = result.latencyMs ?? (Date.now() - startTime);
+            const len = (result.text || '').length;
+            const ok = result.ok !== false;
+            console.log(`[Fanout] PROVIDER_COMPLETE provider=${providerId} ok=${ok} latencyMs=${latency} textLen=${len}`);
+          } catch (_) {}
           
           return { providerId, status: 'fulfilled', value: result };
 
         } catch (error) {
+          try {
+            console.warn(`[Fanout] PROVIDER_ERROR provider=${providerId}`, error?.message || String(error));
+          } catch (_) {}
           if (aggregatedText) {
             return {
               providerId,
