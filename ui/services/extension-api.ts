@@ -6,6 +6,7 @@ import {
   GET_HISTORY_SESSION,
   DELETE_SESSION,
   DELETE_SESSIONS,
+  RENAME_SESSION,
 } from "../../shared/messaging";
 
 import type { HistorySessionSummary, HistoryApiResponse, DocumentRecord } from "../types";
@@ -191,6 +192,13 @@ class ExtensionAPI {
 
   deleteBackgroundSessions(sessionIds: string[]): Promise<{ removed: number; ids: string[] }> {
     return this.queryBackend<{ removed: number; ids: string[] }>({ type: DELETE_SESSIONS, payload: { sessionIds } });
+  }
+
+  renameSession(sessionId: string, title: string): Promise<{ updated: boolean; sessionId: string; title: string }> {
+    return this.queryBackend<{ updated: boolean; sessionId: string; title: string }>({
+      type: RENAME_SESSION,
+      payload: { sessionId, title }
+    });
   }
 
   // === DOCUMENT & GHOST METHODS ===

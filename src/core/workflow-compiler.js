@@ -98,7 +98,11 @@ _createBatchStep(request, context) {
 }
 
 _createMappingStep(request, context, linkIds = {}) {
-  const mappingStepId = `mapping-${Date.now()}`;
+  // Include provider in stepId so UI can derive provider on failure without result payload
+  const mappingProviderId = context.type === 'recompute'
+    ? context.targetProvider
+    : (request.mapper || this._getDefaultMapper(request));
+  const mappingStepId = `mapping-${mappingProviderId}-${Date.now()}`;
 
   if (context.type === 'recompute') {
     return {
@@ -118,7 +122,7 @@ _createMappingStep(request, context, linkIds = {}) {
   }
 
   // Use mapper from primitive
-  const mapper = request.mapper || this._getDefaultMapper(request);
+  const mapper = mappingProviderId;
   
   return {
     stepId: mappingStepId,
@@ -134,7 +138,11 @@ _createMappingStep(request, context, linkIds = {}) {
 }
 
 _createSynthesisStep(request, context, linkIds = {}) {
-  const synthStepId = `synthesis-${Date.now()}`;
+  // Include provider in stepId so UI can derive provider on failure without result payload
+  const synthesisProviderId = context.type === 'recompute'
+    ? context.targetProvider
+    : (request.synthesizer || this._getDefaultSynthesizer(request));
+  const synthStepId = `synthesis-${synthesisProviderId}-${Date.now()}`;
 
   if (context.type === 'recompute') {
     return {
@@ -156,7 +164,7 @@ _createSynthesisStep(request, context, linkIds = {}) {
   }
 
   // Use synthesizer from primitive
-  const synthesizer = request.synthesizer || this._getDefaultSynthesizer(request);
+  const synthesizer = synthesisProviderId;
   
   return {
     stepId: synthStepId,

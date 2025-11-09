@@ -127,8 +127,29 @@ const CompactModelTray = ({
     return `[${activeCount} Models]`;
   };
   
-  const getMapLabel = () => isMapEnabled ? `[Map: ${selectedProviders.find(p => p.id === mapProviderId)?.name || 'None'}]` : '[Map]';
-  const getUnifyLabel = () => isUnifyEnabled ? `[Unify: ${selectedProviders.find(p => p.id === unifyProviderId)?.name || 'None'}]` : '[Unify]';
+  // Helper: find provider name from full config (even if not in witness selection)
+  const getProviderName = (id: string | null | undefined) => {
+    if (!id) return '';
+    const match = LLM_PROVIDERS_CONFIG.find(p => p.id === id);
+    return match?.name || id;
+  };
+
+  // Simplified labels: only show 'inactive' when fewer than two witness models are selected
+  const getMapLabel = () => {
+    if (!isMapEnabled) return '[Map]';
+    const name = getProviderName(mapProviderId);
+    const inactive = activeCount < 2; // refine requires 2+
+    const hint = inactive ? ' • inactive' : '';
+    return `[Map: ${name || 'None'}${hint}]`;
+  };
+
+  const getUnifyLabel = () => {
+    if (!isUnifyEnabled) return '[Unify]';
+    const name = getProviderName(unifyProviderId);
+    const inactive = activeCount < 2;
+    const hint = inactive ? ' • inactive' : '';
+    return `[Unify: ${name || 'None'}${hint}]`;
+  };
   
   // Handle outside clicks for closing expanded and dropdowns
   useEffect(() => {
@@ -294,8 +315,6 @@ const CompactModelTray = ({
                     key={provider.id}
                     onClick={() => {
                       if (isLoading) return;
-                      // Ensure provider is enabled globally
-                      if (!selectedModels[provider.id]) onToggleModel(provider.id);
 
                       const clickedId = provider.id;
                       // If selecting the same as Unify, auto-switch Unify to a fallback (do not block selection)
@@ -419,8 +438,6 @@ const CompactModelTray = ({
                         checked={isSelected}
                         onChange={() => {
                           if (isLoading) return;
-                          // enable provider globally if not already
-                          if (!selectedModels[provider.id]) onToggleModel(provider.id);
                           
                           const clickedId = provider.id;
                           // If selecting same as Map, auto-switch Map to fallback
@@ -465,8 +482,6 @@ const CompactModelTray = ({
                       key={provider.id}
                       onClick={() => {
                         if (isLoading) return;
-                        // enable globally if not selected
-                        if (!selectedModels[provider.id]) onToggleModel(provider.id);
                         const clickedId = provider.id;
                         // If selecting same as Map, auto-switch Map to a fallback
                         if (mapProviderId && mapProviderId === clickedId) {

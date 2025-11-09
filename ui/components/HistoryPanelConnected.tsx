@@ -4,6 +4,7 @@ import { historySessionsAtom, isHistoryLoadingAtom, isHistoryPanelOpenAtom, curr
 import { useChat } from '../hooks/useChat';
 import HistoryPanel from './HistoryPanel';
 import api from '../services/extension-api';
+import RenameDialog from './RenameDialog';
 
 export default function HistoryPanelConnected() {
   const sessions = useAtomValue(historySessionsAtom);
@@ -16,6 +17,9 @@ export default function HistoryPanelConnected() {
   const [deletingIds, setDeletingIds] = useState<Set<string>>(new Set());
   const [isBatchMode, setIsBatchMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [renameSessionId, setRenameSessionId] = useState<string | null>(null);
+  const [renameDefaultTitle, setRenameDefaultTitle] = useState<string>('');
+  const [isRenaming, setIsRenaming] = useState<boolean>(false);
 
   const handleDeleteChat = async (sessionId: string) => {
     // Track pending deletion
@@ -118,20 +122,93 @@ export default function HistoryPanelConnected() {
     }
   };
 
+  const openRenameDialog = (sessionId: string, currentTitle: string) => {
+    setRenameSessionId(sessionId);
+    setRenameDefaultTitle(currentTitle || 'Untitled');
+  };
+
+  const closeRenameDialog = () => {
+    if (isRenaming) return; // prevent closing during active rename to avoid accidental state issues
+    setRenameSessionId(null);
+    setRenameDefaultTitle('');
+  };
+
+  const handleRenameChat = async (newTitle: string) => {
+    const sessionId = renameSessionId;
+    if (!sessionId) return;
+    setIsRenaming(true);
+
+    // Optimistically update local history list
+    const prevSessions = sessions;
+    setHistorySessions((draft: any) => (
+      draft.map((s: any) => {
+        const id = s.sessionId || s.id;
+        if (id === sessionId) {
+          return { ...s, title: newTitle };
+        }
+        return s;
+      })
+    ));
+
+    try {
+    const res = await api.renameSession(sessionId, newTitle);
+    
+    // ✅ FIX: Just check if updated is false/undefined, don't access .error
+    if (!res?.updated) {
+      throw new Error('Rename failed');
+    }
+      // Revalidate with backend list to ensure consistency
+      try {
+        const response = await api.getHistoryList();
+        const refreshed = (response?.sessions || []).map((s: any) => ({
+          id: s.sessionId,
+          sessionId: s.sessionId,
+          title: s.title || 'Untitled',
+          startTime: s.startTime || Date.now(),
+          lastActivity: s.lastActivity || Date.now(),
+          messageCount: s.messageCount || 0,
+          firstMessage: s.firstMessage || '',
+          messages: []
+        }));
+        setHistorySessions(refreshed as any);
+      } catch (e) {
+        console.warn('[HistoryPanel] Failed to refresh after rename, keeping optimistic title:', e);
+      }
+      closeRenameDialog();
+    } catch (e) {
+      console.error('[HistoryPanel] Rename failed:', e);
+      // revert optimistic update
+      setHistorySessions(prevSessions as any);
+    } finally {
+      setIsRenaming(false);
+    }
+  };
+
   return (
-    <HistoryPanel
-      isOpen={isOpen}
-      sessions={sessions}
-      isLoading={isLoading}
-      onNewChat={newChat}
-      onSelectChat={selectChat}
-      onDeleteChat={handleDeleteChat}
-      deletingIds={deletingIds}
-      isBatchMode={isBatchMode}
-      selectedIds={selectedIds}
-      onToggleBatchMode={handleToggleBatchMode}
-      onToggleSessionSelected={handleToggleSelected}
-      onConfirmBatchDelete={handleConfirmBatchDelete}
-    />
+    <>
+      <HistoryPanel
+        isOpen={isOpen}
+        sessions={sessions}
+        isLoading={isLoading}
+        onNewChat={newChat}
+        onSelectChat={selectChat}
+        onDeleteChat={handleDeleteChat}
+        onRenameChat={(sessionId: string, currentTitle: string) => openRenameDialog(sessionId, currentTitle)}
+        deletingIds={deletingIds}
+        isBatchMode={isBatchMode}
+        selectedIds={selectedIds}
+        onToggleBatchMode={handleToggleBatchMode}
+        onToggleSessionSelected={handleToggleSelected}
+        onConfirmBatchDelete={handleConfirmBatchDelete}
+      />
+
+      <RenameDialog
+        isOpen={!!renameSessionId}
+        onClose={closeRenameDialog}
+        onRename={handleRenameChat}
+        defaultTitle={renameDefaultTitle}
+        isRenaming={isRenaming}
+      />
+    </>
   );
 }

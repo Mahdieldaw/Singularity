@@ -768,6 +768,46 @@ async function handleUnifiedMessage(message, sender, sendResponse) {
         }
         return true;
       }
+
+      case 'RENAME_SESSION': {
+        try {
+          const sessionId = message.sessionId || message.payload?.sessionId;
+          const newTitleRaw = message.title || message.payload?.title;
+          if (!sessionId) {
+            sendResponse({ success: false, error: 'Missing sessionId' });
+            return true;
+          }
+          const newTitle = String(newTitleRaw ?? '').trim();
+          if (!newTitle) {
+            sendResponse({ success: false, error: 'Title cannot be empty' });
+            return true;
+          }
+
+          // Persistence-first rename
+          const record = await sm.adapter.get('sessions', sessionId);
+          if (!record) {
+            sendResponse({ success: false, error: `Session ${sessionId} not found` });
+            return true;
+          }
+          record.title = newTitle;
+          record.updatedAt = Date.now();
+          await sm.adapter.put('sessions', record);
+
+          // Update lightweight cache if present
+          try {
+            if (sm.sessions && sm.sessions[sessionId]) {
+              sm.sessions[sessionId].title = newTitle;
+              sm.sessions[sessionId].updatedAt = record.updatedAt;
+            }
+          } catch (_) {}
+
+          sendResponse({ success: true, updated: true, sessionId, title: newTitle });
+        } catch (e) {
+          console.error('[SW] RENAME_SESSION failed:', e);
+          sendResponse({ success: false, error: e?.message || String(e) });
+        }
+        return true;
+      }
         
       case 'GET_PERSISTENCE_STATUS': {
         const layer = self.__HTOS_PERSISTENCE_LAYER || persistenceLayer;

@@ -18,6 +18,8 @@ export const GET_SYSTEM_STATUS = 'GET_SYSTEM_STATUS';
 // Maintenance / cleanup
 export const DELETE_SESSION = 'DELETE_SESSION';
 export const DELETE_SESSIONS = 'DELETE_SESSIONS';
+// Rename existing session title
+export const RENAME_SESSION = 'RENAME_SESSION';
 
 // ChatGPT Provider Messages
 export const CHATGPT_CHECK_REQUIREMENTS = 'CHATGPT_CHECK_REQUIREMENTS';

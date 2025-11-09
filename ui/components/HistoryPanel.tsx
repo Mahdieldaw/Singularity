@@ -8,6 +8,7 @@ interface HistoryPanelProps {
   onNewChat: () => void;
   onSelectChat: (session: HistorySessionSummary) => void;
   onDeleteChat: (sessionId: string) => void;
+  onRenameChat?: (sessionId: string, currentTitle: string) => void;
   // IDs currently being deleted (optimistic UI feedback)
   deletingIds?: Set<string>;
   // Batch selection mode
@@ -18,7 +19,7 @@ interface HistoryPanelProps {
   onConfirmBatchDelete?: () => void;
 }
 
-const HistoryPanel = ({ isOpen, sessions, isLoading, onNewChat, onSelectChat, onDeleteChat, deletingIds, isBatchMode = false, selectedIds, onToggleBatchMode, onToggleSessionSelected, onConfirmBatchDelete }: HistoryPanelProps) => {
+const HistoryPanel = ({ isOpen, sessions, isLoading, onNewChat, onSelectChat, onDeleteChat, onRenameChat, deletingIds, isBatchMode = false, selectedIds, onToggleBatchMode, onToggleSessionSelected, onConfirmBatchDelete }: HistoryPanelProps) => {
 
   const panelStyle: any = {
     position: 'relative',
@@ -76,6 +77,18 @@ const HistoryPanel = ({ isOpen, sessions, isLoading, onNewChat, onSelectChat, on
     background: 'rgba(255, 0, 0, 0.12)',
     border: '1px solid rgba(255, 0, 0, 0.25)',
     color: '#fecaca',
+    borderRadius: '6px',
+    padding: '4px 6px',
+    cursor: 'pointer',
+    fontSize: '12px',
+  };
+
+  const renameBtnStyle: any = {
+    flexShrink: 0,
+    marginLeft: '8px',
+    background: 'rgba(16, 185, 129, 0.12)',
+    border: '1px solid rgba(16, 185, 129, 0.35)',
+    color: '#a7f3d0',
     borderRadius: '6px',
     padding: '4px 6px',
     cursor: 'pointer',
@@ -175,21 +188,34 @@ const HistoryPanel = ({ isOpen, sessions, isLoading, onNewChat, onSelectChat, on
                     </span>
                   </div>
                   {!isBatchMode && (
-                    <button
-                      aria-label={`Delete chat ${session.title}`}
-                      title="Delete chat"
-                      style={{
-                        ...deleteBtnStyle,
-                        cursor: (!!deletingIds && (deletingIds as Set<string>).has(session.sessionId)) ? 'not-allowed' : 'pointer',
-                      }}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onDeleteChat(session.sessionId);
-                      }}
-                      disabled={!!deletingIds && (deletingIds as Set<string>).has(session.sessionId)}
-                    >
-                      { !!deletingIds && (deletingIds as Set<string>).has(session.sessionId) ? 'Deleting…' : '🗑️' }
-                    </button>
+                    <div style={{ display: 'flex', gap: 6 }}>
+                      <button
+                        aria-label={`Rename chat ${session.title}`}
+                        title="Rename chat"
+                        style={renameBtnStyle}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onRenameChat && onRenameChat(session.sessionId, session.title);
+                        }}
+                      >
+                        ✏️
+                      </button>
+                      <button
+                        aria-label={`Delete chat ${session.title}`}
+                        title="Delete chat"
+                        style={{
+                          ...deleteBtnStyle,
+                          cursor: (!!deletingIds && (deletingIds as Set<string>).has(session.sessionId)) ? 'not-allowed' : 'pointer',
+                        }}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onDeleteChat(session.sessionId);
+                        }}
+                        disabled={!!deletingIds && (deletingIds as Set<string>).has(session.sessionId)}
+                      >
+                        { !!deletingIds && (deletingIds as Set<string>).has(session.sessionId) ? 'Deleting…' : '🗑️' }
+                      </button>
+                    </div>
                   )}
                 </div>
               ))

@@ -99,7 +99,8 @@ export function useChat() {
         catch { return null; } 
       })();
       const effectiveMappingProvider = mappingProvider || fallbackMapping || null;
-      const shouldUseMapping = !!(mappingEnabled && effectiveMappingProvider && activeProviders.length > 1 && activeProviders.includes(effectiveMappingProvider as ProviderKey));
+      // Uniform behavior: allow Map to run even if its provider is not in the witness selection
+      const shouldUseMapping = !!(mappingEnabled && effectiveMappingProvider && activeProviders.length > 1);
 
       const isInitialize = (mode === 'new' && (!currentSessionId || turnIds.length === 0));
 
