@@ -31,7 +31,7 @@ compile(request, resolvedContext) {
   const steps = [];
   // Track created step IDs to ensure correct linkage
   let batchStepId = null;
-  let mappingStepId = null;
+  let synthesisStepId = null;
 
   console.log(`[Compiler] Compiling ${resolvedContext.type} workflow`);
 
@@ -54,17 +54,18 @@ compile(request, resolvedContext) {
       break;
   }
 
-  // Mapping step
-  if (this._needsMappingStep(request, resolvedContext)) {
-    const mappingStep = this._createMappingStep(request, resolvedContext, { batchStepId });
-    steps.push(mappingStep);
-    mappingStepId = mappingStep.stepId;
+  // Synthesis step first
+  if (this._needsSynthesisStep(request, resolvedContext)) {
+    const synthesisStep = this._createSynthesisStep(request, resolvedContext, { batchStepId });
+    steps.push(synthesisStep);
   }
 
-  // Synthesis step
-  if (this._needsSynthesisStep(request, resolvedContext)) {
-    const synthesisStep = this._createSynthesisStep(request, resolvedContext, { batchStepId, mappingStepId });
-    steps.push(synthesisStep);
+  // Mapping step after synthesis (so it can reference synthesis step IDs)
+  if (this._needsMappingStep(request, resolvedContext)) {
+    const lastSynthesisStep = steps.filter(s => s.type === 'synthesis').slice(-1)[0] || null;
+    const mappingStep = this._createMappingStep(request, resolvedContext, { batchStepId, synthesisStepId: lastSynthesisStep?.stepId });
+    steps.push(mappingStep);
+    mappingStepId = mappingStep.stepId;
   }
 
   const workflowContext = this._buildWorkflowContext(request, resolvedContext);
@@ -130,6 +131,8 @@ _createMappingStep(request, context, linkIds = {}) {
     payload: {
       mappingProvider: mapper,
       sourceStepIds: linkIds.batchStepId ? [linkIds.batchStepId] : undefined,
+      synthesisStepIds: linkIds.synthesisStepId ? [linkIds.synthesisStepId] : undefined,
+      providerOrder: Array.isArray(request.providers) ? request.providers.slice() : undefined,
       originalPrompt: request.userMessage,
       useThinking: !!request.useThinking && mapper === 'chatgpt',
       attemptNumber: 1
@@ -172,7 +175,7 @@ _createSynthesisStep(request, context, linkIds = {}) {
     payload: {
       synthesisProvider: synthesizer,
       sourceStepIds: linkIds.batchStepId ? [linkIds.batchStepId] : undefined,
-      mappingStepIds: request.includeMapping && linkIds.mappingStepId ? [linkIds.mappingStepId] : undefined,
+      // mappingStepIds deliberately omitted; mapping will run after synthesis now
       originalPrompt: request.userMessage,
       useThinking: !!request.useThinking && synthesizer === 'chatgpt',
       attemptNumber: 1,

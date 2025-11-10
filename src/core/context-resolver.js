@@ -96,6 +96,8 @@ export class ContextResolver {
 
     // Determine the latest valid mapping output for this source turn
     const latestMappingOutput = this._findLatestMappingOutput(responses, request.preferredMappingProvider);
+    // Also resolve latest synthesis output for mapping recompute
+const latestSynthesisOutput = this._findLatestSynthesisOutput(responses);
 
     const providerContextsAtSourceTurn = sourceTurn.providerContexts || {};
     const sourceUserMessage = await this._getUserMessageForTurn(sourceTurn);
@@ -106,6 +108,7 @@ export class ContextResolver {
       sourceTurnId,
       frozenBatchOutputs,
       latestMappingOutput,
+      latestSynthesisOutput,  // ← NEW: Include historical synthesis for mapping
       providerContextsAtSourceTurn,
       stepType,
       targetProvider,
@@ -265,5 +268,39 @@ export class ContextResolver {
       return null;
     }
   }
+/**
+ * Find the latest valid synthesis output among provider responses for a turn.
+ * Used for mapping recompute to reference historical synthesis.
+ */
+_findLatestSynthesisOutput(providerResponses = []) {
+  try {
+    if (!providerResponses || providerResponses.length === 0) {
+      return null;
+    }
 
+    const synthesisResponses = providerResponses.filter(r =>
+      r && r.responseType === 'synthesis' && r.text && String(r.text).trim().length > 0
+    );
+
+    if (synthesisResponses.length === 0) {
+      return null;
+    }
+
+    // Sort by most recent update
+    synthesisResponses.sort((a, b) => 
+      (b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0)
+    );
+
+    const latest = synthesisResponses[0];
+    console.log(`[ContextResolver] Found latest synthesis output from ${latest.providerId}`);
+    return { 
+      providerId: latest.providerId, 
+      text: latest.text, 
+      meta: latest.meta || {} 
+    };
+  } catch (e) {
+    console.warn('[ContextResolver] _findLatestSynthesisOutput failed:', e);
+    return null;
+  }
+}
 }
