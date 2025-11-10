@@ -256,7 +256,8 @@ class FaultTolerantOrchestrator {
         try {
           // Favor unified ask() if available; fall back to sendPrompt().
           // ask(prompt, providerContext?, sessionId?, onChunk, signal)
-          const providerContext = providerContexts[providerId] || providerContexts[providerId]?.meta || null;
+          // Prefer passing only the meta shape to adapters for consistency.
+          const providerContext = providerContexts[providerId]?.meta || providerContexts[providerId] || null;
           const onChunkWrapped = (chunk) => {
             const textChunk = typeof chunk === 'string' ? chunk : chunk.text;
             if (textChunk) aggregatedText += textChunk;
@@ -272,9 +273,10 @@ class FaultTolerantOrchestrator {
 
           let result;
           if (typeof adapter.ask === 'function') {
+            // Pass the canonicalized providerContext (prefer meta shape) to adapters
             result = await adapter.ask(
               request.originalPrompt,
-              providerContexts[providerId] || null,
+              providerContext,
               sessionId,
               onChunkWrapped,
               abortController.signal

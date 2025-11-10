@@ -374,7 +374,7 @@ export class WorkflowEngine {
 
     try {
       // ========================================================================
-      // NEW: Seed frozen outputs for recompute
+      // Seed contexts from ResolvedContext (extend/recompute)
       // ========================================================================
       if (resolvedContext && resolvedContext.type === "recompute") {
         console.log(
@@ -405,6 +405,30 @@ export class WorkflowEngine {
         } catch (e) {
           console.warn(
             "[WorkflowEngine] Failed to cache historical provider contexts:",
+            e
+          );
+        }
+      }
+
+      // When extending an existing session, pre-cache provider contexts
+      if (resolvedContext && resolvedContext.type === "extend") {
+        try {
+          const ctxs = resolvedContext.providerContexts || {};
+          const cachedProviders = [];
+          Object.entries(ctxs).forEach(([pid, meta]) => {
+            if (meta && typeof meta === "object" && Object.keys(meta).length > 0) {
+              workflowContexts[pid] = meta;
+              cachedProviders.push(pid);
+            }
+          });
+          if (cachedProviders.length > 0) {
+            console.log(
+              `[WorkflowEngine] Pre-cached contexts from ResolvedContext.extend for providers: ${cachedProviders.join(", ")}`
+            );
+          }
+        } catch (e) {
+          console.warn(
+            "[WorkflowEngine] Failed to cache provider contexts from extend:",
             e
           );
         }
@@ -482,91 +506,143 @@ export class WorkflowEngine {
         }
       }
 
-      // 2. Execute synthesis steps next (they can use batch outputs; mapping will follow and can consume synthesis text)
-      for (const step of synthesisSteps) {
-        try {
-          const result = await this.executeSynthesisStep(
-            step,
-            context,
-            stepResults,
-            workflowContexts,
-            resolvedContext
-          );
-          stepResults.set(step.stepId, { status: "completed", result });
-          this.port.postMessage({
-            type: "WORKFLOW_STEP_UPDATE",
-            sessionId: context.sessionId,
-            stepId: step.stepId,
-            status: "completed",
-            result,
-            // Attach recompute metadata for UI routing/clearing
-            isRecompute: resolvedContext?.type === "recompute",
-            sourceTurnId: resolvedContext?.sourceTurnId,
-          });
-        } catch (error) {
-          console.error(
-            `[WorkflowEngine] Synthesis step ${step.stepId} failed:`,
-            error
-          );
-          stepResults.set(step.stepId, {
-            status: "failed",
-            error: error.message,
-          });
-          this.port.postMessage({
-            type: "WORKFLOW_STEP_UPDATE",
-            sessionId: context.sessionId,
-            stepId: step.stepId,
-            status: "failed",
-            error: error.message,
-            // Attach recompute metadata for UI routing/clearing
-            isRecompute: resolvedContext?.type === "recompute",
-            sourceTurnId: resolvedContext?.sourceTurnId,
-          });
-          // Continue with other synthesis steps even if one fails
+      const runSynthesisThenMapping = !request?.preferMappingFirst;
+
+      // 2. Execute synthesis or mapping next depending on preference flag
+      if (runSynthesisThenMapping) {
+        for (const step of synthesisSteps) {
+          try {
+            const result = await this.executeSynthesisStep(
+              step,
+              context,
+              stepResults,
+              workflowContexts,
+              resolvedContext
+            );
+            stepResults.set(step.stepId, { status: "completed", result });
+            this.port.postMessage({
+              type: "WORKFLOW_STEP_UPDATE",
+              sessionId: context.sessionId,
+              stepId: step.stepId,
+              status: "completed",
+              result,
+              // Attach recompute metadata for UI routing/clearing
+              isRecompute: resolvedContext?.type === "recompute",
+              sourceTurnId: resolvedContext?.sourceTurnId,
+            });
+          } catch (error) {
+            console.error(
+              `[WorkflowEngine] Synthesis step ${step.stepId} failed:`,
+              error
+            );
+            stepResults.set(step.stepId, {
+              status: "failed",
+              error: error.message,
+            });
+            this.port.postMessage({
+              type: "WORKFLOW_STEP_UPDATE",
+              sessionId: context.sessionId,
+              stepId: step.stepId,
+              status: "failed",
+              error: error.message,
+              // Attach recompute metadata for UI routing/clearing
+              isRecompute: resolvedContext?.type === "recompute",
+              sourceTurnId: resolvedContext?.sourceTurnId,
+            });
+            // Continue with other synthesis steps even if one fails
+          }
         }
       }
 
-      // 3. Execute mapping steps (they can now include synthesis text)
-      for (const step of mappingSteps) {
-        try {
-          const result = await this.executeMappingStep(
-            step,
-            context,
-            stepResults,
-            workflowContexts,
-            resolvedContext
-          );
-          stepResults.set(step.stepId, { status: "completed", result });
-          this.port.postMessage({
-            type: "WORKFLOW_STEP_UPDATE",
-            sessionId: context.sessionId,
-            stepId: step.stepId,
-            status: "completed",
-            result,
-            // Attach recompute metadata for UI routing/clearing
-            isRecompute: resolvedContext?.type === "recompute",
-            sourceTurnId: resolvedContext?.sourceTurnId,
-          });
-        } catch (error) {
-          console.error(
-            `[WorkflowEngine] Mapping step ${step.stepId} failed:`,
-            error
-          );
-          stepResults.set(step.stepId, {
-            status: "failed",
-            error: error.message,
-          });
-          this.port.postMessage({
-            type: "WORKFLOW_STEP_UPDATE",
-            sessionId: context.sessionId,
-            stepId: step.stepId,
-            status: "failed",
-            error: error.message,
-            // Attach recompute metadata for UI routing/clearing
-            isRecompute: resolvedContext?.type === "recompute",
-            sourceTurnId: resolvedContext?.sourceTurnId,
-          });
-          // Continue with other mapping steps even if one fails
+      // 3. Execute mapping (order depends on preference)
+      const mappingLoop = async () => {
+        for (const step of mappingSteps) {
+          try {
+            const result = await this.executeMappingStep(
+              step,
+              context,
+              stepResults,
+              workflowContexts,
+              resolvedContext
+            );
+            stepResults.set(step.stepId, { status: "completed", result });
+            this.port.postMessage({
+              type: "WORKFLOW_STEP_UPDATE",
+              sessionId: context.sessionId,
+              stepId: step.stepId,
+              status: "completed",
+              result,
+              // Attach recompute metadata for UI routing/clearing
+              isRecompute: resolvedContext?.type === "recompute",
+              sourceTurnId: resolvedContext?.sourceTurnId,
+            });
+          } catch (error) {
+            console.error(
+              `[WorkflowEngine] Mapping step ${step.stepId} failed:`,
+              error
+            );
+            stepResults.set(step.stepId, {
+              status: "failed",
+              error: error.message,
+            });
+            this.port.postMessage({
+              type: "WORKFLOW_STEP_UPDATE",
+              sessionId: context.sessionId,
+              stepId: step.stepId,
+              status: "failed",
+              error: error.message,
+              // Attach recompute metadata for UI routing/clearing
+              isRecompute: resolvedContext?.type === "recompute",
+              sourceTurnId: resolvedContext?.sourceTurnId,
+            });
+            // Continue with other mapping steps even if one fails
+          }
+        }
+      };
+
+      if (runSynthesisThenMapping) {
+        await mappingLoop();
+      } else {
+        // Run mapping first, then synthesis
+        await mappingLoop();
+        for (const step of synthesisSteps) {
+          try {
+            const result = await this.executeSynthesisStep(
+              step,
+              context,
+              stepResults,
+              workflowContexts,
+              resolvedContext
+            );
+            stepResults.set(step.stepId, { status: "completed", result });
+            this.port.postMessage({
+              type: "WORKFLOW_STEP_UPDATE",
+              sessionId: context.sessionId,
+              stepId: step.stepId,
+              status: "completed",
+              result,
+              isRecompute: resolvedContext?.type === "recompute",
+              sourceTurnId: resolvedContext?.sourceTurnId,
+            });
+          } catch (error) {
+            console.error(
+              `[WorkflowEngine] Synthesis step ${step.stepId} failed:`,
+              error
+            );
+            stepResults.set(step.stepId, {
+              status: "failed",
+              error: error.message,
+            });
+            this.port.postMessage({
+              type: "WORKFLOW_STEP_UPDATE",
+              sessionId: context.sessionId,
+              stepId: step.stepId,
+              status: "failed",
+              error: error.message,
+              isRecompute: resolvedContext?.type === "recompute",
+              sourceTurnId: resolvedContext?.sourceTurnId,
+            });
+          }
         }
       }
 

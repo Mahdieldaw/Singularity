@@ -130,20 +130,22 @@ export class GeminiAdapter {
 
     try {
       // Extract cursor and model from provider context
-      const cursor = providerContext.cursor;
-      const model = providerContext.model || "gemini-flash";
+      // Support both shapes: top-level and nested under .meta
+      const meta = providerContext?.meta || providerContext || {};
+      const cursor = providerContext?.cursor ?? meta.cursor;
+      const model = (providerContext?.model ?? meta.model) || "gemini-flash";
 
       if (!cursor) {
         console.warn(
           "[GeminiAdapter] No cursor found in provider context, falling back to new chat"
         );
         // Fall back to regular sendPrompt if no context available
-        const meta = {
-          ...(providerContext?.meta || providerContext || {}),
+        const metaForPrompt = {
+          ...(meta || {}),
           model, // Preserve model selection
         };
         return await this.sendPrompt(
-          { originalPrompt: prompt, sessionId, meta },
+          { originalPrompt: prompt, sessionId, meta: metaForPrompt },
           onChunk,
           signal
         );
@@ -208,8 +210,8 @@ export class GeminiAdapter {
           error: error.toString(),
           details: error.details,
           suppressed: classification.suppressed,
-          cursor: providerContext.cursor, // Preserve context even on error
-          model: providerContext.model, // Preserve model even on error
+          cursor: providerContext?.cursor ?? meta.cursor, // Preserve context even on error
+          model: providerContext?.model ?? meta.model, // Preserve model even on error
         },
       };
     }

@@ -20,15 +20,16 @@ import {
   getLatestResponse,
 } from "../utils/turn-helpers";
 
-function parseSynthesisResponse(response?: string | null) {
-  if (!response) return { synthesis: "", options: null };
+function parseMappingResponse(response?: string | null) {
+ 
+  if (!response) return { mapping: "", options: null };
 
-  const separator = "===ALL AVAILABLE OPTIONS===";
+  const separator = "===ALL_AVAILABLE_OPTIONS===";
 
   if (response.includes(separator)) {
-    const [mainSynthesis, optionsSection] = response.split(separator);
+   const [mainMapping, optionsSection] = response.split(separator);
     return {
-      synthesis: mainSynthesis.trim(),
+      mapping: mainMapping.trim(),
       options: optionsSection.trim(),
     };
   }
@@ -44,14 +45,14 @@ function parseSynthesisResponse(response?: string | null) {
     if (match && typeof match.index === "number") {
       const splitIndex = match.index;
       return {
-        synthesis: response.substring(0, splitIndex).trim(),
+        mapping: response.substring(0, splitIndex).trim(),
         options: response.substring(splitIndex).trim(),
       };
     }
   }
 
   return {
-    synthesis: response,
+    mapping: response,
     options: null,
   };
 }
@@ -298,37 +299,38 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
     (!activeMappingPid || activeRecomputeState.providerId === activeMappingPid)
   );
 
-  const getSynthesisAndOptions = useCallback(
+  const getMappingAndOptions = useCallback(
     (take: ProviderResponse | undefined) => {
-      if (!take?.text) return { synthesis: "", options: null };
-      return parseSynthesisResponse(String(take.text));
-    },
-    []
+      // Swap synthesis parsing to mapping parsing
+      if (!take?.text) return { mapping: "", options: null };
+      return parseMappingResponse(String(take.text));
+ 
+  },
+  []
+);
+
+const getOptions = useCallback((): string | null => {
+  if (!activeMappingPid) return null;
+  const take = getLatestResponse(mappingResponses[activeMappingPid]);
+  const { options } = getMappingAndOptions(take);
+  return options;
+}, [activeMappingPid, mappingResponses, getMappingAndOptions]);
+const displayedMappingTake = useMemo(() => {
+  if (!activeMappingPid) return undefined;
+  return getLatestResponse(mappingResponses[activeMappingPid]);
+}, [activeMappingPid, mappingResponses]);
+
+const displayedMappingText = useMemo(() => {
+  if (!displayedMappingTake?.text) return "";
+  return String(
+    getMappingAndOptions(displayedMappingTake).mapping ?? ""
   );
-
-  const getOptions = useCallback((): string | null => {
-    if (!activeSynthPid) return null;
-    const take = getLatestResponse(synthesisResponses[activeSynthPid]);
-    const { options } = getSynthesisAndOptions(take);
-    return options;
-  }, [activeSynthPid, synthesisResponses, getSynthesisAndOptions]);
-
-  const displayedSynthesisTake = useMemo(() => {
-    if (!activeSynthPid) return undefined;
-    return getLatestResponse(synthesisResponses[activeSynthPid]);
-  }, [activeSynthPid, synthesisResponses]);
-
-  const displayedSynthesisText = useMemo(() => {
-    if (!displayedSynthesisTake?.text) return "";
-    return String(
-      getSynthesisAndOptions(displayedSynthesisTake).synthesis ?? ""
-    );
-  }, [displayedSynthesisTake, getSynthesisAndOptions]);
-
-  const hasSynthesis = !!(activeSynthPid && displayedSynthesisTake?.text);
-  const hasMapping = !!(
-    activeMappingPid &&
-    getLatestResponse(mappingResponses[activeMappingPid])?.text
+}, [displayedMappingTake, getMappingAndOptions]);
+ 
+const hasMapping = !!(activeMappingPid && displayedMappingTake?.text);
+const hasSynthesis = !!(
+  activeSynthPid && 
+  getLatestResponse(synthesisResponses[activeSynthPid])?.text
   );
 
   // Respect requested features intent (backward-compatible default true)
@@ -340,7 +342,7 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
   const { synthRef, mapRef, shorterHeight, shorterSection } = useShorterHeight(
     hasSynthesis,
     hasMapping,
-    displayedSynthesisText,
+    displayedMappingText,
     isLive || isLoading
   );
 
@@ -378,6 +380,113 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
       overflow: duringStreaming ? "hidden" : "visible",
       position: "relative",
     };
+  };
+
+  // Citation support adopted from bbb.tsx
+  const transformCitations = useCallback((text: string) => {
+    if (!text) return "";
+    let t = text;
+    // [[CITE:N]] -> [↗N](citation://N)
+    t = t.replace(/\[\[CITE:(\d+)\]\]/g, (_, num) => `[↗${num}](citation://${num})`);
+    // [1, 2, 3] -> [↗1](citation://1) [↗2](citation://2) [↗3](citation://3)
+    t = t.replace(/\[(\d+(?:\s*,\s*\d+)*)\](?!\()/g, (m, grp) => {
+      const nums = String(grp)
+        .split(/\s*,\s*/)
+        .map((n) => n.trim())
+        .filter(Boolean);
+      return nums.map((n) => `[↗${n}](citation://${n})`).join(" ");
+    });
+    return t;
+  }, []);
+
+  const handleCitationClick = useCallback(
+    (modelNumber: number) => {
+      try {
+        // Ensure sources are visible when clicking a citation
+        if (!showSourceOutputs) {
+          onToggleSourceOutputs?.();
+        }
+
+        // Prefer mapping meta citationSourceOrder if present
+        const take = activeMappingPid
+          ? getLatestResponse(mappingResponses[activeMappingPid])
+          : undefined;
+        const metaOrder = (take as any)?.meta?.citationSourceOrder || null;
+
+        let providerId: string | undefined;
+        if (metaOrder && typeof metaOrder === "object") {
+          providerId = metaOrder[modelNumber];
+        }
+        if (!providerId) {
+          const batchProviderIds = Object.keys(aiTurn.batchResponses || {}).sort();
+          providerId = batchProviderIds[modelNumber - 1];
+        }
+        if (!providerId) return;
+
+        setTimeout(() => {
+          const evt = new CustomEvent("htos:scrollToProvider", {
+            detail: { aiTurnId: aiTurn.id, providerId },
+            bubbles: true,
+          });
+          document.dispatchEvent(evt);
+        }, 200);
+      } catch (e) {
+        console.warn("[AiTurnBlock] Citation click failed", e);
+      }
+    },
+    [activeMappingPid, mappingResponses, showSourceOutputs, onToggleSourceOutputs, aiTurn.id, aiTurn.batchResponses]
+  );
+
+  const CitationLink: React.FC<any> = ({ href, children, ...props }) => {
+    const isCitation = typeof href === "string" && href.startsWith("citation://");
+
+    if (!isCitation) {
+      return (
+        <a href={href} target="_blank" rel="noopener noreferrer" {...props}>
+          {children}
+        </a>
+      );
+    }
+
+    const modelNumber = parseInt(String(href).replace("citation://", ""), 10);
+
+    return (
+      <span
+        className="citation-badge"
+        role="button"
+        tabIndex={0}
+        onClick={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          handleCitationClick(modelNumber);
+        }}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            handleCitationClick(modelNumber);
+          }
+        }}
+        style={{
+          display: "inline-flex",
+          alignItems: "center",
+          padding: "2px 6px",
+          marginLeft: 2,
+          marginRight: 2,
+          background: "rgba(59, 130, 246, 0.15)",
+          border: "1px solid rgba(59, 130, 246, 0.4)",
+          borderRadius: 4,
+          color: "#60a5fa",
+          fontSize: 11,
+          fontWeight: 600,
+          cursor: "pointer",
+          transition: "all 0.2s ease",
+          userSelect: "none",
+        }}
+        title={`Jump to Model ${modelNumber}`}
+      >
+        {children}
+      </span>
+    );
   };
 
   const userPrompt: string | null = ((): string | null => {
@@ -446,7 +555,7 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
                   }}
                 >
                   <h4 style={{ margin: 0, fontSize: 14, color: "#e2e8f0" }}>
-                    Synthesis
+                    Unified Synthesis
                   </h4>
                   <button
                     onClick={() => setIsSynthesisExpanded((p) => !p)}
@@ -576,8 +685,10 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
                           );
                         }
                         if (activeSynthPid) {
-                          const take = displayedSynthesisTake;
+                          const take = getLatestResponse(
+                                                          synthesisResponses[activeSynthPid]
                           // Error rendering for synthesis
+                          )
                           if (take && take.status === "error") {
                             const errText = String(take.text || "Synthesis failed");
                             return (
@@ -612,7 +723,7 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
                             e.stopPropagation();
                             try {
                               await navigator.clipboard.writeText(
-                                displayedSynthesisText
+                                String(take.text || "")
                               );
                             } catch (err) {
                               console.error("Copy failed", err);
@@ -652,7 +763,7 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
                                 style={{ lineHeight: 1.7, fontSize: 16 }}
                               >
                                 <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                                  {displayedSynthesisText}
+                                  {String(take.text || "")}
                                 </ReactMarkdown>
                               </div>
                             </div>
@@ -759,14 +870,14 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
                   }}
                 >
                   <h4 style={{ margin: 0, fontSize: 14, color: "#e2e8f0" }}>
-                    Mapping
+                    Decision Map
                   </h4>
                   <div
                     style={{ display: "flex", alignItems: "center", gap: 4 }}
                   >
                     <button
                       onClick={() => setMappingTab("map")}
-                      title="Conflict Map"
+                      title="Decision Map"
                       style={{
                         padding: 6,
                         background:
@@ -782,78 +893,51 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
                     </button>
                     <button
                       onClick={() => setMappingTab("options")}
-                      title="All Options"
-                      style={{
-                        padding: "4px 8px",
-                        background: "#334155",
-                        border: "1px solid #475569",
-                        borderRadius: 6,
-                        color: mappingTab === "options" ? "#e2e8f0" : "#64748b",
-                        cursor: "pointer",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                      }}
-                    >
-                      <ListIcon style={{ width: 16, height: 16 }} />
-                    </button>
-                    <button
-                      onClick={async () => {
-                        try {
-                          const ORDER = [
-                            "claude",
-                            "gemini-pro",
-                            "qwen",
-                            "chatgpt",
-                            "gemini",
-                          ];
-                          const nameMap = new Map(
-                            LLM_PROVIDERS_CONFIG.map((p) => [
-                              String(p.id),
-                              p.name,
-                            ])
-                          );
+        title="All Options"
+        style={{
+          padding: "4px 8px",
+          background: mappingTab === "options" ? "#334155" : "transparent",
+          border: mappingTab === "options" ? "1px solid #475569" : "1px solid transparent",
+          borderRadius: 6,
+          color: mappingTab === "options" ? "#e2e8f0" : "#94a3b8",
+          cursor: "pointer",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+        }}
+      >
+        <ListIcon style={{ width: 16, height: 16 }} />
+      </button>
+      <button
+        onClick={async () => {
+          // ... ✅ FIX "Copy All" logic here
+          try {
+            const ORDER = ["claude", "gemini-pro", "qwen", "chatgpt", "gemini"];
+            const nameMap = new Map(LLM_PROVIDERS_CONFIG.map((p) => [String(p.id), p.name]));
+            const lines: string[] = [];
 
-                          const lines: string[] = [];
+            // Synthesis section
+            ORDER.forEach((pid) => {
+              const take = getLatestResponse(synthesisResponses[pid] || []);
+              // ✅ FIXED: Get text from the 'take' object
+              const text = take?.text ? String(take.text) : "";
+              if (text && text.trim().length > 0) {
+                lines.push(`=== Synthesis • ${nameMap.get(pid) || pid} ===`);
+                lines.push(text.trim());
+                lines.push("\n---\n");
+              }
+            });
 
-                          // Synthesis section
-                          const synthHeaderAdded = false;
-                          ORDER.forEach((pid) => {
-                            const arr = synthesisResponses[pid] || [];
-                            const take = getLatestResponse(arr);
-                            const text = take?.text
-                              ? String(
-                                  getSynthesisAndOptions(take).synthesis || ""
-                                )
-                              : "";
-                            if (text && text.trim().length > 0) {
-                              if (!synthHeaderAdded && false) {
-                              }
-                              lines.push(
-                                `=== Synthesis • ${nameMap.get(pid) || pid} ===`
-                              );
-                              lines.push(text);
-                              lines.push("");
-                              lines.push("---");
-                              lines.push("");
-                            }
-                          });
-
-                          // Mapping section
-                          ORDER.forEach((pid) => {
-                            const arr = mappingResponses[pid] || [];
-                            const take = getLatestResponse(arr);
-                            const text = take?.text ? String(take.text) : "";
-                            if (text && text.trim().length > 0) {
-                              lines.push(
-                                `=== Mapping • ${nameMap.get(pid) || pid} ===`
-                              );
-                              lines.push(text);
-                              lines.push("");
-                              lines.push("---");
-                              lines.push("");
-                            }
-                          });
+            // Mapping section
+            ORDER.forEach((pid) => {
+              const take = getLatestResponse(mappingResponses[pid] || []);
+              const text = take?.text ? String(take.text) : "";
+              if (text && text.trim().length > 0) {
+                lines.push(`=== Mapping • ${nameMap.get(pid) || pid} ===`);
+                lines.push(text.trim());
+                lines.push("\n---\n");
+              }
+            });
 
                           // Batch source responses (original providers)
                           ORDER.forEach((pid) => {
@@ -937,206 +1021,111 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
                       />
                     )}
 
-                    <div
-                      className="clip-content"
-                      style={{
-                        marginTop: 12,
-                        background: "#0f172a",
-                        border: "1px solid #334155",
-                        borderRadius: 8,
-                        padding: 12,
-                        flex: 1,
-                        minWidth: 0, // ← NEW
-                        wordBreak: "break-word", // ← NEW
-                        overflowWrap: "break-word", // ← NEW
-                        overflowY: isLive || isLoading ? "auto" : "visible",
-                        maxHeight: isLive || isLoading ? "40vh" : "none",
-                        minHeight: 0,
-                      }}
-                    >
-                      {mappingTab === "options"
-                        ? (() => {
-                            const options = getOptions();
-                            if (!options)
-                              return (
-                                <div style={{ color: "#64748b" }}>
-                                  {!activeSynthPid
-                                    ? "Select a synthesis provider to see options."
-                                    : "No options found. Run synthesis first."}
-                                </div>
-                              );
-                            return (
-                              <div>
-                                <div
-                                  style={{
-                                    display: "flex",
-                                    alignItems: "center",
-                                    justifyContent: "space-between",
-                                    gap: 8,
-                                    marginBottom: 8,
-                                  }}
-                                >
-                                  <div
-                                    style={{ fontSize: 12, color: "#94a3b8" }}
-                                  >
-                                    All Available Options • via {activeSynthPid}
-                                  </div>
-                                </div>
-                                <div
-                                  className="prose prose-sm max-w-none dark:prose-invert"
-                                  style={{ lineHeight: 1.7, fontSize: 14 }}
-                                >
-                                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                                    {String(options ?? "")}
-                                  </ReactMarkdown>
-                                </div>
-                              </div>
-                            );
-                          })()
-                        : (() => {
-                            // Respect mapping request intent
-                            if (!wasMapRequested) {
-                              return (
-                                <div style={{ color: "#64748b", fontStyle: "italic", textAlign: "center" }}>
-                                  Mapping not enabled for this turn.
-                                </div>
-                              );
-                            }
-                            const latest = activeMappingPid
-                              ? getLatestResponse(
-                                  mappingResponses[activeMappingPid]
-                                )
-                              : undefined;
-                            const isGenerating =
-                              (latest &&
-                                (latest.status === "streaming" ||
-                                  latest.status === "pending")) ||
-                              isMappingTarget;
-                            if (isGenerating) {
-                              return (
-                                <div
-                                  style={{
-                                    display: "flex",
-                                    alignItems: "center",
-                                    justifyContent: "center",
-                                    gap: 8,
-                                    color: "#94a3b8",
-                                  }}
-                                >
-                                  <span style={{ fontStyle: "italic" }}>
-                                    Conflict map generating
-                                  </span>
-                                  <span className="streaming-dots" />
-                                </div>
-                              );
-                            }
-                            if (activeMappingPid) {
-                              const take = getLatestResponse(
-                                mappingResponses[activeMappingPid]
-                              );
-                              // Error rendering for mapping
-                              if (take && take.status === "error") {
-                                const errText = String(take.text || "Mapping failed");
-                                return (
-                                  <div
-                                    style={{
-                                      background: "#1f2937",
-                                      border: "1px solid #ef4444",
-                                      color: "#fecaca",
-                                      borderRadius: 8,
-                                      padding: 12,
-                                    }}
-                                  >
-                                    <div style={{ fontSize: 12, marginBottom: 8 }}>
-                                      {activeMappingPid} · error
-                                    </div>
-                                    <div className="prose prose-sm max-w-none dark:prose-invert" style={{ lineHeight: 1.7, fontSize: 14 }}>
-                                      <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                                        {errText}
-                                      </ReactMarkdown>
-                                    </div>
-                                  </div>
-                                );
-                              }
-                              if (!take)
-                                return (
-                                  <div style={{ color: "#64748b" }}>
-                                    No mapping yet for this model.
-                                  </div>
-                                );
-                              const handleCopy = async (
-                                e: React.MouseEvent
-                              ) => {
-                                e.stopPropagation();
-                                try {
-                                  await navigator.clipboard.writeText(
-                                    String(take.text || "")
-                                  );
-                                } catch (err) {
-                                  console.error("Copy failed", err);
-                                }
-                              };
-                              return (
-                                <div>
-                                  <div
-                                    style={{
-                                      display: "flex",
-                                      alignItems: "center",
-                                      justifyContent: "space-between",
-                                      gap: 8,
-                                      marginBottom: 8,
-                                    }}
-                                  >
-                                    <div
-                                      style={{ fontSize: 12, color: "#94a3b8" }}
-                                    >
-                                      {activeMappingPid} · {take.status}
-                                    </div>
-                                    <button
-                                      onClick={handleCopy}
-                                      style={{
-                                        background: "#334155",
-                                        border: "1px solid #475569",
-                                        borderRadius: 6,
-                                        padding: "4px 8px",
-                                        color: "#94a3b8",
-                                        fontSize: 12,
-                                        cursor: "pointer",
-                                      }}
-                                    >
-                                      📋 Copy
-                                    </button>
-                                  </div>
-                                  <div
-                                    className="prose prose-sm max-w-none dark:prose-invert"
-                                    style={{ lineHeight: 1.7, fontSize: 16 }}
-                                  >
-                                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                                      {String(take.text || "")}
-                                    </ReactMarkdown>
-                                  </div>
-                                </div>
-                              );
-                            }
-                            return (
-                              <div
-                                style={{
-                                  color: "#64748b",
-                                  display: "flex",
-                                  alignItems: "center",
-                                  justifyContent: "center",
-                                  height: "100%",
-                                  fontStyle: "italic",
-                                }}
-                              >
-                                Choose a model to map.
-                              </div>
-                            );
-                          })()}
-                    </div>
+                  
+      <div
+        className="clip-content"
+        style={{
+          marginTop: 12,
+          background: "#0f172a",
+          border: "1px solid #334155",
+          borderRadius: 8,
+          padding: 12,
+          flex: 1,
+          minWidth: 0,
+          wordBreak: "break-word",
+          overflowWrap: "break-word",
+          overflowY: isLive || isLoading ? "auto" : "visible",
+          maxHeight: isLive || isLoading ? "40vh" : "none",
+          minHeight: 0,
+        }}
+      >
+        {mappingTab === "options"
+          ? (() => {
+              // This logic was already correct in your version!
+              const options = getOptions();
+              if (!options) {
+                return (
+                  <div style={{ color: "#64748b" }}>
+                    {!activeMappingPid
+                      ? "Select a mapping provider to see options."
+                      : "No options found in the mapping response."}
+                  </div>
+                );
+              }
+              return (
+                <div>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 8 }}>
+                    <div style={{ fontSize: 12, color: "#94a3b8" }}> All Available Options • via {activeMappingPid} </div>
+                  </div>
+                  <div className="prose prose-sm max-w-none dark:prose-invert" style={{ lineHeight: 1.7, fontSize: 14 }}>
+                    <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ a: CitationLink }}>
+                      {transformCitations(options)}
+                    </ReactMarkdown>
+                  </div>
+                </div>
+              );
+            })()
+          : (() => {
+              // ✅ REPLACED all the broken logic with this single, correct flow for the "Map" tab.
+              if (!wasMapRequested) {
+                return <div style={{ color: "#64748b", fontStyle: "italic", textAlign: "center" }}> Mapping not enabled for this turn. </div>;
+              }
 
-                    {/* Expand button for truncated content */}
-                    {mapTruncated && !mapExpanded && (
+              const latest = displayedMappingTake;
+              const isGenerating = (latest && (latest.status === "streaming" || latest.status === "pending")) || isMappingTarget;
+
+              if (isGenerating) {
+                return (
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, color: "#94a3b8" }}>
+                    <span style={{ fontStyle: "italic" }}>Conflict map generating</span>
+                    <span className="streaming-dots" />
+                  </div>
+                );
+              }
+
+              if (activeMappingPid) {
+                const take = displayedMappingTake;
+                if (take && take.status === "error") {
+                  const errText = String(take.text || "Mapping failed");
+                  return (
+                    <div style={{ background: "#1f2937", border: "1px solid #ef4444", color: "#fecaca", borderRadius: 8, padding: 12 }}>
+                      <div style={{ fontSize: 12, marginBottom: 8 }}> {activeMappingPid} · error </div>
+                      <div className="prose prose-sm max-w-none dark:prose-invert" style={{ lineHeight: 1.7, fontSize: 14 }}>
+                        <ReactMarkdown remarkPlugins={[remarkGfm]}>{errText}</ReactMarkdown>
+                      </div>
+                    </div>
+                  );
+                }
+                if (!take) {
+                  return <div style={{ color: "#64748b" }}> No mapping yet for this model. </div>;
+                }
+                
+                const handleCopy = async (e: React.MouseEvent) => {
+                  e.stopPropagation();
+                  await navigator.clipboard.writeText(displayedMappingText); // Use parsed text
+                };
+
+                return (
+                  <div>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 8 }}>
+                      <div style={{ fontSize: 12, color: "#94a3b8" }}> {activeMappingPid} · {take.status} </div>
+                      <button onClick={handleCopy} style={{ background: "#334155", border: "1px solid #475569", borderRadius: 6, padding: "4px 8px", color: "#94a3b8", fontSize: 12, cursor: "pointer" }}> 📋 Copy </button>
+                    </div>
+                    <div className="prose prose-sm max-w-none dark:prose-invert" style={{ lineHeight: 1.7, fontSize: 16 }}>
+                      <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ a: CitationLink }}>
+                        {transformCitations(displayedMappingText)}
+                      </ReactMarkdown>
+                    </div>
+                  </div>
+                );
+              }
+              
+              return <div style={{ color: "#64748b", display: "flex", alignItems: "center", justifyContent: "center", height: "100%", fontStyle: "italic" }}> Choose a model to map. </div>;
+            })()}
+      </div>
+
+      {/* Expand/Collapse buttons - your logic here was already correct */}
+      {mapTruncated && !mapExpanded && (
                       <>
                         <div
                           style={{

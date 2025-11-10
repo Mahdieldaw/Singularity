@@ -112,8 +112,9 @@ export class ClaudeAdapter {
         let aggregatedText = '';
         
         try {
-            // Extract chatId from provider context (stored from previous responses)
-            const chatId = providerContext.chatId || providerContext.threadUrl;
+            // Extract chatId from provider context (support both top-level and nested .meta)
+            const meta = providerContext?.meta || providerContext || {};
+            const chatId = providerContext?.chatId ?? meta.chatId ?? providerContext?.threadUrl ?? meta.threadUrl;
             
             if (!chatId) {
                 console.warn('[ClaudeAdapter] No chatId found in provider context, falling back to new chat');
@@ -186,7 +187,7 @@ export class ClaudeAdapter {
                     error: error.toString(),
                     details: error.details,
                     suppressed: classification.suppressed,
-                    chatId: providerContext.chatId // Preserve context even on error
+                    chatId: providerContext?.chatId ?? meta.chatId // Preserve context even on error
                 }
             };
         }

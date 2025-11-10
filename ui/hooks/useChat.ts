@@ -102,7 +102,23 @@ export function useChat() {
       // Uniform behavior: allow Map to run even if its provider is not in the witness selection
       const shouldUseMapping = !!(mappingEnabled && effectiveMappingProvider && activeProviders.length > 1);
 
-      const isInitialize = (mode === 'new' && (!currentSessionId || turnIds.length === 0));
+    const isInitialize = (mode === 'new' && (!currentSessionId || turnIds.length === 0));
+
+    // Validate continuation has a sessionId and bind the port before sending
+    if (!isInitialize) {
+      if (!currentSessionId) {
+        console.error('[useChat] Continuation requested but currentSessionId is missing. Aborting send.');
+        setIsLoading(false);
+        setUiPhase('awaiting_action');
+        return;
+      }
+      // Proactively bind/reconnect the port scoped to the target session
+      try {
+        await api.ensurePort({ sessionId: currentSessionId });
+      } catch (e) {
+        console.warn('[useChat] ensurePort failed prior to extend; proceeding with executeWorkflow', e);
+      }
+    }
 
       // Build NEW primitive request shape
       const primitive: PrimitiveWorkflowRequest = isInitialize
@@ -134,6 +150,7 @@ export function useChat() {
           };
 
       // AI turn will be created upon TURN_CREATED from backend
+      // Port is already ensured above for extend; for initialize, executeWorkflow ensures port
       await api.executeWorkflow(primitive);
       // For initialize, sessionId will be set by TURN_CREATED handler; do not set here
     } catch (err) {

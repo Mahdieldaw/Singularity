@@ -98,16 +98,10 @@ export function usePortMessageHandler() {
       case 'TURN_CREATED': {
         const { userTurnId, aiTurnId, sessionId: msgSessionId, } = message;
 
-        // Initialize session for new conversations
-        if (msgSessionId && (!currentSessionId || currentSessionId === '')) {
+        // Always adopt the backend sessionId for TURN_CREATED
+        if (msgSessionId) {
           setCurrentSessionId(msgSessionId);
           try { api.setSessionId(msgSessionId); } catch {}
-        }
-
-        // Ignore cross-session messages
-        if (msgSessionId && currentSessionId && msgSessionId !== currentSessionId) {
-          console.warn(`[Port] Ignoring TURN_CREATED from ${msgSessionId} (active ${currentSessionId})`);
-          return;
         }
 
         // Compute active providers at the time of creation
@@ -164,10 +158,10 @@ export function usePortMessageHandler() {
       case 'TURN_FINALIZED': {
         const { userTurnId, aiTurnId, turn, sessionId: msgSessionId } = message;
         
-        // Ignore cross-session messages
-        if (msgSessionId && currentSessionId && msgSessionId !== currentSessionId) {
-          console.warn(`[Port] Ignoring TURN_FINALIZED from ${msgSessionId} (active ${currentSessionId})`);
-          return;
+        // Adopt sessionId on finalization to ensure coherence
+        if (msgSessionId) {
+          setCurrentSessionId(msgSessionId);
+          try { api.setSessionId(msgSessionId); } catch {}
         }
 
         console.log('[Port] Received TURN_FINALIZED', { 
@@ -244,14 +238,6 @@ export function usePortMessageHandler() {
         const { stepId, providerId, chunk, sessionId: msgSessionId } = message;
         if (!chunk?.text) return;
 
-        // Ignore cross-session messages
-        if (msgSessionId && currentSessionId && msgSessionId !== currentSessionId) {
-          if (STREAMING_DEBUG_UI) {
-            console.warn(`[Port] Ignoring PARTIAL_RESULT from ${msgSessionId} (active ${currentSessionId})`);
-          }
-          return;
-        }
-
         const stepType = getStepType(stepId);
         if (!stepType) {
           console.warn(`[Port] Cannot determine step type for: ${stepId}`);
@@ -322,10 +308,7 @@ export function usePortMessageHandler() {
           try { partialLoggedRef.current.delete(stepId); } catch {}
         }
 
-        if (msgSessionId && currentSessionId && msgSessionId !== currentSessionId) {
-          console.warn(`[Port] Ignoring WORKFLOW_STEP_UPDATE from ${msgSessionId}`);
-          break;
-        }
+        // Do not gate by session; process updates irrespective of UI session state
 
         if (status === 'completed' && result) {
           streamingBufferRef.current?.flushImmediate();
@@ -517,10 +500,6 @@ export function usePortMessageHandler() {
 
       case 'WORKFLOW_COMPLETE': {
         const { sessionId: msgSessionId } = message;
-        if (msgSessionId && currentSessionId && msgSessionId !== currentSessionId) {
-          console.warn(`[Port] Ignoring WORKFLOW_COMPLETE from ${msgSessionId}`);
-          break;
-        }
 
         streamingBufferRef.current?.flushImmediate();
         // Fallback finalization is no longer needed.

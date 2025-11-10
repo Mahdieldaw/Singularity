@@ -32,6 +32,7 @@ compile(request, resolvedContext) {
   // Track created step IDs to ensure correct linkage
   let batchStepId = null;
   let synthesisStepId = null;
+  let mappingStepId = null;
 
   console.log(`[Compiler] Compiling ${resolvedContext.type} workflow`);
 
@@ -58,6 +59,8 @@ compile(request, resolvedContext) {
   if (this._needsSynthesisStep(request, resolvedContext)) {
     const synthesisStep = this._createSynthesisStep(request, resolvedContext, { batchStepId });
     steps.push(synthesisStep);
+    // Track for potential future linkage or diagnostics
+    synthesisStepId = synthesisStep.stepId;
   }
 
   // Mapping step after synthesis (so it can reference synthesis step IDs)
@@ -130,6 +133,8 @@ _createMappingStep(request, context, linkIds = {}) {
     type: 'mapping',
     payload: {
       mappingProvider: mapper,
+      // Explicitly allow mapper to continue thread from the batch step when available
+      continueFromBatchStep: linkIds.batchStepId || undefined,
       sourceStepIds: linkIds.batchStepId ? [linkIds.batchStepId] : undefined,
       synthesisStepIds: linkIds.synthesisStepId ? [linkIds.synthesisStepId] : undefined,
       providerOrder: Array.isArray(request.providers) ? request.providers.slice() : undefined,

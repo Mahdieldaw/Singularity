@@ -112,13 +112,15 @@ export class GeminiProAdapter {
   async sendContinuation(prompt, providerContext, sessionId, onChunk, signal) {
     const startTime = Date.now();
     try {
-      const cursor = providerContext.cursor;
-      const model = providerContext.model || "gemini-pro";
+      // Support both shapes: top-level and nested under .meta
+      const meta = providerContext?.meta || providerContext || {};
+      const cursor = providerContext?.cursor ?? meta.cursor;
+      const model = (providerContext?.model ?? meta.model) || "gemini-pro";
 
       if (!cursor) {
-        const meta = { ...(providerContext?.meta || providerContext || {}), model };
+        const metaForPrompt = { ...(meta || {}), model };
         return await this.sendPrompt(
-          { originalPrompt: prompt, sessionId, meta },
+          { originalPrompt: prompt, sessionId, meta: metaForPrompt },
           onChunk,
           signal
         );
@@ -182,8 +184,8 @@ export class GeminiProAdapter {
           error: error.toString(),
           details: error.details,
           suppressed: classification.suppressed,
-          cursor: providerContext.cursor,
-          model: providerContext.model || "gemini-pro",
+          cursor: providerContext?.cursor ?? meta.cursor,
+          model: (providerContext?.model ?? meta.model) || "gemini-pro",
         },
       };
     }

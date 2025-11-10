@@ -3,7 +3,7 @@ import React from 'react';
 import { LLMProvider, AppStep, ProviderResponse } from '../types';
 import { LLM_PROVIDERS_CONFIG, PRIMARY_STREAMING_PROVIDER_IDS } from '../constants';
 import { BotIcon } from './Icons';
-import { useState, useCallback, useMemo } from 'react';
+import { useState, useCallback, useMemo, useEffect } from 'react';
 import { ProviderPill } from './ProviderPill';
 import { useAtomValue } from 'jotai';
 import { providerContextsAtom } from '../state/atoms';
@@ -147,6 +147,42 @@ const ProviderResponseBlock = ({
     });
   }, []);
 
+  // Highlight target provider on citation click and scroll into view
+  const [highlightedProviderId, setHighlightedProviderId] = useState<string | null>(null);
+  useEffect(() => {
+    const handler = (evt: Event) => {
+      try {
+        const detail = (evt as CustomEvent<any>).detail || {};
+        const targetTurnId: string | undefined = detail.aiTurnId;
+        const targetProviderId: string | undefined = detail.providerId;
+        if (!targetProviderId) return;
+        if (aiTurnId && targetTurnId && targetTurnId !== aiTurnId) return;
+
+        // Ensure target provider is brought into view
+        setVisibleSlots(prev => {
+          if (prev.includes(targetProviderId)) return prev;
+          const next = [...prev];
+          next[0] = targetProviderId;
+          return next;
+        });
+
+        setHighlightedProviderId(targetProviderId);
+        setTimeout(() => {
+          const el = document.getElementById(`provider-card-${targetProviderId}`);
+          if (el && typeof el.scrollIntoView === 'function') {
+            el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          }
+        }, 60);
+        // Clear highlight after pulse
+        setTimeout(() => setHighlightedProviderId(null), 1600);
+      } catch (e) {
+        console.warn('scroll-to-provider handler failed', e);
+      }
+    };
+    document.addEventListener('htos:scrollToProvider', handler as EventListener);
+    return () => document.removeEventListener('htos:scrollToProvider', handler as EventListener);
+  }, [aiTurnId]);
+
 
 
 
@@ -181,6 +217,7 @@ const ProviderResponseBlock = ({
     const context = providerContexts[providerId];
     const isStreaming = state?.status === 'streaming';
     const isError = state?.status === 'error';
+    const isHighlighted = highlightedProviderId === providerId;
 
     const displayText = isError 
       ? (context?.errorMessage || state?.text || 'Provider error') 
@@ -189,6 +226,7 @@ const ProviderResponseBlock = ({
     return (
       <div 
         key={providerId}
+        id={`provider-card-${providerId}`}
         style={{
           flex: '1 1 320px',
           minWidth: '260px',
@@ -198,11 +236,13 @@ const ProviderResponseBlock = ({
           display: isVisible ? 'flex' : 'none',
           flexDirection: 'column',
           background: '#1e293b',
-          border: '1px solid #334155',
+          border: isHighlighted ? '1px solid #3b82f6' : '1px solid #334155',
           borderRadius: '12px',
           padding: '12px',
           flexShrink: 0,
           overflow: 'hidden',
+          boxShadow: isHighlighted ? '0 0 0 2px rgba(59,130,246,0.6), 0 10px 30px rgba(59,130,246,0.25)' : 'none',
+          transition: 'box-shadow 0.3s ease, border-color 0.3s ease',
         }}
         aria-live="polite"
       >

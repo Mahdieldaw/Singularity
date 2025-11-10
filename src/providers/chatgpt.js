@@ -254,6 +254,8 @@ export class ChatGPTSessionApi {
     this.sharedState = sharedState;
     this.utils = utils;
     this.fetch = fetchImpl;
+    this._debug = false;
+    this._sessionDebug = false;
     // Bind/wrap
     this.ask = this._wrapMethod(this.ask);
     // ephemeral caches
@@ -298,12 +300,7 @@ export class ChatGPTSessionApi {
    * Ask ChatGPT with mandatory Arkose preflight and PoW.
    */
   async ask(prompt, options = {}, onChunk = () => {}) {
-    // Provider-specific debug flags (off by default)
-    const CHATGPT_DEBUG = false; // gates verbose internal diagnostics
-    const CHATGPT_SESSION_DEBUG = false; // gates session flow logs
-    const dbg = (...args) => { if (CHATGPT_DEBUG) console.debug(...args); };
-    const sesLog = (...args) => { if (CHATGPT_SESSION_DEBUG) console.log(...args); };
-    const sesWarn = (...args) => { if (CHATGPT_SESSION_DEBUG) console.warn(...args); };
+    const dbg = (...args) => { if (this._debug) console.debug(...args); };
     // For log safety only: prepare a display-limited version without altering the actual prompt
     const safeDisplayPrompt =
       typeof prompt === "string"
@@ -361,7 +358,7 @@ export class ChatGPTSessionApi {
               break;
             }
             } catch (innerError) {
-            if (CHATGPT_DEBUG) console.warn(
+            if (this._debug) console.warn(
               `[ChatGPT Debug] Poll attempt failed, retries left: ${
                 retries - 1
               }`,
@@ -375,12 +372,12 @@ export class ChatGPTSessionApi {
         }
       } catch (e) {
         if (String(e).includes("poll_timeout")) {
-          if (CHATGPT_DEBUG) console.warn("[ChatGPT Debug] poll startup.oiReady timed out", {
+          if (this._debug) console.warn("[ChatGPT Debug] poll startup.oiReady timed out", {
             ts: Date.now(),
             dur: Date.now() - __chatgpt_offscreen_poll_start,
           });
         } else {
-          if (CHATGPT_DEBUG) console.error("[ChatGPT Debug] poll startup.oiReady error", e, {
+          if (this._debug) console.error("[ChatGPT Debug] poll startup.oiReady error", e, {
             ts: Date.now(),
             dur: Date.now() - __chatgpt_offscreen_poll_start,
           });
@@ -388,11 +385,11 @@ export class ChatGPTSessionApi {
         __chatgpt_offscreen_ready = false;
       }
     } else {
-      if (CHATGPT_DEBUG) console.warn("[ChatGPT Debug] No bus.poll method available");
+      if (this._debug) console.warn("[ChatGPT Debug] No bus.poll method available");
       __chatgpt_offscreen_ready = false;
     }
 
-    if (CHATGPT_DEBUG) console.log("[ChatGPT Debug] poll startup.oiReady result", {
+    if (this._debug) console.log("[ChatGPT Debug] poll startup.oiReady result", {
       result: __chatgpt_offscreen_ready,
       ts: Date.now(),
       dur: Date.now() - __chatgpt_offscreen_poll_start,
@@ -411,22 +408,22 @@ export class ChatGPTSessionApi {
       if (__bg_bus?.poll) {
         await __bg_bus.poll("startup.oiReady");
       } else {
-        sesWarn(
+        this._sesWarn(
           "[ChatGPT Session] No bus.poll available in background context"
         );
       }
     } catch (error) {
-      sesWarn(
+      this._sesWarn(
         "[ChatGPT Session] Offscreen (oi) readiness check failed:",
         error
       );
     }
 
     // Ensure we have (or tried to get) access token
-    sesLog("[ChatGPT Session] Ensuring access token...");
+    this._sesLog("[ChatGPT Session] Ensuring access token...");
     await this._ensureAccessToken();
     const hasToken = !!this._accessToken;
-    sesLog(
+    this._sesLog(
       `[ChatGPT Session] Access token status: ${
         hasToken ? "present" : "missing"
       }`
@@ -480,7 +477,7 @@ export class ChatGPTSessionApi {
       signal,
     });
 
-    sesLog(`[ChatGPT Session] Response status: ${res.status}`);
+    this._sesLog(`[ChatGPT Session] Response status: ${res.status}`);
 
     if (res.status !== 200) {
       const errJson = await this._safeJson(res);
@@ -501,7 +498,7 @@ export class ChatGPTSessionApi {
 
     // Prefer SSE path
     if (ct.includes("text/event-stream")) {
-      sesLog("[ChatGPT Session] Processing SSE stream...");
+      this._sesLog("[ChatGPT Session] Processing SSE stream...");
       const reader = res.body.getReader();
       let carry = "";
       let aggText = "";
@@ -537,7 +534,7 @@ export class ChatGPTSessionApi {
             }
           }
         }
-        sesLog(
+        this._sesLog(
           `[ChatGPT Session] SSE stream completed. Total chunks: ${chunkCount}, final text length: ${aggText.length}`
         );
       } catch (e) {
@@ -743,7 +740,7 @@ export class ChatGPTSessionApi {
     const attempt = async () => {
       try {
         const truncatedPayload = JSON.stringify(payload).slice(0, 200) + "...";
-        sesLog(
+        this._sesLog(
           `[ChatGPT Session] Bus call: ${action} payload=${truncatedPayload}`
         );
         const bus = this._getHtosBus();
@@ -757,7 +754,7 @@ export class ChatGPTSessionApi {
         const res = await Promise.race([sendPromise, timeoutPromise]);
         return res;
       } catch (e) {
-        sesLog(`[ChatGPT Session] Bus response: ${action} result=error`);
+        this._sesLog(`[ChatGPT Session] Bus response: ${action} result=error`);
         console.warn(
           `[ChatGPTSessionApi] BusController.send failed: ${action}`,
           e
@@ -773,7 +770,7 @@ export class ChatGPTSessionApi {
       } catch (e) {
         lastErr = e;
         if (i < retries) {
-          sesLog(
+          this._sesLog(
             `[ChatGPTSessionApi] Retrying BusController.send ${action} (attempt ${
               i + 2
             })`
@@ -812,7 +809,7 @@ export class ChatGPTSessionApi {
         scripts,
         dpl,
       };
-      if (CHATGPT_DEBUG) console.log("[ChatGPT Debug] about to call ai.generateProofToken", {
+      if (this._debug) console.log("[ChatGPT Debug] about to call ai.generateProofToken", {
         ts: Date.now(),
         payload: { seed, difficulty, scripts: scripts?.length || 0, dpl },
       });
@@ -829,7 +826,7 @@ export class ChatGPTSessionApi {
         });
         throw e;
       });
-      if (CHATGPT_DEBUG) console.log("[ChatGPT Debug] ai.generateProofToken response", {
+      if (this._debug) console.log("[ChatGPT Debug] ai.generateProofToken response", {
         res: __chatgpt_gen_res,
         ts: Date.now(),
         dur: Date.now() - __chatgpt_gen_start,
@@ -934,7 +931,7 @@ export class ChatGPTSessionApi {
         accessToken: this._accessToken, // Pass the access token.
       };
 
-      if (CHATGPT_DEBUG) console.log("[ChatGPT Debug] about to call ai.retrieveArkoseToken", {
+      if (this._debug) console.log("[ChatGPT Debug] about to call ai.retrieveArkoseToken", {
         ts: Date.now(),
         payload: {
           dx: "<redacted-for-logs>",
@@ -958,7 +955,7 @@ export class ChatGPTSessionApi {
         throw e;
       });
 
-      if (CHATGPT_DEBUG) console.log("[ChatGPT Debug] ai.retrieveArkoseToken response", {
+      if (this._debug) console.log("[ChatGPT Debug] ai.retrieveArkoseToken response", {
         res: __chatgpt_ret_res,
         ts: Date.now(),
         dur: Date.now() - __chatgpt_ret_start,
@@ -987,7 +984,7 @@ export class ChatGPTSessionApi {
     // PoW header - fail fast if required but generation fails
     const pow = requirements?.[AE_CONFIG.pow.$proofofwork];
     if (pow?.[AE_CONFIG.pow.$required]) {
-      sesLog("[ChatGPT Session] PoW token required, generating...");
+      this._sesLog("[ChatGPT Session] PoW token required, generating...");
       const seed = pow?.[AE_CONFIG.pow.$seed];
       const difficulty = pow?.[AE_CONFIG.pow.$difficulty];
 
@@ -1026,7 +1023,7 @@ export class ChatGPTSessionApi {
       AE_CONFIG.requirements.arkoseRequiredPath
     );
     if (arkoseRequired) {
-      sesLog("[ChatGPT Session] Arkose token required, retrieving...");
+      this._sesLog("[ChatGPT Session] Arkose token required, retrieving...");
       const dx = this._get(requirements, AE_CONFIG.requirements.dxPath);
 
       if (!dx) {
@@ -1150,6 +1147,14 @@ export class ChatGPTSessionApi {
     } catch {
       return null;
     }
+  }
+
+  // Instance-scoped session logging helpers
+  _sesLog(...args) {
+    if (this._sessionDebug) console.log(...args);
+  }
+  _sesWarn(...args) {
+    if (this._sessionDebug) console.warn(...args);
   }
 }
 
