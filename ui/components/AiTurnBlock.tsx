@@ -15,6 +15,7 @@ import { hasComposableContent } from "../utils/composerUtils";
 import { LLM_PROVIDERS_CONFIG } from "../constants";
 import ClipsCarousel from "./ClipsCarousel";
 import { ChevronDownIcon, ChevronUpIcon, ListIcon } from "./Icons";
+import { useDraggable } from "@dnd-kit/core";
 import {
   normalizeResponseArray,
   getLatestResponse,
@@ -382,19 +383,19 @@ const hasSynthesis = !!(
     };
   };
 
-  // Citation support adopted from bbb.tsx
+  // Citation support adopted from bbb.tsx (DOM version: no hrefs)
   const transformCitations = useCallback((text: string) => {
     if (!text) return "";
     let t = text;
-    // [[CITE:N]] -> [↗N](citation://N)
-    t = t.replace(/\[\[CITE:(\d+)\]\]/g, (_, num) => `[↗${num}](citation://${num})`);
-    // [1, 2, 3] -> [↗1](citation://1) [↗2](citation://2) [↗3](citation://3)
+    // [[CITE:N]] -> ↗N
+    t = t.replace(/\[\[CITE:(\d+)\]\]/g, (_, num) => `↗${num}`);
+    // [1, 2, 3] -> ↗1 ↗2 ↗3
     t = t.replace(/\[(\d+(?:\s*,\s*\d+)*)\](?!\()/g, (m, grp) => {
       const nums = String(grp)
         .split(/\s*,\s*/)
         .map((n) => n.trim())
         .filter(Boolean);
-      return nums.map((n) => `[↗${n}](citation://${n})`).join(" ");
+      return nums.map((n) => `↗${n}`).join(" ");
     });
     return t;
   }, []);
@@ -417,9 +418,13 @@ const hasSynthesis = !!(
         if (metaOrder && typeof metaOrder === "object") {
           providerId = metaOrder[modelNumber];
         }
+        // Fallback: use the stable UI provider order, filtered to only those with outputs,
+        // so 1→first active provider, 2→second, etc. This matches the user's expectation.
         if (!providerId) {
-          const batchProviderIds = Object.keys(aiTurn.batchResponses || {}).sort();
-          providerId = batchProviderIds[modelNumber - 1];
+          const activeOrdered = LLM_PROVIDERS_CONFIG
+            .map((p) => String(p.id))
+            .filter((pid) => !!(aiTurn.batchResponses || {})[pid]);
+          providerId = activeOrdered[modelNumber - 1];
         }
         if (!providerId) return;
 
@@ -437,8 +442,138 @@ const hasSynthesis = !!(
     [activeMappingPid, mappingResponses, showSourceOutputs, onToggleSourceOutputs, aiTurn.id, aiTurn.batchResponses]
   );
 
+  // Capture-phase DOM interception for any <a href="citation://N"> clicks that might
+  // slip through ReactMarkdown or browser defaults. This mirrors the composer path's
+  // DOM-based navigation approach so we always scroll in-place rather than opening a new tab.
+  const interceptCitationAnchorClick = useCallback((e: React.MouseEvent) => {
+    try {
+      const target = e.target as HTMLElement | null;
+      const anchor = target ? (target.closest('a[href^="citation:"]') as HTMLAnchorElement | null) : null;
+      if (anchor) {
+        e.preventDefault();
+        e.stopPropagation();
+        const href = anchor.getAttribute('href') || '';
+        const numMatch = href.match(/(\d+)/);
+        const num = numMatch ? parseInt(numMatch[1], 10) : NaN;
+        if (!isNaN(num)) {
+          handleCitationClick(num);
+        }
+      }
+    } catch (err) {
+      console.warn('[AiTurnBlock] interceptCitationAnchorClick error', err);
+    }
+  }, [handleCitationClick]);
+
+  // Also intercept middle/aux clicks and Ctrl/Cmd+Click, which browsers treat as "open in new tab"
+  const interceptCitationMouseDownCapture = useCallback((e: React.MouseEvent) => {
+    try {
+      const target = e.target as HTMLElement | null;
+      const anchor = target ? (target.closest('a[href^="citation:"]') as HTMLAnchorElement | null) : null;
+      if (!anchor) return;
+      const isAux = (e as any).button && (e as any).button !== 0;
+      const isModifier = (e.ctrlKey || (e as any).metaKey);
+      if (isAux || isModifier) {
+        e.preventDefault();
+        e.stopPropagation();
+        const href = anchor.getAttribute('href') || '';
+        const numMatch = href.match(/(\d+)/);
+        const num = numMatch ? parseInt(numMatch[1], 10) : NaN;
+        if (!isNaN(num)) handleCitationClick(num);
+      }
+    } catch (err) {
+      console.warn('[AiTurnBlock] interceptCitationMouseDownCapture error', err);
+    }
+  }, [handleCitationClick]);
+
+  // Intercept pointer down too (some environments dispatch pointer events before mouse/click)
+  const interceptCitationPointerDownCapture = useCallback((e: React.PointerEvent) => {
+    try {
+      const target = e.target as HTMLElement | null;
+      const anchor = target ? (target.closest('a[href^="citation:"]') as HTMLAnchorElement | null) : null;
+      if (!anchor) return;
+      const isAux = e.button !== 0;
+      const isModifier = (e.ctrlKey || (e as any).metaKey);
+      if (isAux || isModifier) {
+        e.preventDefault();
+        e.stopPropagation();
+        const href = anchor.getAttribute('href') || '';
+        const numMatch = href.match(/(\d+)/);
+        const num = numMatch ? parseInt(numMatch[1], 10) : NaN;
+        if (!isNaN(num)) handleCitationClick(num);
+      }
+    } catch (err) {
+      console.warn('[AiTurnBlock] interceptCitationPointerDownCapture error', err);
+    }
+  }, [handleCitationClick]);
+
+  // Global capture-phase guard to ensure citation:// never triggers browser navigation
+  useEffect(() => {
+    const onClick = (e: MouseEvent) => {
+      try {
+        const target = e.target as HTMLElement | null;
+        const anchor = target ? (target.closest('a[href^="citation:"]') as HTMLAnchorElement | null) : null;
+        if (!anchor) return;
+        e.preventDefault();
+        e.stopPropagation();
+        const href = anchor.getAttribute('href') || '';
+        const numMatch = href.match(/(\d+)/);
+        const num = numMatch ? parseInt(numMatch[1], 10) : NaN;
+        if (!isNaN(num)) handleCitationClick(num);
+      } catch (err) {
+        console.warn('[AiTurnBlock] global citation click intercept error', err);
+      }
+    };
+    const onMouseDown = (e: MouseEvent) => {
+      try {
+        const target = e.target as HTMLElement | null;
+        const anchor = target ? (target.closest('a[href^="citation:"]') as HTMLAnchorElement | null) : null;
+        if (!anchor) return;
+        const isAux = (e as any).button && (e as any).button !== 0;
+        const isModifier = (e.ctrlKey || (e as any).metaKey);
+        if (isAux || isModifier) {
+          e.preventDefault();
+          e.stopPropagation();
+          const href = anchor.getAttribute('href') || '';
+          const numMatch = href.match(/(\d+)/);
+          const num = numMatch ? parseInt(numMatch[1], 10) : NaN;
+          if (!isNaN(num)) handleCitationClick(num);
+        }
+      } catch (err) {
+        console.warn('[AiTurnBlock] global citation mousedown intercept error', err);
+      }
+    };
+    const onPointerDown = (e: PointerEvent) => {
+      try {
+        const target = e.target as HTMLElement | null;
+        const anchor = target ? (target.closest('a[href^="citation:"]') as HTMLAnchorElement | null) : null;
+        if (!anchor) return;
+        const isAux = e.button !== 0;
+        const isModifier = (e.ctrlKey || (e as any).metaKey);
+        if (isAux || isModifier) {
+          e.preventDefault();
+          e.stopPropagation();
+          const href = anchor.getAttribute('href') || '';
+          const numMatch = href.match(/(\d+)/);
+          const num = numMatch ? parseInt(numMatch[1], 10) : NaN;
+          if (!isNaN(num)) handleCitationClick(num);
+        }
+      } catch (err) {
+        console.warn('[AiTurnBlock] global citation pointerdown intercept error', err);
+      }
+    };
+
+    document.addEventListener('click', onClick, true);
+    document.addEventListener('mousedown', onMouseDown, true);
+    document.addEventListener('pointerdown', onPointerDown, true);
+    return () => {
+      document.removeEventListener('click', onClick, true);
+      document.removeEventListener('mousedown', onMouseDown, true);
+      document.removeEventListener('pointerdown', onPointerDown, true);
+    };
+  }, [handleCitationClick]);
+
   const CitationLink: React.FC<any> = ({ href, children, ...props }) => {
-    const isCitation = typeof href === "string" && href.startsWith("citation://");
+    const isCitation = typeof href === "string" && href.startsWith("citation:");
 
     if (!isCitation) {
       return (
@@ -448,7 +583,8 @@ const hasSynthesis = !!(
       );
     }
 
-    const modelNumber = parseInt(String(href).replace("citation://", ""), 10);
+    const numMatch = String(href).match(/(\d+)/);
+    const modelNumber = numMatch ? parseInt(numMatch[1], 10) : NaN;
 
     return (
       <span
@@ -469,18 +605,21 @@ const hasSynthesis = !!(
         style={{
           display: "inline-flex",
           alignItems: "center",
-          padding: "2px 6px",
-          marginLeft: 2,
-          marginRight: 2,
-          background: "rgba(59, 130, 246, 0.15)",
-          border: "1px solid rgba(59, 130, 246, 0.4)",
-          borderRadius: 4,
-          color: "#60a5fa",
-          fontSize: 11,
-          fontWeight: 600,
+          gap: 6,
+          padding: "2px 10px",
+          marginLeft: 6,
+          marginRight: 6,
+          background: "#2563eb", // solid blue
+          border: "1px solid #1d4ed8",
+          borderRadius: 9999, // pill
+          color: "#ffffff",
+          fontSize: 12,
+          fontWeight: 700,
           cursor: "pointer",
-          transition: "all 0.2s ease",
+          transition: "opacity 0.2s ease",
           userSelect: "none",
+          lineHeight: 1.4,
+          boxShadow: "0 0 0 1px rgba(29,78,216,0.6)",
         }}
         title={`Jump to Model ${modelNumber}`}
       >
@@ -488,6 +627,173 @@ const hasSynthesis = !!(
       </span>
     );
   };
+
+  // Lightweight draggable handle for dragging text into the Scratchpad (local to AiTurnBlock)
+  const DraggableHandle: React.FC<{ id: string; text: string; provenance?: any; title?: string }> = ({ id, text, provenance, title = "Drag to Scratchpad" }) => {
+    const { attributes, listeners, setNodeRef } = useDraggable({ id, data: { text, provenance } });
+    return (
+      <button
+        ref={setNodeRef}
+        {...listeners}
+        {...attributes}
+        onClick={(e) => e.stopPropagation()}
+        title={title}
+        style={{
+          background: "#0b1220",
+          border: "1px solid #334155",
+          borderRadius: 6,
+          padding: "4px 8px",
+          color: "#e2e8f0",
+          fontSize: 12,
+          cursor: "grab",
+        }}
+      >
+        ⇅ Drag
+      </button>
+    );
+  };
+
+  // DOM version: aggressively replace any rendered <a href="citation://N"> inside the mapping box
+  // with real <button> elements that call handleCitationClick(N). This avoids relying on
+  // ReactMarkdown's anchor overrides and guarantees no browser navigation.
+  useEffect(() => {
+    const m = mapRef.current;
+    if (!m) return;
+
+    const created: Array<{ btn: HTMLButtonElement; handler: (e: MouseEvent) => void }> = [];
+
+    const anchors = Array.from(m.querySelectorAll('a[href^="citation:"]')) as HTMLAnchorElement[];
+    anchors.forEach((a) => {
+      const href = a.getAttribute('href') || '';
+      const numMatch = href.match(/(\d+)/);
+      const num = numMatch ? parseInt(numMatch[1], 10) : NaN;
+      const label = a.textContent || (isNaN(num) ? '↗' : `↗${num}`);
+
+      // Build a button to replace the anchor
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.setAttribute('data-citation', String(num));
+      btn.setAttribute('aria-label', isNaN(num) ? 'Citation' : `Citation ${num}`);
+      btn.textContent = label;
+      btn.style.display = 'inline-flex';
+      btn.style.alignItems = 'center';
+      btn.style.gap = '6px';
+      btn.style.padding = '2px 10px';
+      btn.style.marginLeft = '6px';
+      btn.style.marginRight = '6px';
+      btn.style.background = '#2563eb';
+      btn.style.border = '1px solid #1d4ed8';
+      btn.style.borderRadius = '9999px';
+      btn.style.color = '#ffffff';
+      btn.style.fontSize = '12px';
+      btn.style.fontWeight = '700';
+      btn.style.cursor = 'pointer';
+      btn.style.userSelect = 'none';
+      btn.style.lineHeight = '1.4';
+      btn.style.boxShadow = '0 0 0 1px rgba(29,78,216,0.6)';
+
+      const handler = (e: MouseEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (!isNaN(num)) handleCitationClick(num);
+      };
+      btn.addEventListener('click', handler, { capture: true });
+      created.push({ btn, handler });
+
+      // Replace anchor with button
+      a.replaceWith(btn);
+    });
+
+    return () => {
+      // Cleanup listeners
+      created.forEach(({ btn, handler }) => {
+        try { btn.removeEventListener('click', handler, { capture: true } as any); } catch {}
+      });
+    };
+  }, [mapRef, displayedMappingText, activeMappingPid, mappingTab]);
+
+  // DOM version: wrap plain text tokens "↗N" into clickable buttons inside the mapping box
+  useEffect(() => {
+    const root = mapRef.current;
+    if (!root) return;
+
+    const created: Array<{ btn: HTMLButtonElement; handler: (e: MouseEvent) => void }> = [];
+    const rx = /↗(\d+)/g;
+
+    const makeBtn = (num: number, label?: string) => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.setAttribute('data-citation', String(num));
+      btn.setAttribute('aria-label', `Citation ${num}`);
+      btn.textContent = label || `↗${num}`;
+      btn.style.display = 'inline-flex';
+      btn.style.alignItems = 'center';
+      btn.style.gap = '6px';
+      btn.style.padding = '2px 10px';
+      btn.style.marginLeft = '6px';
+      btn.style.marginRight = '6px';
+      btn.style.background = '#2563eb';
+      btn.style.border = '1px solid #1d4ed8';
+      btn.style.borderRadius = '9999px';
+      btn.style.color = '#ffffff';
+      btn.style.fontSize = '12px';
+      btn.style.fontWeight = '700';
+      btn.style.cursor = 'pointer';
+      btn.style.userSelect = 'none';
+      btn.style.lineHeight = '1.4';
+      btn.style.boxShadow = '0 0 0 1px rgba(29,78,216,0.6)';
+      const handler = (e: MouseEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (!isNaN(num)) handleCitationClick(num);
+      };
+      btn.addEventListener('click', handler, { capture: true });
+      created.push({ btn, handler });
+      return btn;
+    };
+
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    const toReplace: Array<{ node: Text; parts: (string | HTMLButtonElement)[] }> = [];
+    let node: Node | null = walker.nextNode();
+    while (node) {
+      const textNode = node as Text;
+      const value = textNode.nodeValue || '';
+      let match: RegExpExecArray | null;
+      rx.lastIndex = 0;
+      let lastIdx = 0;
+      const parts: (string | HTMLButtonElement)[] = [];
+      while ((match = rx.exec(value)) !== null) {
+        const start = match.index;
+        const end = start + match[0].length;
+        const num = parseInt(match[1], 10);
+        if (start > lastIdx) parts.push(value.slice(lastIdx, start));
+        parts.push(makeBtn(num));
+        lastIdx = end;
+      }
+      if (parts.length > 0) {
+        if (lastIdx < value.length) parts.push(value.slice(lastIdx));
+        toReplace.push({ node: textNode, parts });
+      }
+      node = walker.nextNode();
+    }
+
+    toReplace.forEach(({ node, parts }) => {
+      const frag = document.createDocumentFragment();
+      parts.forEach((p) => {
+        if (typeof p === 'string') frag.appendChild(document.createTextNode(p));
+        else frag.appendChild(p);
+      });
+      try {
+        node.parentNode?.replaceChild(frag, node);
+      } catch {}
+    });
+
+    return () => {
+      created.forEach(({ btn, handler }) => {
+        try { btn.removeEventListener('click', handler, { capture: true } as any); } catch {}
+      });
+    };
+  }, [mapRef, displayedMappingText, mappingTab]);
 
   const userPrompt: string | null = ((): string | null => {
     const maybe = aiTurn as any;
@@ -604,6 +910,7 @@ const hasSynthesis = !!(
                         border: "1px solid #334155",
                         borderRadius: 8,
                         padding: 12,
+                        paddingBottom: 18,
                         flex: 1,
                         minWidth: 0, // ← NEW
                         wordBreak: "break-word", // ← NEW
@@ -612,6 +919,9 @@ const hasSynthesis = !!(
                         maxHeight: isLive || isLoading ? "40vh" : "none",
                         minHeight: 0,
                       }}
+                      onClickCapture={interceptCitationAnchorClick}
+                      onMouseDownCapture={interceptCitationMouseDownCapture}
+                      onPointerDownCapture={interceptCitationPointerDownCapture}
                       onWheelCapture={(e: React.WheelEvent<HTMLDivElement>) => {
                         const el = e.currentTarget;
                         const dy = e.deltaY ?? 0;
@@ -705,7 +1015,7 @@ const hasSynthesis = !!(
                                   {activeSynthPid} · error
                                 </div>
                                 <div className="prose prose-sm max-w-none dark:prose-invert" style={{ lineHeight: 1.7, fontSize: 14 }}>
-                                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                                  <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ a: CitationLink }}>
                                     {errText}
                                   </ReactMarkdown>
                                 </div>
@@ -762,10 +1072,52 @@ const hasSynthesis = !!(
                                 className="prose prose-sm max-w-none dark:prose-invert"
                                 style={{ lineHeight: 1.7, fontSize: 16 }}
                               >
-                                <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                                <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ a: CitationLink }}>
                                   {String(take.text || "")}
                                 </ReactMarkdown>
                               </div>
+                              {/* Synthesis actions: drag + scratchpad */}
+                              {(() => {
+                                const text = String(take.text || "");
+                                const provenance = {
+                                  source: "ai",
+                                  sessionId: aiTurn.sessionId,
+                                  aiTurnId: aiTurn.id,
+                                  providerId: activeSynthPid || 'unknown',
+                                  responseType: "synthesis",
+                                  responseIndex: 0,
+                                  timestamp: Date.now(),
+                                  granularity: "full",
+                                  sourceText: text,
+                                } as any;
+                                return (
+                                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 12 }}>
+                                    <DraggableHandle id={`drag-synth-${aiTurn.id}-${activeSynthPid}`} text={text} provenance={provenance} title="Drag synthesis to Scratchpad" />
+                                    <button
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        try {
+                                          document.dispatchEvent(new CustomEvent("extract-to-canvas", { detail: { text, provenance, targetColumn: 'left' }, bubbles: true }));
+                                        } catch (err) {
+                                          console.error("Add synthesis to scratchpad failed", err);
+                                        }
+                                      }}
+                                      aria-label="Send synthesis to Scratchpad"
+                                      style={{
+                                        background: "#1d4ed8",
+                                        border: "1px solid #334155",
+                                        borderRadius: 6,
+                                        padding: "4px 8px",
+                                        color: "#ffffff",
+                                        fontSize: 12,
+                                        cursor: "pointer",
+                                      }}
+                                    >
+                                      ↘ Scratchpad
+                                    </button>
+                                  </div>
+                                );
+                              })()}
                             </div>
                           );
                         }
@@ -801,6 +1153,76 @@ const hasSynthesis = !!(
                             borderRadius: "0 0 8px 8px",
                           }}
                         />
+                        {/* Always show actions in truncated view (overlay at bottom-left) */}
+                        {(() => {
+                          const latest = activeSynthPid
+                            ? getLatestResponse(
+                                synthesisResponses[activeSynthPid]
+                              )
+                            : undefined;
+                          const text = String(latest?.text || "");
+                          const provenance = {
+                            source: "ai",
+                            sessionId: aiTurn.sessionId,
+                            aiTurnId: aiTurn.id,
+                            providerId: activeSynthPid || 'unknown',
+                            responseType: "synthesis",
+                            responseIndex: 0,
+                            timestamp: Date.now(),
+                            granularity: "full",
+                            sourceText: text,
+                          } as any;
+                          return (
+                            <div
+                              style={{
+                                position: "absolute",
+                                bottom: 12,
+                                left: 12,
+                                display: "flex",
+                                alignItems: "center",
+                                gap: 8,
+                                zIndex: 2,
+                              }}
+                            >
+                              <DraggableHandle
+                                id={`drag-synth-overlay-${aiTurn.id}-${activeSynthPid}`}
+                                text={text}
+                                provenance={provenance}
+                                title="Drag synthesis to Scratchpad"
+                              />
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  try {
+                                    document.dispatchEvent(
+                                      new CustomEvent("extract-to-canvas", {
+                                        detail: { text, provenance, targetColumn: 'left' },
+                                        bubbles: true,
+                                      })
+                                    );
+                                  } catch (err) {
+                                    console.error(
+                                      "Add synthesis to scratchpad failed",
+                                      err
+                                    );
+                                  }
+                                }}
+                                aria-label="Send synthesis to Scratchpad"
+                                style={{
+                                  background: "#1d4ed8",
+                                  border: "1px solid #334155",
+                                  borderRadius: 6,
+                                  padding: "4px 8px",
+                                  color: "#ffffff",
+                                  fontSize: 12,
+                                  cursor: "pointer",
+                                }}
+                              >
+                                ↘ Scratchpad
+                              </button>
+                            </div>
+                          );
+                        })()}
                         <button
                           onClick={() => setSynthExpanded(true)}
                           style={{
@@ -1030,6 +1452,7 @@ const hasSynthesis = !!(
           border: "1px solid #334155",
           borderRadius: 8,
           padding: 12,
+          paddingBottom: 18,
           flex: 1,
           minWidth: 0,
           wordBreak: "break-word",
@@ -1038,6 +1461,9 @@ const hasSynthesis = !!(
           maxHeight: isLive || isLoading ? "40vh" : "none",
           minHeight: 0,
         }}
+        onClickCapture={interceptCitationAnchorClick}
+        onMouseDownCapture={interceptCitationMouseDownCapture}
+        onPointerDownCapture={interceptCitationPointerDownCapture}
       >
         {mappingTab === "options"
           ? (() => {
@@ -1057,11 +1483,115 @@ const hasSynthesis = !!(
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 8 }}>
                     <div style={{ fontSize: 12, color: "#94a3b8" }}> All Available Options • via {activeMappingPid} </div>
                   </div>
-                  <div className="prose prose-sm max-w-none dark:prose-invert" style={{ lineHeight: 1.7, fontSize: 14 }}>
+                  <div className="prose prose-sm max-w-none dark:prose-invert" style={{ lineHeight: 1.7, fontSize: 14 }} onClickCapture={interceptCitationAnchorClick} onMouseDownCapture={interceptCitationMouseDownCapture} onPointerDownCapture={interceptCitationPointerDownCapture}>
+                    
+                    
+                    
+                    
+                    
+                    
+                    
+                    
+                    
+                    
+                    
+                    
+                    
+                    
+                    
+                    
+                    
+                    
+                    
+                    
+                    
+                    
+                    
+                    
+                    
+                    
+                    
+                    
+                    
+                    
+                    
+                    
+                    
+                    
+                    
+                    
+                    
+                    
+                    
+                    
+                    
+                    
+                    
+                    
+                    
+                    
+                    
+                    
+                    
+                    
+                    
+                    
+                    
+                    
+                    
+                    
+                    
+                    
+                    
+                    
+                    
+                    
                     <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ a: CitationLink }}>
                       {transformCitations(options)}
                     </ReactMarkdown>
                   </div>
+                  {/* Options actions: drag + scratchpad */}
+                  {(() => {
+                    const text = String(options || "");
+                    const provenance = {
+                      source: "ai",
+                      sessionId: aiTurn.sessionId,
+                      aiTurnId: aiTurn.id,
+                      providerId: activeMappingPid || 'unknown',
+                      responseType: "mapping",
+                      responseIndex: 0,
+                      timestamp: Date.now(),
+                      granularity: "full",
+                      sourceText: text,
+                    } as any;
+                    return (
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 12 }}>
+                        <DraggableHandle id={`drag-options-${aiTurn.id}-${activeMappingPid}`} text={text} provenance={provenance} title="Drag options to Scratchpad" />
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            try {
+                              document.dispatchEvent(new CustomEvent("extract-to-canvas", { detail: { text, provenance, targetColumn: 'left' }, bubbles: true }));
+                            } catch (err) {
+                              console.error("Add options to scratchpad failed", err);
+                            }
+                          }}
+                          aria-label="Send options to Scratchpad"
+                          style={{
+                            background: "#1d4ed8",
+                            border: "1px solid #334155",
+                            borderRadius: 6,
+                            padding: "4px 8px",
+                            color: "#ffffff",
+                            fontSize: 12,
+                            cursor: "pointer",
+                          }}
+                        >
+                          ↘ Scratchpad
+                        </button>
+                      </div>
+                    );
+                  })()}
                 </div>
               );
             })()
@@ -1111,11 +1641,53 @@ const hasSynthesis = !!(
                       <div style={{ fontSize: 12, color: "#94a3b8" }}> {activeMappingPid} · {take.status} </div>
                       <button onClick={handleCopy} style={{ background: "#334155", border: "1px solid #475569", borderRadius: 6, padding: "4px 8px", color: "#94a3b8", fontSize: 12, cursor: "pointer" }}> 📋 Copy </button>
                     </div>
-                    <div className="prose prose-sm max-w-none dark:prose-invert" style={{ lineHeight: 1.7, fontSize: 16 }}>
+                    <div className="prose prose-sm max-w-none dark:prose-invert" style={{ lineHeight: 1.7, fontSize: 16 }} onClickCapture={interceptCitationAnchorClick} onMouseDownCapture={interceptCitationMouseDownCapture} onPointerDownCapture={interceptCitationPointerDownCapture}>
                       <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ a: CitationLink }}>
                         {transformCitations(displayedMappingText)}
                       </ReactMarkdown>
                     </div>
+                    {/* Mapping actions: drag + scratchpad */}
+                    {(() => {
+                      const text = String(displayedMappingText || "");
+                      const provenance = {
+                        source: "ai",
+                        sessionId: aiTurn.sessionId,
+                        aiTurnId: aiTurn.id,
+                        providerId: activeMappingPid || 'unknown',
+                        responseType: "mapping",
+                        responseIndex: 0,
+                        timestamp: Date.now(),
+                        granularity: "full",
+                        sourceText: text,
+                      } as any;
+                      return (
+                        <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 12 }}>
+                          <DraggableHandle id={`drag-map-${aiTurn.id}-${activeMappingPid}`} text={text} provenance={provenance} title="Drag mapping to Scratchpad" />
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              try {
+                                document.dispatchEvent(new CustomEvent("extract-to-canvas", { detail: { text, provenance, targetColumn: 'left' }, bubbles: true }));
+                              } catch (err) {
+                                console.error("Add mapping to scratchpad failed", err);
+                              }
+                            }}
+                            aria-label="Send mapping to Scratchpad"
+                            style={{
+                              background: "#1d4ed8",
+                              border: "1px solid #334155",
+                              borderRadius: 6,
+                              padding: "4px 8px",
+                              color: "#ffffff",
+                              fontSize: 12,
+                              cursor: "pointer",
+                            }}
+                          >
+                            ↘ Scratchpad
+                          </button>
+                        </div>
+                      );
+                    })()}
                   </div>
                 );
               }
@@ -1139,6 +1711,71 @@ const hasSynthesis = !!(
                             borderRadius: "0 0 8px 8px",
                           }}
                         />
+                        {/* Always show actions in truncated mapping view (overlay at bottom-left) */}
+                        {(() => {
+                          const text = String(displayedMappingText || "");
+                          const provenance = {
+                            source: "ai",
+                            sessionId: aiTurn.sessionId,
+                            aiTurnId: aiTurn.id,
+                            providerId: activeMappingPid || 'unknown',
+                            responseType: "mapping",
+                            responseIndex: 0,
+                            timestamp: Date.now(),
+                            granularity: "full",
+                            sourceText: text,
+                          } as any;
+                          return (
+                            <div
+                              style={{
+                                position: "absolute",
+                                bottom: 12,
+                                left: 12,
+                                display: "flex",
+                                alignItems: "center",
+                                gap: 8,
+                                zIndex: 2,
+                              }}
+                            >
+                              <DraggableHandle
+                                id={`drag-map-overlay-${aiTurn.id}-${activeMappingPid}`}
+                                text={text}
+                                provenance={provenance}
+                                title="Drag mapping to Scratchpad"
+                              />
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  try {
+                                    document.dispatchEvent(
+                                      new CustomEvent("extract-to-canvas", {
+                                        detail: { text, provenance, targetColumn: 'left' },
+                                        bubbles: true,
+                                      })
+                                    );
+                                  } catch (err) {
+                                    console.error(
+                                      "Add mapping to scratchpad failed",
+                                      err
+                                    );
+                                  }
+                                }}
+                                aria-label="Send mapping to Scratchpad"
+                                style={{
+                                  background: "#1d4ed8",
+                                  border: "1px solid #334155",
+                                  borderRadius: 6,
+                                  padding: "4px 8px",
+                                  color: "#ffffff",
+                                  fontSize: 12,
+                                  cursor: "pointer",
+                                }}
+                              >
+                                ↘ Scratchpad
+                              </button>
+                            </div>
+                          );
+                        })()}
                         <button
                           onClick={() => setMapExpanded(true)}
                           style={{

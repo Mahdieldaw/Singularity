@@ -7,11 +7,23 @@ const ProvenancePluginKey = new PluginKey('provenance');
 
 // Function to create badge DOM element with proper event handling
 function createBadgeDOM(provenance: ProvenanceData) {
+  // Null checks: return an empty element if provenance is invalid
+  if (!provenance || typeof provenance !== 'object') {
+    return document.createElement('span');
+  }
+  const providerId = (provenance as any).providerId;
+  const aiTurnId = (provenance as any).aiTurnId;
+  if (!providerId || !aiTurnId) {
+    return document.createElement('span');
+  }
+
   const badge = document.createElement('button');
   badge.textContent = '↗';
   badge.className = 'provenance-badge';
   
-  const baseProviderId = provenance.providerId.replace(/-(synthesis|mapping)$/, '');
+  const baseProviderId = typeof providerId === 'string' 
+    ? providerId.replace(/-(synthesis|mapping)$/, '') 
+    : 'unknown';
   badge.setAttribute('data-provider', baseProviderId);
   
   // Make it non-editable and non-focusable
@@ -39,13 +51,22 @@ function createBadgeDOM(provenance: ProvenanceData) {
     stopEvent(e);
     
     console.log('[ProvenanceExtension] Badge clicked', {
-      aiTurnId: provenance.aiTurnId,
-      providerId: provenance.providerId,
-      sessionId: provenance.sessionId,
+      aiTurnId: aiTurnId,
+      providerId: providerId,
+      sessionId: (provenance as any).sessionId,
       provenance,
     });
     
-    // Dispatch navigation event
+    // Prefer scratchpad navigation when inside scratchpad
+    const isInScratchpad = !!(badge.closest && badge.closest('.scratchpad-drawer'));
+    if (isInScratchpad) {
+      document.dispatchEvent(new CustomEvent('jump-to-turn', {
+        detail: { turnId: aiTurnId, providerId }
+      }));
+      return;
+    }
+    
+    // Dispatch navigation event for composer contexts
     openReferenceView(provenance);
   });
   

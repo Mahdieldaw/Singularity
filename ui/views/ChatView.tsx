@@ -1,21 +1,29 @@
-import React, { useMemo } from 'react';
-import { Virtuoso } from 'react-virtuoso';
+import React, { useMemo, useEffect, useRef } from 'react';
+import { Virtuoso, VirtuosoHandle } from 'react-virtuoso';
 import { useAtom } from 'jotai';
-import { turnIdsAtom, isLoadingAtom, showWelcomeAtom } from '../state/atoms';
+import { turnIdsAtom, isLoadingAtom, showWelcomeAtom, currentSessionIdAtom } from '../state/atoms';
 
 import MessageRow from '../components/MessageRow';
 import ChatInputConnected from '../components/ChatInputConnected';
 import WelcomeScreen from '../components/WelcomeScreen';
 import { useScrollPersistence } from '../hooks/useScrollPersistence';
 import CompactModelTrayConnected from '../components/CompactModelTrayConnected';
+import ScratchpadDrawer from '../components/ScratchpadDrawer';
+import { DndContext } from '@dnd-kit/core';
+import { useMemo as useReactMemo } from 'react';
+import { scratchpadDragActiveAtom } from '../state/atoms';
+import { useChat } from '../hooks/useChat';
 
 export default function ChatView() {
   const [turnIds] = useAtom(turnIdsAtom as any) as [string[], any];
   const [isLoading] = useAtom(isLoadingAtom as any) as [boolean, any];
   const [showWelcome] = useAtom(showWelcomeAtom as any) as [boolean, any];
+  const [currentSessionId] = useAtom(currentSessionIdAtom as any) as [string | null, any];
   // Note: Avoid subscribing to uiPhase in ChatView to reduce unnecessary re-renders during streaming
 
   const scrollerRef = useScrollPersistence();
+  const virtuosoRef = useRef<VirtuosoHandle | null>(null);
+  const { selectChat } = useChat();
 
   const itemContent = useMemo(() => (index: number, turnId: string) => {
     if (!turnId) {
@@ -47,33 +55,143 @@ export default function ChatView() {
     ))
   ), [scrollerRef]);
 
-  return (
-    <div className="chat-view" style={{ 
-      display: 'flex', 
-      flexDirection: 'column', 
-      height: '100%', 
-      width: '100%',
-      flex: 1,
-      minHeight: 0
-    }}>
-      {showWelcome ? (
-        <WelcomeScreen />
-      ) : (
-        <Virtuoso
-          style={{ flex: 1 }}
-          data={turnIds}
-          followOutput={(isAtBottom: boolean) => (isAtBottom ? 'smooth' : false)}
-          increaseViewportBy={{ top: 800, bottom: 600 }}
-          components={{ 
-            Scroller: ScrollerComponent as unknown as React.ComponentType<any>
-          }}
-          itemContent={itemContent}
-          computeItemKey={(index, turnId) => turnId || `fallback-${index}`}
-        />
-      )}
+  // Handle drag end to drop text/provenance into the scratchpad canvas
+  const [, setDragActive] = useAtom(scratchpadDragActiveAtom);
 
-      <ChatInputConnected />
-      <CompactModelTrayConnected />  
-    </div>
+  const handleDragEnd = useReactMemo(() => {
+    return (event: any) => {
+      try {
+        const over = event?.over;
+        const data = event?.active?.data?.current || event?.active?.data || {};
+        const text: string = String(data.text || '');
+        const provenance = data.provenance || { source: 'drag', timestamp: Date.now() };
+        if (!over || !text) { setDragActive(false); return; }
+        // Clean implementation: only support scratchpad-specific dropzones
+        if (over.id === 'scratchpad-header-dropzone' || over.id === 'scratchpad-gather-dropzone') {
+          // Append to Gather (left) column
+          document.dispatchEvent(new CustomEvent('extract-to-canvas', { detail: { text, provenance, targetColumn: 'left' }, bubbles: true }));
+        }
+        setDragActive(false);
+      } catch (e) {
+        console.warn('[ChatView] Drag end handler failed', e);
+        setDragActive(false);
+      }
+    };
+  }, []);
+
+  const handleDragStart = useReactMemo(() => {
+    return () => {
+      try { setDragActive(true); } catch {}
+    };
+  }, []);
+
+  const handleDragCancel = useReactMemo(() => {
+    return () => {
+      try { setDragActive(false); } catch {}
+    };
+  }, []);
+
+  // Jump-to-turn event listener with optional cross-session loading
+  useEffect(() => {
+    const handler = async (evt: Event) => {
+      try {
+        const detail = (evt as CustomEvent<any>).detail || {};
+        const targetTurnId: string | undefined = detail.turnId || detail.aiTurnId || detail.userTurnId;
+        const targetProviderId: string | undefined = detail.providerId;
+        const targetSessionId: string | undefined = detail.sessionId;
+        if (!targetTurnId) return;
+
+        const doScroll = () => {
+          try {
+            const index = turnIds.findIndex((id) => id === targetTurnId);
+            if (index !== -1) {
+              virtuosoRef.current?.scrollToIndex({ index, behavior: 'smooth', align: 'center' });
+            } else {
+              // Fallback to DOM query when item is rendered
+              const el = document.querySelector(`[data-turn-id="${CSS.escape(targetTurnId)}"]`) as HTMLElement | null;
+              if (el && typeof el.scrollIntoView === 'function') {
+                el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+              }
+            }
+            // Brief highlight pulse
+            const row = document.getElementById(`turn-${targetTurnId}`) || document.querySelector(`[data-turn-id="${CSS.escape(targetTurnId)}"]`);
+            if (row && row instanceof HTMLElement) {
+              const prev = row.style.boxShadow;
+              row.style.boxShadow = '0 0 0 2px rgba(99,102,241,0.55)';
+              setTimeout(() => { row.style.boxShadow = prev; }, 1200);
+            }
+            // Focus provider card if requested
+            if (targetProviderId) {
+              setTimeout(() => {
+                document.dispatchEvent(new CustomEvent('htos:scrollToProvider', {
+                  detail: { aiTurnId: targetTurnId, providerId: targetProviderId }
+                }));
+              }, 120);
+            }
+          } catch (e) {
+            console.warn('[ChatView] doScroll failed', e);
+          }
+        };
+
+        // Cross-session navigation support
+        if (targetSessionId && currentSessionId && targetSessionId !== currentSessionId) {
+          const summary = {
+            id: targetSessionId,
+            sessionId: targetSessionId,
+            startTime: Date.now(),
+            lastActivity: Date.now(),
+            title: '',
+            firstMessage: '',
+            messageCount: 0,
+            messages: []
+          };
+          await selectChat(summary as any);
+          // Wait a tick for state to settle then scroll
+          requestAnimationFrame(() => doScroll());
+        } else {
+          doScroll();
+        }
+      } catch (e) {
+        console.warn('[ChatView] jump-to-turn handler failed', e);
+      }
+    };
+    document.addEventListener('jump-to-turn', handler as EventListener);
+    return () => document.removeEventListener('jump-to-turn', handler as EventListener);
+  }, [turnIds, currentSessionId, selectChat]);
+
+  return (
+    <DndContext onDragStart={handleDragStart as any} onDragEnd={handleDragEnd as any} onDragCancel={handleDragCancel as any}>
+      <div className="chat-view" style={{ 
+        display: 'flex', 
+        flexDirection: 'column', 
+        height: '100%', 
+        width: '100%',
+        flex: 1,
+        minHeight: 0
+      }}>
+        {showWelcome ? (
+          <WelcomeScreen />
+        ) : (
+          <Virtuoso
+            style={{ flex: 1 }}
+            data={turnIds}
+            followOutput={(isAtBottom: boolean) => (isAtBottom ? 'smooth' : false)}
+            increaseViewportBy={{ top: 800, bottom: 600 }}
+            components={{ 
+              Scroller: ScrollerComponent as unknown as React.ComponentType<any>
+            }}
+            itemContent={itemContent}
+            computeItemKey={(index, turnId) => turnId || `fallback-${index}`}
+            ref={virtuosoRef as any}
+          />
+        )}
+
+        {/* Scratchpad drawer mounted between transcript and input */}
+        <ScratchpadDrawer />
+
+        <ChatInputConnected />
+        <CompactModelTrayConnected />  
+      </div>
+    </DndContext>
   );
 }

@@ -115,6 +115,23 @@ export const isReducedMotionAtom = atomWithStorage<boolean>('htos_reduced_motion
 export const providerContextsAtom = atomWithImmer<Record<string, any>>({});
 
 // -----------------------------
+// Scratchpad drawer state (persisted)
+// -----------------------------
+// Controls visibility of the bottom Scratchpad drawer
+export const scratchpadOpenAtom = atomWithStorage<boolean>('htos_scratchpad_open', false);
+// Height of the open drawer in pixels (resizable in future)
+export const scratchpadHeightAtom = atomWithStorage<number>('htos_scratchpad_height', 240);
+
+// Drag overlay: true while a drag is in progress, used to bring the collapsed scratchpad header to foreground
+export const scratchpadDragActiveAtom = atom<boolean>(false);
+
+// Three-column scratchpad data
+// Left column: gathered blocks (array of { text, provenance, timestamp })
+export const scratchpadLeftBlocksAtom = atomWithStorage<any[]>('htos_scratchpad_left_blocks', []);
+// Right column: refined editor JSON content
+export const scratchpadRightContentAtom = atomWithStorage<any>('htos_scratchpad_right_json', { type: 'doc', content: [] });
+
+// -----------------------------
 // Precise recompute targeting
 // -----------------------------
 export const activeRecomputeStateAtom = atom<

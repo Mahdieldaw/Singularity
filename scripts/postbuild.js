@@ -20,6 +20,7 @@ if (fs.existsSync("ui/index.html")) {
   fs.writeFileSync("dist/ui/index.html", html);
 }
 
+
 // optional assets
 if (fs.existsSync("ui/index.css"))
   fs.copyFileSync("ui/index.css", "dist/ui/index.css");

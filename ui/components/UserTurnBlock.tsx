@@ -3,6 +3,7 @@ import { UserIcon, ChevronDownIcon, ChevronUpIcon } from './Icons';
 import { useState, useCallback } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { useDraggable } from '@dnd-kit/core';
 
 
 const CopyButton = ({ text, label, onClick }: { text: string; label: string; onClick?: () => void }) => {
@@ -116,6 +117,7 @@ const UserTurnBlock = ({ userTurn, isExpanded, onToggle }: UserTurnBlockProps) =
               className="user-metadata"
               style={{
                 display: 'flex',
+                alignItems: 'center',
                 gap: '12px',
                 fontSize: '11px',
                 color: '#94a3b8',
@@ -129,13 +131,46 @@ const UserTurnBlock = ({ userTurn, isExpanded, onToggle }: UserTurnBlockProps) =
                   Session: {userTurn.sessionId.slice(-6)}
                 </span>
               )}
+              {/** Inline action bar slightly to the right of the session id */}
+              {(() => {
+                const provenance = {
+                  source: 'user',
+                  sessionId: userTurn.sessionId,
+                  userTurnId: userTurn.id,
+                  timestamp: Date.now(),
+                  granularity: 'full',
+                } as any;
+                return (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginLeft: '8px' }}>
+                    <DraggableHandle id={`drag-user-${userTurn.id}`} text={userTurn.text || ''} provenance={provenance} title="Drag user prompt to Scratchpad" />
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        try {
+                          document.dispatchEvent(new CustomEvent('extract-to-canvas', { detail: { text: userTurn.text || '', provenance, targetColumn: 'left' }, bubbles: true }));
+                        } catch (err) {
+                          console.error('Add to scratchpad failed', err);
+                        }
+                      }}
+                      aria-label="Send user prompt to Scratchpad"
+                      style={{
+                        background: '#1d4ed8',
+                        border: '1px solid #334155',
+                        borderRadius: '6px',
+                        padding: '4px 8px',
+                        color: '#ffffff',
+                        fontSize: '12px',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      ↘ Scratchpad
+                    </button>
+                    <CopyButton text={userTurn.text} label="Copy user prompt" />
+                  </div>
+                );
+              })()}
             </div>
-            <div style={{ marginTop: 'auto', display: 'flex', justifyContent: 'flex-end' }}>
-              <CopyButton 
-                text={userTurn.text} 
-                label="Copy user prompt" 
-              />
-            </div>
+            
           </>
         ) : (
             <div 
@@ -157,6 +192,44 @@ const UserTurnBlock = ({ userTurn, isExpanded, onToggle }: UserTurnBlockProps) =
               {userTurn.text}
             </div>
         )}
+        {/** Bottom-left action bar in collapsed state */}
+        {!isExpanded && (() => {
+          const provenance = {
+            source: 'user',
+            sessionId: userTurn.sessionId,
+            userTurnId: userTurn.id,
+            timestamp: Date.now(),
+            granularity: 'full',
+          } as any;
+          return (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '6px' }}>
+              <DraggableHandle id={`drag-user-${userTurn.id}`} text={userTurn.text || ''} provenance={provenance} title="Drag user prompt to Scratchpad" />
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  try {
+                    document.dispatchEvent(new CustomEvent('extract-to-canvas', { detail: { text: userTurn.text || '', provenance, targetColumn: 'left' }, bubbles: true }));
+                  } catch (err) {
+                    console.error('Add to scratchpad failed', err);
+                  }
+                }}
+                aria-label="Send user prompt to Scratchpad"
+                style={{
+                  background: '#1d4ed8',
+                  border: '1px solid #334155',
+                  borderRadius: '6px',
+                  padding: '4px 8px',
+                  color: '#ffffff',
+                  fontSize: '12px',
+                  cursor: 'pointer',
+                }}
+              >
+                ↘ Scratchpad
+              </button>
+              <CopyButton text={userTurn.text} label="Copy user prompt" />
+            </div>
+          );
+        })()}
         
       </div>
     </div>
@@ -164,3 +237,26 @@ const UserTurnBlock = ({ userTurn, isExpanded, onToggle }: UserTurnBlockProps) =
 };
 
 export default UserTurnBlock;
+const DraggableHandle = ({ id, text, provenance, title }: { id: string; text: string; provenance: any; title?: string }) => {
+  const { setNodeRef, listeners } = useDraggable({ id, data: { text, provenance } });
+  return (
+    <button
+      ref={setNodeRef as any}
+      {...(listeners as any)}
+      aria-label="Drag to Scratchpad"
+      style={{
+        background: 'rgba(99, 102, 241, 0.25)',
+        border: '1px solid #334155',
+        borderRadius: '6px',
+        padding: '4px 8px',
+        color: '#e5e7eb',
+        fontSize: '12px',
+        cursor: 'grab',
+        marginRight: '8px'
+      }}
+      title={title || 'Drag to Scratchpad'}
+    >
+      ⇳ Drag
+    </button>
+  );
+};

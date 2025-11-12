@@ -12,10 +12,16 @@ function MessageRow({ turnId }: { turnId: string }) {
     return <div style={{ padding: '8px', color: '#ef4444' }}>Error: Missing turn {turnId}</div>;
   }
 
-  if ((message as any).type === 'user') {
-    return <UserTurnBlockConnected userTurn={message as any} />;
-  }
-  return <AiTurnBlockConnected aiTurn={message as any} />;
+  const content = (message as any).type === 'user'
+    ? <UserTurnBlockConnected userTurn={message as any} />
+    : <AiTurnBlockConnected aiTurn={message as any} />;
+
+  // Wrap each row with an anchor for scroll/highlight targeting
+  return (
+    <div className="message-row" data-turn-id={turnId} id={`turn-${turnId}`}>
+      {content}
+    </div>
+  );
 }
 
 export default React.memo(MessageRow);

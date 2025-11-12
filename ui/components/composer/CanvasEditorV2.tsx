@@ -1,14 +1,19 @@
-import React, { useEffect, useImperativeHandle, useMemo } from 'react';
+import React, { useEffect, useImperativeHandle } from 'react';
 import { EditorContent, useEditor, JSONContent } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import Placeholder from '@tiptap/extension-placeholder';
-import { useDroppable } from '@dnd-kit/core';
-import { ComposedContent } from './extensions/ComposedContentNode';
-import { ProvenanceExtension } from './extensions/ProvenanceExtension';
+// Removed drag-and-drop and legacy composer extensions for a cleaner editor
+import { ScratchpadComposedNode } from '../ScratchpadComposedNode';
 import type { ProvenanceData } from './extensions/ComposedContentNode';
 
 export interface CanvasEditorRef {
   insertComposedContent: (content: string, provenance: ProvenanceData, position?: number) => void;
+  insertAtCoords: (left: number, top: number, content: JSONContent) => void;
+  getPosAtCoords: (left: number, top: number) => number | undefined;
+  getCoordsAtPos: (pos: number) => { left: number; right: number; top: number; bottom: number } | undefined;
+  getSelectionText: () => string;
+  getSelectionRange: () => { from: number; to: number } | null;
+  deleteRange: (from: number, to: number) => void;
   setContent: (content: JSONContent) => void;
   getContent: () => JSONContent;
   getText: () => string;
@@ -19,17 +24,16 @@ export interface CanvasEditorRef {
 interface CanvasEditorProps {
   content?: string;
   initialText?: string;
-  droppableId?: string;
   initialContent?: JSONContent;
   placeholder?: string;
   onChange?: (content: JSONContent) => void;
-  onDrop?: (data: any, position: number) => void;
   className?: string;
   onInteraction?: () => void;
+  onSelectionChange?: (sel: { from: number; to: number; text: string }) => void;
 }
 
 export const CanvasEditorV2 = React.forwardRef<CanvasEditorRef, CanvasEditorProps>((props, ref) => {
-  const { content, initialText, droppableId = 'canvas-dropzone' } = props;
+  const { content, initialText } = props;
 
   const editor = useEditor({
     extensions: [
@@ -37,11 +41,11 @@ export const CanvasEditorV2 = React.forwardRef<CanvasEditorRef, CanvasEditorProp
         heading: false,
       }),
       Placeholder.configure({
-        placeholder: props.placeholder || 'Drag content here to start composing...',
+        placeholder: props.placeholder || 'Click to place content here…',
         emptyEditorClass: 'is-editor-empty',
       }),
-      ComposedContent,
-      ProvenanceExtension,
+      ScratchpadComposedNode,
+      // Rely on TipTap's natural splitting and behavior; no legacy composer extension
     ],
     content: props.initialContent ?? content ?? initialText ?? '',
     onUpdate: ({ editor }) => {
@@ -50,17 +54,78 @@ export const CanvasEditorV2 = React.forwardRef<CanvasEditorRef, CanvasEditorProp
     },
     editorProps: {
       attributes: {
-        class: `prose prose-sm sm:prose lg:prose-lg xl:prose-2xl mx-auto focus:outline-none ${props.className || ''}`,
-        style: 'min-height: 160px; padding: 8px;',
+        class: `prose prose-sm focus:outline-none ${props.className || ''}`,
+        style: 'min-height: 100%; padding: 12px; cursor: text; width: 100%;',
       },
       handleDrop: () => false,
+      handleClick: (view) => { view.focus(); return false; },
     }
   });
 
   useImperativeHandle(ref, () => ({
     insertComposedContent: (text: string, provenance: ProvenanceData, position?: number) => {
       if (!editor) return;
-      editor.commands.insertComposedContent({ content: text, provenance, position });
+      const providerId = (provenance as any)?.providerId || 'unknown';
+      const turnId = (provenance as any)?.aiTurnId || (provenance as any)?.userTurnId || '';
+      const responseType = (provenance as any)?.responseType || 'batch';
+      const sessionId = (provenance as any)?.sessionId || 'unknown';
+      const node: JSONContent = {
+        type: 'scratchpadBlock',
+        attrs: { providerId, turnId, responseType, sessionId },
+        content: [{ type: 'text', text }]
+      };
+      if (typeof position === 'number') {
+        editor.chain().focus().insertContentAt(position, node).run();
+      } else {
+        editor.chain().focus().insertContent(node).run();
+      }
+    },
+    // Precise insertion by viewport coordinates
+    insertAtCoords: (left: number, top: number, content: JSONContent) => {
+      if (!editor) return;
+      const view = (editor as any).view;
+      if (!view || typeof view.posAtCoords !== 'function') {
+        editor.chain().focus().insertContent(content).run();
+        return;
+      }
+      const pos = view.posAtCoords({ left, top });
+      const insertPos = pos?.pos ?? undefined;
+      if (typeof insertPos === 'number') {
+        editor.chain().focus().insertContentAt(insertPos, content).run();
+      } else {
+        editor.chain().focus().insertContent(content).run();
+      }
+    },
+    getPosAtCoords: (left: number, top: number) => {
+      if (!editor) return undefined;
+      const view = (editor as any).view;
+      const pos = view?.posAtCoords ? view.posAtCoords({ left, top }) : null;
+      return pos?.pos ?? undefined;
+    },
+    getCoordsAtPos: (pos: number) => {
+      if (!editor || typeof pos !== 'number') return undefined;
+      const view = (editor as any).view;
+      if (!view || typeof view.coordsAtPos !== 'function') return undefined;
+      try {
+        const rect = view.coordsAtPos(pos);
+        return { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom } as any;
+      } catch { return undefined; }
+    },
+    getSelectionText: () => {
+      const state = (editor as any)?.state;
+      const sel = state?.selection;
+      if (!sel) return '';
+      return state.doc?.textBetween(sel.from, sel.to, '\n') || '';
+    },
+    getSelectionRange: () => {
+      const state = (editor as any)?.state;
+      const sel = state?.selection;
+      if (!sel) return null;
+      return { from: sel.from, to: sel.to };
+    },
+    deleteRange: (from: number, to: number) => {
+      if (!editor || typeof from !== 'number' || typeof to !== 'number') return;
+      editor.chain().focus().deleteRange({ from, to }).run();
     },
     setContent: (json: JSONContent) => {
       if (!editor) return;
@@ -83,26 +148,30 @@ export const CanvasEditorV2 = React.forwardRef<CanvasEditorRef, CanvasEditorProp
     const notify = () => props.onInteraction?.();
     editor.on('focus', notify);
     editor.on('selectionUpdate', notify);
+    const onSel = () => {
+      try {
+        const state = (editor as any).state;
+        const sel = state?.selection;
+        if (!sel) return;
+        const from = sel.from;
+        const to = sel.to;
+        const text = state.doc?.textBetween(from, to, '\n') || '';
+        props.onSelectionChange?.({ from, to, text });
+      } catch {}
+    };
+    editor.on('selectionUpdate', onSel);
     // ensure typing is already covered by onUpdate
     return () => {
       editor.off('focus', notify);
       editor.off('selectionUpdate', notify);
+      editor.off('selectionUpdate', onSel);
     };
-  }, [editor, props.onInteraction]);
+  }, [editor, props.onInteraction, props.onSelectionChange]);
 
-  const { isOver, setNodeRef } = useDroppable({ id: droppableId, data: { type: 'canvas' } });
-
-  const overlay = useMemo(() => (
-    <div className="absolute inset-0 transition-all duration-150 pointer-events-none" style={{
-      background: isOver ? 'rgba(99, 102, 241, 0.10)' : 'transparent',
-      outline: isOver ? '2px dashed rgba(99, 102, 241, 0.7)' : 'none',
-      borderRadius: '8px'
-    }} />
-  ), [isOver]);
+  // Removed droppable overlay and drag-related code for a cleaner editor
 
   return (
     <div
-      ref={setNodeRef}
       className="canvas-editor-container"
       style={{
         position: 'relative',
@@ -111,12 +180,12 @@ export const CanvasEditorV2 = React.forwardRef<CanvasEditorRef, CanvasEditorProp
         height: '100%',
         minHeight: '160px',
         background: 'rgba(2, 6, 23, 0.6)',
-        border: isOver ? '2px dashed rgba(99, 102, 241, 0.7)' : '1px solid rgba(148, 163, 184, 0.15)',
+        border: '1px solid rgba(148, 163, 184, 0.15)',
         display: 'flex',
         flexDirection: 'column'
       }}
+      onClick={() => editor?.commands.focus()}
     >
-      {overlay}
       <div style={{ flex: 1, minHeight: 0 }}>
         <EditorContent editor={editor} />
       </div>

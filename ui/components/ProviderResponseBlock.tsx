@@ -9,6 +9,7 @@ import { useAtomValue } from 'jotai';
 import { providerContextsAtom } from '../state/atoms';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { useDraggable } from '@dnd-kit/core';
 
 interface ProviderState {
   text: string;
@@ -168,7 +169,8 @@ const ProviderResponseBlock = ({
 
         setHighlightedProviderId(targetProviderId);
         setTimeout(() => {
-          const el = document.getElementById(`provider-card-${targetProviderId}`);
+          // Use a per-turn unique ID to avoid collisions across turns
+          const el = document.getElementById(`provider-card-${targetTurnId || aiTurnId || 'unknown'}-${targetProviderId}`);
           if (el && typeof el.scrollIntoView === 'function') {
             el.scrollIntoView({ behavior: 'smooth', block: 'center' });
           }
@@ -223,10 +225,10 @@ const ProviderResponseBlock = ({
       ? (context?.errorMessage || state?.text || 'Provider error') 
       : (state?.text || getStatusText(state?.status));
 
-    return (
-      <div 
+  return (
+    <div
         key={providerId}
-        id={`provider-card-${providerId}`}
+        id={`provider-card-${aiTurnId || 'unknown'}-${providerId}`}
         style={{
           flex: '1 1 320px',
           minWidth: '260px',
@@ -321,12 +323,56 @@ const ProviderResponseBlock = ({
             minHeight: 0
           }}
         >
-          <div className="prose prose-sm max-w-none dark:prose-invert" style={{ 
+          <div className="prose prose-sm max-w-none dark:prose-invert"
+               onClickCapture={(e) => {
+                 try {
+                   const target = e.target as HTMLElement | null;
+                   const anchor = target ? (target.closest('a[href^="citation:"]') as HTMLAnchorElement | null) : null;
+                   if (anchor) { e.preventDefault(); e.stopPropagation(); }
+                 } catch {}
+               }}
+               onMouseDownCapture={(e) => {
+                 try {
+                   const target = e.target as HTMLElement | null;
+                   const anchor = target ? (target.closest('a[href^="citation:"]') as HTMLAnchorElement | null) : null;
+                   const isAux = (e as any).button && (e as any).button !== 0;
+                   const isMod = (e.ctrlKey || (e as any).metaKey);
+                   if (anchor && (isAux || isMod)) { e.preventDefault(); e.stopPropagation(); }
+                 } catch {}
+               }}
+               onPointerDownCapture={(e) => {
+                 try {
+                   const target = e.target as HTMLElement | null;
+                   const anchor = target ? (target.closest('a[href^="citation:"]') as HTMLAnchorElement | null) : null;
+                   const isAux = (e as any).button && (e as any).button !== 0;
+                   const isMod = (e.ctrlKey || (e as any).metaKey);
+                   if (anchor && (isAux || isMod)) { e.preventDefault(); e.stopPropagation(); }
+                 } catch {}
+               }}
+               style={{ 
             fontSize: '13px', 
             lineHeight: '1.5', 
             color: '#e2e8f0' 
           }}>
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+            <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ a: (props: any) => {
+              const href = props?.href || '';
+              const isCitation = typeof href === 'string' && href.startsWith('citation:');
+              if (!isCitation) {
+                return <a {...props} target="_blank" rel="noopener noreferrer" />;
+              }
+              const numMatch = String(href).match(/(\d+)/);
+              const num = numMatch ? parseInt(numMatch[1], 10) : NaN;
+              return (
+                <span role="button" tabIndex={0}
+                      onClick={(e) => { e.preventDefault(); e.stopPropagation(); /* citation handled by AiTurnBlock */ }}
+                      style={{ display: 'inline-flex', alignItems: 'center', padding: '2px 8px', margin: '0 4px',
+                               background: 'rgba(30, 64, 175, 0.35)', border: '1px solid #3b82f6', borderRadius: 9999,
+                               color: '#bfdbfe', fontSize: 12, fontWeight: 700, cursor: 'pointer', userSelect: 'none' }}
+                      title={isNaN(num) ? 'Citation' : `Citation ${num}`}>
+                  {props.children}
+                </span>
+              );
+            } }}>
               {String(displayText || '')}
             </ReactMarkdown>
             {isStreaming && <span className="streaming-dots" />}
@@ -342,22 +388,41 @@ const ProviderResponseBlock = ({
           flexShrink: 0,
           height: '32px'
         }}>
+          {/** Drag handle to move provider response into Scratchpad */}
+          {(() => {
+            const text = String(state?.text || '');
+            const provenance = {
+              providerId: providerId || 'unknown',
+              aiTurnId: aiTurnId,
+              sessionId: sessionId,
+              granularity: 'full',
+              sourceText: text,
+              responseType: 'batch',
+              responseIndex: 0,
+              timestamp: Date.now()
+            } as any;
+            return (
+              <DraggableHandle id={`drag-provider-${aiTurnId || 'unknown'}-${providerId}`} text={text} provenance={provenance} title={`Drag ${provider?.name || providerId} to Canvas`} />
+            );
+          })()}
           <button
             onClick={(e) => {
               e.stopPropagation();
               try {
                 onEnterComposerMode?.();
+                const text = String(state?.text || '');
                 const provenance = {
-                  providerId,
+                  providerId: providerId || 'unknown',
                   aiTurnId: aiTurnId,
                   sessionId: sessionId,
                   granularity: 'full',
-                  sourceText: state?.text || '',
+                  sourceText: text,
                   responseType: 'batch',
+                  responseIndex: 0,
                   timestamp: Date.now()
                 } as any;
                 setTimeout(() => {
-                  document.dispatchEvent(new CustomEvent('extract-to-canvas', { detail: { text: state?.text || '', provenance }, bubbles: true }));
+                  document.dispatchEvent(new CustomEvent('extract-to-canvas', { detail: { text, provenance, targetColumn: 'left' }, bubbles: true }));
                 }, 50);
               } catch (err) { console.error('Copy to canvas failed', err); }
             }}
@@ -372,7 +437,7 @@ const ProviderResponseBlock = ({
               cursor: 'pointer',
             }}
           >
-            ↘ Canvas
+            ↘ Scratchpad
           </button>
           <CopyButton text={state?.text} label={`Copy ${provider?.name || providerId}`} />
           <ProviderPill id={providerId as any} />
@@ -540,3 +605,25 @@ const ProviderResponseBlock = ({
 };
 
 export default React.memo(ProviderResponseBlock);
+const DraggableHandle = ({ id, text, provenance, title }: { id: string; text: string; provenance: any; title?: string }) => {
+  const { setNodeRef, listeners } = useDraggable({ id, data: { text, provenance } });
+  return (
+    <button
+      ref={setNodeRef as any}
+      {...(listeners as any)}
+      aria-label={title || 'Drag to Scratchpad'}
+      style={{
+        background: 'rgba(99, 102, 241, 0.25)',
+        border: '1px solid #334155',
+        borderRadius: '6px',
+        padding: '4px 8px',
+        color: '#e5e7eb',
+        fontSize: '12px',
+        cursor: 'grab',
+      }}
+      title={title || 'Drag to Scratchpad'}
+    >
+      ⇳ Drag
+    </button>
+  );
+};

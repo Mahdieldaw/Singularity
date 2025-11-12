@@ -256,3 +256,40 @@ html, body, #root {
   flex: 0 0 auto !important;
   z-index: 10;
 }
+
+/* Custom scrollbar styles for Scratchpad */
+.scratchpad-drawer ::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.scratchpad-drawer ::-webkit-scrollbar-track {
+  background: rgba(30, 41, 59, 0.3);
+  border-radius: 3px;
+}
+
+.scratchpad-drawer ::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.3);
+  border-radius: 3px;
+}
+
+.scratchpad-drawer ::-webkit-scrollbar-thumb:hover {
+  background: rgba(148, 163, 184, 0.5);
+}
+
+/* Make TipTap editor more responsive */
+.ProseMirror {
+  outline: none;
+  min-height: 100%;
+  cursor: text !important;
+}
+
+.ProseMirror-focused {
+  outline: none;
+}
+
+/* Make entire editor area clickable */
+.scratchpad-editor {
+  min-height: 100%;
+  cursor: text;
+}
