@@ -1,7 +1,10 @@
 import { SimpleIndexedDBAdapter } from '../persistence/SimpleIndexedDBAdapter';
-import type { ProvenanceData } from '../../ui/components/composer/extensions/ComposedContentNode';
-import type { TurnRecord, ProviderResponseRecord } from '../persistence/types';
+import type { TurnRecord } from '../persistence/types';
 
+/**
+ * Simple context provider for the Scratchpad agent.
+ * Reads turn digests and provides them as context.
+ */
 export class ContextGraphService {
   private adapter: SimpleIndexedDBAdapter;
 
@@ -10,104 +13,66 @@ export class ContextGraphService {
   }
 
   /**
-   * HIGH-PERFORMANCE: Uses compound index for O(1) lookup
+   * Get all turns for a session with their digests
+   * Returns turns sorted by creation time
    */
-  async getContextByProvenance(provenance: ProvenanceData): Promise<ProviderResponseRecord | null> {
-    if (!this.adapter.isReady()) {
-      console.warn('[ContextGraph] Adapter not ready');
-      return null;
-    }
-
-    const { aiTurnId, providerId, responseType, responseIndex } = provenance;
-
-    // Validate inputs
-    if (!aiTurnId || !providerId || !responseType) {
-      console.warn('[ContextGraph] Invalid provenance:', provenance);
-      return null;
-    }
-
-    try {
-      // Use the existing byCompoundKey index for O(1) lookup
-      const responses = await this.adapter.getByIndex(
-        'provider_responses',
-        'byCompoundKey',
-        [aiTurnId, providerId, responseType, responseIndex ?? 0]
-      );
-
-      if (!responses || responses.length === 0) {
-        console.warn(`[ContextGraph] No response found for provenance:`, provenance);
-        return null;
-      }
-
-      // Should return exactly one match due to unique constraint
-      return responses[0] as ProviderResponseRecord;
-    } catch (error) {
-      console.error('[ContextGraph] getContextByProvenance failed:', error);
-      return null;
-    }
-  }
-
-  /**
-   * OPTIMIZED: Early-exit search with recency sorting
-   */
-  async searchChatHistory(
-    sessionId: string,
-    query: string,
-    limit: number = 20
-  ): Promise<TurnRecord[]> {
+  async getTurnsWithDigests(sessionId: string): Promise<TurnRecord[]> {
     if (!this.adapter.isReady()) {
       console.warn('[ContextGraph] Adapter not ready');
       return [];
     }
 
     try {
-      const lowerQuery = query.toLowerCase();
-      const matches: TurnRecord[] = [];
-
-      // Get turns using indexed query (fast)
       const turns = await this.adapter.getTurnsBySessionId(sessionId);
+      
+      // Sort by creation time (oldest first)
+      turns.sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0));
+      
+      return turns as TurnRecord[];
+    } catch (error) {
+      console.error('[ContextGraph] getTurnsWithDigests failed:', error);
+      return [];
+    }
+  }
 
-      // Sort by recency (most recent first)
-      turns.sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0));
+  /**
+   * Build a context string from turn digests
+   * This is what we'll send to the agent as "conversation memory"
+   */
+  buildContextFromDigests(turns: TurnRecord[]): string {
+    const lines: string[] = [];
+    
+    lines.push('CONVERSATION HISTORY:');
+    lines.push('');
 
-      // Early exit when we have enough matches
-      for (const turn of turns) {
-        if (matches.length >= limit) break;
-
-        const content = String(turn.content || '').toLowerCase();
-        if (content.includes(lowerQuery)) {
-          matches.push(turn as TurnRecord);
+    turns.forEach((turn, index) => {
+      if (turn.type === 'user') {
+        const content = String(turn.content || '');
+        lines.push(`[Turn ${index + 1}] User: ${content.slice(0, 200)}`);
+      } else if (turn.type === 'ai') {
+        const aiTurn = turn as any;
+        
+        // If digest exists, use it
+        if (typeof aiTurn.digest === 'string' && aiTurn.digest.trim().length > 0) {
+          lines.push(`[Turn ${index + 1}] AI: ${aiTurn.digest}`);
+        } else if (aiTurn.digest?.summary) {
+          lines.push(`[Turn ${index + 1}] AI: ${aiTurn.digest.summary}`);
+          if (aiTurn.digest.keyPoints?.length > 0) {
+            lines.push(`  Key points: ${aiTurn.digest.keyPoints.join(', ')}`);
+          }
+        } else {
+          // Fallback: use batch responses preview
+          const batchResponses = Object.values(aiTurn.batchResponses || {});
+          if (batchResponses.length > 0) {
+            const firstResponse = batchResponses[0] as any;
+            const preview = String(firstResponse?.text || '').slice(0, 150);
+            lines.push(`[Turn ${index + 1}] AI: ${preview}...`);
+          }
         }
       }
+      lines.push('');
+    });
 
-      return matches;
-    } catch (error) {
-      console.error('[ContextGraph] searchChatHistory failed:', error);
-      return [];
-    }
-  }
-
-  /**
-   * Direct turn lookup by ID (already O(1))
-   */
-  async getTurnById(turnId: string): Promise<TurnRecord | undefined> {
-    if (!this.adapter.isReady()) return undefined;
-    return this.adapter.get('turns', turnId) as Promise<TurnRecord | undefined>;
-  }
-
-  /**
-   * Get recent turns (useful for "what did we just discuss?")
-   */
-  async getRecentTurns(sessionId: string, limit: number = 10): Promise<TurnRecord[]> {
-    if (!this.adapter.isReady()) return [];
-
-    try {
-      const turns = await this.adapter.getTurnsBySessionId(sessionId);
-      turns.sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0));
-      return turns.slice(0, limit) as TurnRecord[];
-    } catch (error) {
-      console.error('[ContextGraph] getRecentTurns failed:', error);
-      return [];
-    }
+    return lines.join('\n');
   }
 }

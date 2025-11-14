@@ -1,242 +1,230 @@
 import { ContextGraphService } from './ContextGraphService';
-import ExtensionAPI from '../../ui/services/extension-api';
-import type { InitializeRequest, ProviderKey } from '../../shared/contract';
+import type { ProviderKey } from '../../shared/contract';
 
-interface AgentResponse {
-  type: 'text' | 'tool_call';
-  text?: string;
-  toolCall?: {
-    id: string;
-    name: string;
-    input: any;
-  };
-  rawMessage: any;
-}
-
-const MAX_TOOL_CALLS = 5; // Safety limit
-
+/**
+ * ScratchpadAgentService
+ * 
+ * Provides a strategic "advisor" agent that:
+ * - Reads digests from the main conversation thread
+ * - Uses direct provider calls (NOT the workflow engine)
+ * - Stores agent contexts separately under "agent:{provider}" keys
+ * - Supports continue mode (reuses previous agent context)
+ * - Supports new mode (starts fresh, clearing agent contexts)
+ */
 export class ScratchpadAgentService {
   private contextGraph: ContextGraphService;
-  private api: ExtensionAPI;
-  private messages: any[] = [];
+  private providerRegistry: any;
+  private sessionManager: any;
+  private currentAgentModel: ProviderKey | null = null;
+  private agentContextKey: string | null = null;
 
-  constructor(contextGraph: ContextGraphService) {
+  constructor(contextGraph: ContextGraphService, sessionManager: any, providerRegistry: any) {
     this.contextGraph = contextGraph;
-    this.api = new ExtensionAPI();
+    this.sessionManager = sessionManager;
+    this.providerRegistry = providerRegistry;
   }
 
   /**
-   * Tool definitions for the LLM
-   */
-  private readonly AGENT_TOOLS = [
-    {
-      name: 'getContextByProvenance',
-      description: 'Fetches the full text content for a specific block using its provenance metadata.',
-      input_schema: {
-        type: 'object',
-        properties: {
-          aiTurnId: { type: 'string', description: 'The AI turn ID' },
-          providerId: { type: 'string', description: 'The provider ID (e.g., "claude")' },
-          responseType: { type: 'string', description: 'Response type (e.g., "batch", "synthesis")' },
-          responseIndex: { type: 'number', description: 'Response index (usually 0)' }
-        },
-        required: ['aiTurnId', 'providerId', 'responseType', 'responseIndex']
-      }
-    },
-    {
-      name: 'searchChatHistory',
-      description: 'Searches the entire conversation history for keywords or topics. Returns the most recent matching turns.',
-      input_schema: {
-        type: 'object',
-        properties: {
-          sessionId: { type: 'string', description: 'Current session ID' },
-          query: { type: 'string', description: 'Search query' }
-        },
-        required: ['sessionId', 'query']
-      }
-    },
-    {
-      name: 'getRecentTurns',
-      description: 'Gets the N most recent turns from the conversation.',
-      input_schema: {
-        type: 'object',
-        properties: {
-          sessionId: { type: 'string', description: 'Current session ID' },
-          limit: { type: 'number', description: 'Number of turns to retrieve (default 10)' }
-        },
-        required: ['sessionId']
-      }
-    }
-  ];
-
-  /**
-   * Main entry point: handles a user prompt with agentic loop
+   * Handle agent prompt with mode selection
+   * @param userInput - The user's question to the agent
+   * @param mainSessionId - The main conversation session (for digest context)
+   * @param agentModel - Which provider to use for the agent
+   * @param options - { mode: 'new' | 'continue' }
    */
   async handlePrompt(
     userInput: string,
-    sessionId: string,
-    agentModel: ProviderKey
+    mainSessionId: string,
+    agentModel: ProviderKey,
+    options: { mode?: 'new' | 'continue' } = {}
   ): Promise<string> {
-    // System prompt defines the agent's role
-    const systemPrompt = `You are "The Strategist," an analytical advisor helping the user understand their conversation history.
+    const mode = options.mode || 'continue';
 
-You have access to tools that let you search the full conversation and retrieve specific content.
-
-When answering questions:
-1. Use tools to find accurate information
-2. Cite specific turns when referencing content
-3. Be concise and direct
-4. If you can't find relevant information, say so
-
-Always use tools when the user asks about past conversation content.`;
-
-    // Initialize conversation with system prompt and user query
-    this.messages = [
-      { role: 'user', content: systemPrompt }
-    ];
-    this.messages.push({ role: 'user', content: userInput });
-
-    // Agentic loop: keep calling until we get a text response
-    for (let i = 0; i < MAX_TOOL_CALLS; i++) {
-      const agentResponse = await this.executeAgentTurn(sessionId, agentModel);
-
-      if (agentResponse.type === 'text') {
-        // Success! Return final answer
-        return agentResponse.text || 'Done.';
-      }
-
-      if (agentResponse.type === 'tool_call') {
-        const toolCall = agentResponse.toolCall!;
-        
-        // Add assistant's tool use to history
-        this.messages.push(agentResponse.rawMessage);
-        
-        // Execute the tool
-        console.log(`[Agent] Using tool: ${toolCall.name}`, toolCall.input);
-        const toolResult = await this.executeTool(toolCall.name, toolCall.input);
-        
-        // Add tool result to history
-        this.messages.push({
-          role: 'user',
-          content: [
-            {
-              type: 'tool_result',
-              tool_use_id: toolCall.id,
-              content: JSON.stringify(toolResult)
-            }
-          ]
-        });
-        
-        // Loop continues...
-      }
-    }
-
-    return "Error: Agent exceeded maximum tool calls. Please try a simpler question.";
-  }
-
-  /**
-   * Execute one turn: call your workflow API with tools
-   */
-  private async executeAgentTurn(
-    sessionId: string,
-    agentModel: ProviderKey
-  ): Promise<AgentResponse> {
-    // Build request using your existing API contract
-    const request: InitializeRequest = {
-      type: 'initialize',
-      sessionId: `agent-${Date.now()}`, // Ephemeral session for agent
-      userMessage: '', // Messages are in providerMeta
-      providers: [agentModel],
-      includeMapping: false,
-      includeSynthesis: false,
-      providerMeta: {
-        [agentModel]: {
-          messages: this.messages,
-          tools: this.AGENT_TOOLS
-        }
-      }
-    };
-
-    // Call your existing workflow API
-    const response = await this.api.executeWorkflow(request);
-    
-    // Extract the model's response
-    const agentOutput = response.batchOutputs?.[agentModel];
-    const rawContent = agentOutput?.rawModelResponse?.content;
-
-    if (Array.isArray(rawContent)) {
-      // Check for tool use
-      const toolUse = rawContent.find((block: any) => block.type === 'tool_use');
-      if (toolUse) {
-        return {
-          type: 'tool_call',
-          toolCall: {
-            id: toolUse.id,
-            name: toolUse.name,
-            input: toolUse.input
-          },
-          rawMessage: { 
-            role: 'assistant', 
-            content: rawContent 
-          }
-        };
-      }
-
-      // Check for text response
-      const textBlock = rawContent.find((block: any) => block.type === 'text');
-      if (textBlock) {
-        return {
-          type: 'text',
-          text: textBlock.text,
-          rawMessage: { 
-            role: 'assistant', 
-            content: rawContent 
-          }
-        };
-      }
-    }
-
-    // Fallback
-    return {
-      type: 'text',
-      text: agentOutput?.text || "I encountered an error processing your request.",
-      rawMessage: { 
-        role: 'assistant', 
-        content: agentOutput?.text || "" 
-      }
-    };
-  }
-
-  /**
-   * Execute tool calls via ContextGraphService
-   */
-  private async executeTool(toolName: string, input: any): Promise<any> {
     try {
-      switch (toolName) {
-        case 'getContextByProvenance':
-          return await this.contextGraph.getContextByProvenance(input);
-        
-        case 'searchChatHistory':
-          return await this.contextGraph.searchChatHistory(
-            input.sessionId,
-            input.query,
-            20 // Return up to 20 matches
-          );
-        
-        case 'getRecentTurns':
-          return await this.contextGraph.getRecentTurns(
-            input.sessionId,
-            input.limit || 10
-          );
-        
-        default:
-          return { error: `Unknown tool: ${toolName}` };
+      // Reset agent context if switching models OR explicit new mode
+      if (mode === 'new' || agentModel !== this.currentAgentModel) {
+        await this.newAgent(mainSessionId);
+        this.currentAgentModel = agentModel;
+        this.agentContextKey = `agent:${agentModel}`;
       }
+
+      // Build seeded prompt with digest context (only for first message)
+      const isFirstMessage = !this.currentAgentModel || mode === 'new';
+      const prompt = isFirstMessage 
+        ? await this.buildSeededPrompt(userInput, mainSessionId)
+        : userInput;
+
+      // Get provider adapter
+      const adapter = this.providerRegistry.getAdapter(agentModel);
+      if (!adapter) {
+        throw new Error(`Provider ${agentModel} not available`);
+      }
+
+      // Retrieve agent context (if continuing)
+      let agentContext = null;
+      if (mode === 'continue' && this.agentContextKey) {
+        agentContext = await this.getAgentContext(mainSessionId, this.agentContextKey);
+      }
+
+      // Call provider directly
+      console.log(`[Agent] Calling ${agentModel} in ${mode} mode`, {
+        hasContext: !!agentContext,
+        contextKeys: agentContext ? Object.keys(agentContext) : []
+      });
+
+      const response = await adapter.ask(
+        prompt,
+        agentContext, // Pass existing context for continuation
+        mainSessionId,
+        undefined, // No streaming callback needed
+        undefined  // No abort signal
+      );
+
+      if (!response || !response.text) {
+        throw new Error(`Agent ${agentModel} returned empty response`);
+      }
+
+      // Store updated agent context
+      await this.storeAgentContext(mainSessionId, this.agentContextKey!, response.meta || {});
+
+      return response.text;
     } catch (error) {
-      console.error(`[Agent] Tool execution failed:`, error);
-      return { 
-        error: `Tool execution failed: ${error instanceof Error ? error.message : 'Unknown error'}` 
-      };
+      console.error('[Agent] handlePrompt failed:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Clear agent conversation (start fresh)
+   */
+  async newAgent(mainSessionId: string): Promise<void> {
+    try {
+      if (this.agentContextKey) {
+        // Clear stored agent context
+        await this.clearAgentContext(mainSessionId, this.agentContextKey);
+      }
+      this.currentAgentModel = null;
+      this.agentContextKey = null;
+      console.log('[Agent] Agent conversation reset');
+    } catch (e) {
+      console.warn('[Agent] Failed to clear agent context:', e);
+    }
+  }
+
+  /**
+   * Build seeded prompt with digest context from main session
+   * @private
+   */
+  private async buildSeededPrompt(userInput: string, mainSessionId: string): Promise<string> {
+    // Load all turns with digests from main session
+    const turns = await this.contextGraph.getTurnsWithDigests(mainSessionId);
+    const contextString = this.contextGraph.buildContextFromDigests(turns);
+
+    // Build strategic advisor prompt
+    const fullPrompt = `You are "The Strategist," an analytical advisor analyzing an ongoing conversation.
+
+${contextString}
+
+---
+
+USER QUESTION: ${userInput}
+
+Provide a clear, concise, strategic answer based on the conversation history above. Focus on:
+- Identifying patterns and insights across the conversation
+- Highlighting unresolved tensions or open questions
+- Suggesting next steps or clarifying questions
+- Drawing connections between different parts of the discussion
+
+Be direct and actionable. Avoid repeating information already discussed unless synthesizing it in a new way.`;
+
+    return fullPrompt;
+  }
+
+  /**
+   * Retrieve agent context from main session's providerContexts
+   * Agent contexts are stored under "agent:{provider}" keys
+   * @private
+   */
+  private async getAgentContext(mainSessionId: string, agentContextKey: string): Promise<any> {
+    try {
+      // Get session record
+      const session = await this.sessionManager.adapter.get('sessions', mainSessionId);
+      if (!session || !session.lastTurnId) {
+        return null;
+      }
+
+      // Get last turn
+      const lastTurn = await this.sessionManager.adapter.get('turns', session.lastTurnId);
+      if (!lastTurn || !lastTurn.providerContexts) {
+        return null;
+      }
+
+      // Extract agent context
+      const agentContext = lastTurn.providerContexts[agentContextKey];
+      if (!agentContext) {
+        return null;
+      }
+
+      console.log(`[Agent] Retrieved context for ${agentContextKey}:`, Object.keys(agentContext));
+      return agentContext;
+    } catch (e) {
+      console.warn('[Agent] Failed to retrieve agent context:', e);
+      return null;
+    }
+  }
+
+  /**
+   * Store agent context in main session's last turn
+   * @private
+   */
+  private async storeAgentContext(mainSessionId: string, agentContextKey: string, meta: any): Promise<void> {
+    try {
+      // Get session
+      const session = await this.sessionManager.adapter.get('sessions', mainSessionId);
+      if (!session || !session.lastTurnId) {
+        console.warn('[Agent] No last turn to store agent context');
+        return;
+      }
+
+      // Get last turn
+      const lastTurn = await this.sessionManager.adapter.get('turns', session.lastTurnId);
+      if (!lastTurn) {
+        console.warn('[Agent] Last turn not found');
+        return;
+      }
+
+      // Update providerContexts with agent context
+      lastTurn.providerContexts = lastTurn.providerContexts || {};
+      lastTurn.providerContexts[agentContextKey] = meta;
+      lastTurn.updatedAt = Date.now();
+
+      // Save turn
+      await this.sessionManager.adapter.put('turns', lastTurn);
+      
+      console.log(`[Agent] Stored context for ${agentContextKey}:`, Object.keys(meta));
+    } catch (e) {
+      console.error('[Agent] Failed to store agent context:', e);
+    }
+  }
+
+  /**
+   * Clear agent context from main session
+   * @private
+   */
+  private async clearAgentContext(mainSessionId: string, agentContextKey: string): Promise<void> {
+    try {
+      const session = await this.sessionManager.adapter.get('sessions', mainSessionId);
+      if (!session || !session.lastTurnId) return;
+
+      const lastTurn = await this.sessionManager.adapter.get('turns', session.lastTurnId);
+      if (!lastTurn || !lastTurn.providerContexts) return;
+
+      delete lastTurn.providerContexts[agentContextKey];
+      lastTurn.updatedAt = Date.now();
+      await this.sessionManager.adapter.put('turns', lastTurn);
+
+      console.log(`[Agent] Cleared context for ${agentContextKey}`);
+    } catch (e) {
+      console.warn('[Agent] Failed to clear agent context:', e);
     }
   }
 }

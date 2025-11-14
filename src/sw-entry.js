@@ -39,6 +39,9 @@ import { SessionManager } from './persistence/SessionManager.js';
 import { initializePersistenceLayer } from './persistence/index.js';
 import { errorHandler } from './utils/ErrorHandler.js';
 import { persistenceMonitor } from './debug/PersistenceMonitor.js';
+// Scratchpad Strategist services
+import { ContextGraphService } from './services/ContextGraphService.js';
+import { ScratchpadAgentService } from './services/ScratchpadAgentService.js';
 
 // ============================================================================
 // FEATURE FLAGS (Source of Truth)
@@ -57,6 +60,7 @@ const HTOS_ENABLE_DOCUMENT_PERSISTENCE = globalThis.HTOS_ENABLE_DOCUMENT_PERSIST
 let sessionManager = null;
 let persistenceLayer = null;
 const __HTOS_SESSIONS = (self.__HTOS_SESSIONS = self.__HTOS_SESSIONS || {});
+let scratchpadAgentService = null;
 
 // Ensure fetch is correctly bound
 try {
@@ -447,6 +451,16 @@ async function initializeGlobalServices() {
     // 6. Create compiler and context resolver
     const compiler = new WorkflowCompiler(sessionManager);
     const contextResolver = new ContextResolver(sessionManager);
+
+    // Initialize Strategist agent service (lazy if needed later)
+    try {
+      const graphService = new ContextGraphService(sessionManager.adapter);
+      scratchpadAgentService = new ScratchpadAgentService(graphService, sessionManager, providerRegistry);
+      console.log('[SW] ✓ ScratchpadAgentService initialized');
+    } catch (e) {
+      console.warn('[SW] ScratchpadAgentService init failed (will initialize lazily on first use):', e);
+      scratchpadAgentService = null;
+    }
     
     console.log("[SW] ✅ Global services ready");
     return {
@@ -455,6 +469,7 @@ async function initializeGlobalServices() {
       compiler,
       contextResolver,
       persistenceLayer: pl, // Expose persistence layer to other modules
+      scratchpadAgentService,
     };
   })();
 
@@ -665,6 +680,62 @@ async function handleUnifiedMessage(message, sender, sendResponse) {
             activeMode: 'indexeddb'
           }
         });
+        return true;
+      }
+
+      // ========================================================================
+      // SCRATCHPAD STRATEGIST AGENT ENDPOINTS
+      // ========================================================================
+      case 'SCRATCHPAD_AGENT_PROMPT': {
+        try {
+          const text = message.text || message.payload?.text || message.userInput || '';
+          const sessionId = message.sessionId || message.payload?.sessionId || message.mainSessionId;
+          const model = String(message.model || message.payload?.model || 'claude').toLowerCase();
+          const mode = (message.mode || message.payload?.mode || 'continue');
+
+          if (!sessionId) {
+            sendResponse({ success: false, error: 'Missing sessionId' });
+            return true;
+          }
+
+          // Ensure agent service exists
+          try {
+            if (!scratchpadAgentService) {
+              const graphService = new ContextGraphService(sm.adapter);
+              scratchpadAgentService = new ScratchpadAgentService(graphService, sm, providerRegistry);
+            }
+          } catch (e) {
+            console.error('[SW] Failed to initialize ScratchpadAgentService lazily:', e);
+            sendResponse({ success: false, error: e?.message || String(e) });
+            return true;
+          }
+
+          const textResp = await scratchpadAgentService.handlePrompt(text, sessionId, model, { mode });
+          sendResponse({ success: true, data: { text: textResp } });
+        } catch (e) {
+          console.error('[SW] SCRATCHPAD_AGENT_PROMPT failed:', e);
+          sendResponse({ success: false, error: e?.message || String(e) });
+        }
+        return true;
+      }
+
+      case 'SCRATCHPAD_AGENT_NEW': {
+        try {
+          const sessionId = message.sessionId || message.payload?.sessionId || message.mainSessionId;
+          if (!sessionId) {
+            sendResponse({ success: false, error: 'Missing sessionId' });
+            return true;
+          }
+          if (!scratchpadAgentService) {
+            const graphService = new ContextGraphService(sm.adapter);
+            scratchpadAgentService = new ScratchpadAgentService(graphService, sm, providerRegistry);
+          }
+          await scratchpadAgentService.newAgent(sessionId);
+          sendResponse({ success: true });
+        } catch (e) {
+          console.error('[SW] SCRATCHPAD_AGENT_NEW failed:', e);
+          sendResponse({ success: false, error: e?.message || String(e) });
+        }
         return true;
       }
       

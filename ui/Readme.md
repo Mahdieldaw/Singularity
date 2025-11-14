@@ -97,6 +97,23 @@ This message signals the end of the *entire workflow*.
 * **Types:** `ui/types.ts` (UI-specific `AiTurn` and `ProviderResponse` shapes)
 * **Renderers:** `ui/components/AiTurnBlockConnected.tsx`, `ui/components/ProviderResponseBlockConnected.tsx`
 
+### Scratchpad Strategist Controls
+
+The Scratchpad drawer includes a lightweight "Strategist" agent to analyze the current conversation.
+
+- Location: `ui/components/ScratchpadDrawer.tsx`
+- Models: Uses `ProviderKey` models (claude, gemini, chatgpt, qwen) via the global `providerRegistry`.
+- Controls:
+  - Model select: choose the provider for the strategist
+  - Continue: continues the strategist's thread using stored provider context
+  - New Agent: resets the strategist context for the current session and starts fresh
+- Context: The agent seeds its first prompt with conversation digests from `ContextGraphService` (pulled from `turn.digest` values). Subsequent continues reuse the provider's `meta` context stored under `providerContexts['agent:{provider}']` on the last turn.
+- Persistence: Read/write occurs through the `PersistenceLayer.adapter` (`SimpleIndexedDBAdapter`).
+
+Notes:
+- These controls require extension runtime (Chrome) because preview mode lacks `chrome.runtime.id`.
+- Provider contexts (agent state) are stored on the last turn of the main session and keyed as `agent:{provider}`.
+
 ### Invariants & Gotchas
 
 * **Never Remap IDs:** The canonical `aiTurnId` from `TURN_CREATED` is used from start to finish.

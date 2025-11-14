@@ -202,6 +202,8 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
   const [isSynthesisExpanded, setIsSynthesisExpanded] = useState(true);
   const [isMappingExpanded, setIsMappingExpanded] = useState(true);
   const [mappingTab, setMappingTab] = useState<"map" | "options">("map");
+  const mapProseRef = useRef<HTMLDivElement>(null);
+  const optionsProseRef = useRef<HTMLDivElement>(null);
 
   // Selection menu for "Extract to Canvas"
   const [selectionMenu, setSelectionMenu] = useState<{ x: number; y: number; text: string; provenance: any } | null>(null);
@@ -363,6 +365,7 @@ const displayedMappingText = useMemo(() => {
     getMappingAndOptions(displayedMappingTake).mapping ?? ""
   );
 }, [displayedMappingTake, getMappingAndOptions]);
+const optionsText = useMemo(() => String(getOptions() || ""), [getOptions]);
  
 const hasMapping = !!(activeMappingPid && displayedMappingTake?.text);
 const hasSynthesis = !!(
@@ -391,6 +394,8 @@ const hasSynthesis = !!(
     hasMapping &&
     shorterHeight &&
     shorterSection === "synthesis";
+
+  // Determine if sections are truncated
 
   const getSectionStyle = (
     section: "synthesis" | "mapping",
@@ -435,6 +440,85 @@ const hasSynthesis = !!(
     });
     return t;
   }, []);
+
+  // DOM-based citation annotation: wrap plain text tokens like "↗N" into
+  // span elements with data attributes so our capture-phase handlers can
+  // delegate clicks without relying on anchors or hrefs.
+  const annotateCitations = useCallback((root: HTMLElement | null) => {
+    if (!root) return;
+    const rx = /↗(\d+)/g;
+    // Use a TreeWalker to process only text nodes; skip any content already annotated
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    const replacements: Array<{ node: Text; parts: (string | HTMLElement)[] }> = [];
+    let node: Node | null = walker.nextNode();
+    while (node) {
+      const textNode = node as Text;
+      const parentEl = textNode.parentElement;
+      // Skip if inside an anchor or already annotated citation element
+      if (parentEl && (parentEl.closest('a[href^="citation:"]') || parentEl.closest('[data-citation-number]') || parentEl.closest('[data-citation]'))) {
+        node = walker.nextNode();
+        continue;
+      }
+      const value = textNode.nodeValue || "";
+      let match: RegExpExecArray | null;
+      rx.lastIndex = 0;
+      let lastIdx = 0;
+      const parts: (string | HTMLElement)[] = [];
+      while ((match = rx.exec(value)) !== null) {
+        const start = match.index;
+        const end = start + match[0].length;
+        const num = parseInt(match[1], 10);
+        if (start > lastIdx) parts.push(value.slice(lastIdx, start));
+        const span = document.createElement('span');
+        span.setAttribute('data-citation-number', String(num));
+        span.setAttribute('role', 'button');
+        span.setAttribute('tabindex', '0');
+        span.textContent = `↗${isNaN(num) ? '' : num}`;
+        // lightweight visual styling to match badge without breaking text selection
+        span.style.display = 'inline-flex';
+        span.style.alignItems = 'center';
+        span.style.gap = '6px';
+        span.style.padding = '0 4px';
+        span.style.marginLeft = '4px';
+        span.style.marginRight = '4px';
+        span.style.background = '#1f2937';
+        span.style.border = '1px solid #374151';
+        span.style.borderRadius = '6px';
+        span.style.color = '#93c5fd';
+        span.style.fontSize = '12px';
+        span.style.lineHeight = '1.4';
+        parts.push(span);
+        lastIdx = end;
+      }
+      if (parts.length > 0) {
+        if (lastIdx < value.length) parts.push(value.slice(lastIdx));
+        replacements.push({ node: textNode, parts });
+      }
+      node = walker.nextNode();
+    }
+    replacements.forEach(({ node, parts }) => {
+      const frag = document.createDocumentFragment();
+      parts.forEach((p) => {
+        if (typeof p === 'string') frag.appendChild(document.createTextNode(p));
+        else frag.appendChild(p);
+      });
+      try {
+        if ((node as any).isConnected && node.parentNode) {
+          node.parentNode.replaceChild(frag, node);
+        }
+      } catch (err) {
+        console.warn('[AiTurnBlock] annotateCitations replace failed', err);
+      }
+    });
+  }, []);
+
+  // After Markdown renders, annotate citations with span[data-citation-number]
+  useEffect(() => {
+    try { annotateCitations(mapProseRef.current!); } catch {}
+  }, [annotateCitations, displayedMappingText, activeMappingPid, mappingTab]);
+  useEffect(() => {
+    try { annotateCitations(optionsProseRef.current!); } catch {}
+  }, [annotateCitations, optionsText, activeMappingPid, mappingTab]);
 
   const handleCitationClick = useCallback(
     (modelNumber: number) => {
@@ -485,12 +569,20 @@ const hasSynthesis = !!(
     try {
       const target = e.target as HTMLElement | null;
       const anchor = target ? (target.closest('a[href^="citation:"]') as HTMLAnchorElement | null) : null;
-      if (anchor) {
+      const citeEl = target ? (target.closest('[data-citation-number], [data-citation]') as HTMLElement | null) : null;
+      if (anchor || citeEl) {
         e.preventDefault();
         e.stopPropagation();
-        const href = anchor.getAttribute('href') || '';
-        const numMatch = href.match(/(\d+)/);
-        const num = numMatch ? parseInt(numMatch[1], 10) : NaN;
+        let num = NaN;
+        if (anchor) {
+          const href = anchor.getAttribute('href') || '';
+          const numMatch = href.match(/(\d+)/);
+          num = numMatch ? parseInt(numMatch[1], 10) : NaN;
+        } else if (citeEl) {
+          const raw = citeEl.getAttribute('data-citation-number') || citeEl.getAttribute('data-citation') || '';
+          const numMatch = raw.match(/(\d+)/);
+          num = numMatch ? parseInt(numMatch[1], 10) : NaN;
+        }
         if (!isNaN(num)) {
           handleCitationClick(num);
         }
@@ -505,15 +597,23 @@ const hasSynthesis = !!(
     try {
       const target = e.target as HTMLElement | null;
       const anchor = target ? (target.closest('a[href^="citation:"]') as HTMLAnchorElement | null) : null;
-      if (!anchor) return;
+      const citeEl = target ? (target.closest('[data-citation-number], [data-citation]') as HTMLElement | null) : null;
+      if (!anchor && !citeEl) return;
       const isAux = (e as any).button && (e as any).button !== 0;
       const isModifier = (e.ctrlKey || (e as any).metaKey);
       if (isAux || isModifier) {
         e.preventDefault();
         e.stopPropagation();
-        const href = anchor.getAttribute('href') || '';
-        const numMatch = href.match(/(\d+)/);
-        const num = numMatch ? parseInt(numMatch[1], 10) : NaN;
+        let num = NaN;
+        if (anchor) {
+          const href = anchor.getAttribute('href') || '';
+          const numMatch = href.match(/(\d+)/);
+          num = numMatch ? parseInt(numMatch[1], 10) : NaN;
+        } else if (citeEl) {
+          const raw = citeEl.getAttribute('data-citation-number') || citeEl.getAttribute('data-citation') || '';
+          const numMatch = raw.match(/(\d+)/);
+          num = numMatch ? parseInt(numMatch[1], 10) : NaN;
+        }
         if (!isNaN(num)) handleCitationClick(num);
       }
     } catch (err) {
@@ -526,15 +626,23 @@ const hasSynthesis = !!(
     try {
       const target = e.target as HTMLElement | null;
       const anchor = target ? (target.closest('a[href^="citation:"]') as HTMLAnchorElement | null) : null;
-      if (!anchor) return;
+      const citeEl = target ? (target.closest('[data-citation-number], [data-citation]') as HTMLElement | null) : null;
+      if (!anchor && !citeEl) return;
       const isAux = e.button !== 0;
       const isModifier = (e.ctrlKey || (e as any).metaKey);
       if (isAux || isModifier) {
         e.preventDefault();
         e.stopPropagation();
-        const href = anchor.getAttribute('href') || '';
-        const numMatch = href.match(/(\d+)/);
-        const num = numMatch ? parseInt(numMatch[1], 10) : NaN;
+        let num = NaN;
+        if (anchor) {
+          const href = anchor.getAttribute('href') || '';
+          const numMatch = href.match(/(\d+)/);
+          num = numMatch ? parseInt(numMatch[1], 10) : NaN;
+        } else if (citeEl) {
+          const raw = citeEl.getAttribute('data-citation-number') || citeEl.getAttribute('data-citation') || '';
+          const numMatch = raw.match(/(\d+)/);
+          num = numMatch ? parseInt(numMatch[1], 10) : NaN;
+        }
         if (!isNaN(num)) handleCitationClick(num);
       }
     } catch (err) {
@@ -547,12 +655,20 @@ const hasSynthesis = !!(
     try {
       const target = e.target as HTMLElement | null;
       const anchor = target ? (target.closest('a[href^="citation:"]') as HTMLAnchorElement | null) : null;
-      if (!anchor) return;
+      const citeEl = target ? (target.closest('[data-citation-number], [data-citation]') as HTMLElement | null) : null;
+      if (!anchor && !citeEl) return;
       e.preventDefault();
       e.stopPropagation();
-      const href = anchor.getAttribute('href') || '';
-      const numMatch = href.match(/(\d+)/);
-      const num = numMatch ? parseInt(numMatch[1], 10) : NaN;
+      let num = NaN;
+      if (anchor) {
+        const href = anchor.getAttribute('href') || '';
+        const numMatch = href.match(/(\d+)/);
+        num = numMatch ? parseInt(numMatch[1], 10) : NaN;
+      } else if (citeEl) {
+        const raw = citeEl.getAttribute('data-citation-number') || citeEl.getAttribute('data-citation') || '';
+        const numMatch = raw.match(/(\d+)/);
+        num = numMatch ? parseInt(numMatch[1], 10) : NaN;
+      }
       if (!isNaN(num)) handleCitationClick(num);
     } catch (err) {
       console.warn('[AiTurnBlock] interceptCitationMouseUpCapture error', err);
@@ -585,12 +701,20 @@ const hasSynthesis = !!(
       try {
         const target = e.target as HTMLElement | null;
         const anchor = target ? (target.closest('a[href^="citation:"]') as HTMLAnchorElement | null) : null;
-        if (!anchor) return;
+        const citeEl = target ? (target.closest('[data-citation-number], [data-citation]') as HTMLElement | null) : null;
+        if (!anchor && !citeEl) return;
         e.preventDefault();
         e.stopPropagation();
-        const href = anchor.getAttribute('href') || '';
-        const numMatch = href.match(/(\d+)/);
-        const num = numMatch ? parseInt(numMatch[1], 10) : NaN;
+        let num = NaN;
+        if (anchor) {
+          const href = anchor.getAttribute('href') || '';
+          const numMatch = href.match(/(\d+)/);
+          num = numMatch ? parseInt(numMatch[1], 10) : NaN;
+        } else if (citeEl) {
+          const raw = citeEl.getAttribute('data-citation-number') || citeEl.getAttribute('data-citation') || '';
+          const numMatch = raw.match(/(\d+)/);
+          num = numMatch ? parseInt(numMatch[1], 10) : NaN;
+        }
         if (!isNaN(num)) handleCitationClick(num);
       } catch (err) {
         console.warn('[AiTurnBlock] global citation click intercept error', err);
@@ -600,12 +724,20 @@ const hasSynthesis = !!(
       try {
         const target = e.target as HTMLElement | null;
         const anchor = target ? (target.closest('a[href^="citation:"]') as HTMLAnchorElement | null) : null;
-        if (!anchor) return;
+        const citeEl = target ? (target.closest('[data-citation-number], [data-citation]') as HTMLElement | null) : null;
+        if (!anchor && !citeEl) return;
         e.preventDefault();
         e.stopPropagation();
-        const href = anchor.getAttribute('href') || '';
-        const numMatch = href.match(/(\d+)/);
-        const num = numMatch ? parseInt(numMatch[1], 10) : NaN;
+        let num = NaN;
+        if (anchor) {
+          const href = anchor.getAttribute('href') || '';
+          const numMatch = href.match(/(\d+)/);
+          num = numMatch ? parseInt(numMatch[1], 10) : NaN;
+        } else if (citeEl) {
+          const raw = citeEl.getAttribute('data-citation-number') || citeEl.getAttribute('data-citation') || '';
+          const numMatch = raw.match(/(\d+)/);
+          num = numMatch ? parseInt(numMatch[1], 10) : NaN;
+        }
         if (!isNaN(num)) handleCitationClick(num);
       } catch (err) {
         console.warn('[AiTurnBlock] global citation mouseup intercept error', err);
@@ -615,15 +747,23 @@ const hasSynthesis = !!(
       try {
         const target = e.target as HTMLElement | null;
         const anchor = target ? (target.closest('a[href^="citation:"]') as HTMLAnchorElement | null) : null;
-        if (!anchor) return;
+        const citeEl = target ? (target.closest('[data-citation-number], [data-citation]') as HTMLElement | null) : null;
+        if (!anchor && !citeEl) return;
         const isAux = (e as any).button && (e as any).button !== 0;
         const isModifier = (e.ctrlKey || (e as any).metaKey);
         if (isAux || isModifier) {
           e.preventDefault();
           e.stopPropagation();
-          const href = anchor.getAttribute('href') || '';
-          const numMatch = href.match(/(\d+)/);
-          const num = numMatch ? parseInt(numMatch[1], 10) : NaN;
+          let num = NaN;
+          if (anchor) {
+            const href = anchor.getAttribute('href') || '';
+            const numMatch = href.match(/(\d+)/);
+            num = numMatch ? parseInt(numMatch[1], 10) : NaN;
+          } else if (citeEl) {
+            const raw = citeEl.getAttribute('data-citation-number') || citeEl.getAttribute('data-citation') || '';
+            const numMatch = raw.match(/(\d+)/);
+            num = numMatch ? parseInt(numMatch[1], 10) : NaN;
+          }
           if (!isNaN(num)) handleCitationClick(num);
         }
       } catch (err) {
@@ -634,15 +774,23 @@ const hasSynthesis = !!(
       try {
         const target = e.target as HTMLElement | null;
         const anchor = target ? (target.closest('a[href^="citation:"]') as HTMLAnchorElement | null) : null;
-        if (!anchor) return;
+        const citeEl = target ? (target.closest('[data-citation-number], [data-citation]') as HTMLElement | null) : null;
+        if (!anchor && !citeEl) return;
         const isAux = e.button !== 0;
         const isModifier = (e.ctrlKey || (e as any).metaKey);
         if (isAux || isModifier) {
           e.preventDefault();
           e.stopPropagation();
-          const href = anchor.getAttribute('href') || '';
-          const numMatch = href.match(/(\d+)/);
-          const num = numMatch ? parseInt(numMatch[1], 10) : NaN;
+          let num = NaN;
+          if (anchor) {
+            const href = anchor.getAttribute('href') || '';
+            const numMatch = href.match(/(\d+)/);
+            num = numMatch ? parseInt(numMatch[1], 10) : NaN;
+          } else if (citeEl) {
+            const raw = citeEl.getAttribute('data-citation-number') || citeEl.getAttribute('data-citation') || '';
+            const numMatch = raw.match(/(\d+)/);
+            num = numMatch ? parseInt(numMatch[1], 10) : NaN;
+          }
           if (!isNaN(num)) handleCitationClick(num);
         }
       } catch (err) {
@@ -1636,6 +1784,7 @@ const hasSynthesis = !!(
                   </button>
                 </div>
                 <div
+                  ref={optionsProseRef}
                   className="prose prose-sm max-w-none dark:prose-invert"
                   style={{ lineHeight: 1.7, fontSize: 14 }}
                   onClickCapture={interceptCitationAnchorClick}
@@ -1801,6 +1950,7 @@ const hasSynthesis = !!(
                     </button>
                   </div>
                   <div
+                    ref={mapProseRef}
                     className="prose prose-sm max-w-none dark:prose-invert"
                     style={{ lineHeight: 1.7, fontSize: 16 }}
                     onClickCapture={interceptCitationAnchorClick}

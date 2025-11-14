@@ -82,6 +82,20 @@ export interface AiTurnRecord extends BaseTurnRecord {
   batchResponseCount: number;
   synthesisResponseCount: number;
   mappingResponseCount: number;
+  /**
+   * Optional compact digest capturing the essence of this AI turn.
+   * Populated by TurnDigestService after workflow completion.
+   *
+   * New format (preferred): plain string paragraph.
+   * Legacy format (still supported): structured object with summary/keyPoints.
+   */
+  digest?: string | {
+    summary: string;
+    keyPoints: string[];
+    sources?: Record<string, { type: string; length: number }>;
+    model?: string;
+    createdAt: number;
+  };
   providerContexts?: Record<string, any>;
 }
 

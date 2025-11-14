@@ -4,6 +4,9 @@ import { scratchpadOpenAtom, scratchpadHeightAtom, activeCanvasIdAtom, canvasTab
 import { useComposer } from '../hooks/useComposer';
 import CanvasEditorV2, { CanvasEditorRef } from './composer/CanvasEditorV2';
 import { useDroppable } from '@dnd-kit/core';
+// Agent calls are bridged through the extension Service Worker via ExtensionAPI
+import extensionApi from '../services/extension-api';
+import type { ProviderKey } from '../../shared/contract';
 
 /**
  * ScratchpadDrawer
@@ -20,6 +23,47 @@ export default function ScratchpadDrawer() {
   const [rightContent, setRightContent] = useAtom(scratchpadRightContentAtom);
   const [currentSessionId] = useAtom(currentSessionIdAtom);
 
+  // Backend availability (extension runtime)
+  const backendAvailable = typeof chrome !== 'undefined' && !!(chrome as any)?.runtime?.id;
+
+  // System status fetched from Service Worker
+  const [adapterReady, setAdapterReady] = useState(false);
+  const [availableProviders, setAvailableProviders] = useState<string[]>(['claude', 'gemini', 'gemini-pro', 'chatgpt', 'qwen']);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function fetchStatus() {
+      if (!backendAvailable) return;
+      try {
+        const status: any = await extensionApi.queryBackend({ type: 'GET_SYSTEM_STATUS' });
+        if (cancelled) return;
+        setAdapterReady(!!status?.adapterReady);
+        const providers = Array.isArray(status?.availableProviders) ? status.availableProviders : [];
+        if (providers.length > 0) setAvailableProviders(providers);
+      } catch (e) {
+        console.warn('[Scratchpad] GET_SYSTEM_STATUS failed:', e);
+        setAdapterReady(false);
+      }
+    }
+    fetchStatus();
+    const id = setInterval(fetchStatus, 5000);
+    return () => { cancelled = true; clearInterval(id); };
+  }, [backendAvailable]);
+
+  // Agent UI state
+  const [isAgentThinking, setIsAgentThinking] = useState(false);
+  const [agentInputValue, setAgentInputValue] = useState('');
+  const [selectedAgentModel, setSelectedAgentModel] = useState<ProviderKey>('claude');
+
+  // Adjust default model when providers become available
+  useEffect(() => {
+    const preferredOrder: ProviderKey[] = ['claude', 'gemini', 'gemini-pro', 'chatgpt', 'qwen'];
+    const available = availableProviders.filter(p => preferredOrder.includes(p as ProviderKey)) as ProviderKey[];
+    if (available.length > 0 && !available.includes(selectedAgentModel)) {
+      setSelectedAgentModel(available[0]);
+    }
+  }, [availableProviders]);
+
   const {
     currentDocument,
     canvasTabs,
@@ -33,7 +77,7 @@ export default function ScratchpadDrawer() {
   const rightEditorRef = useRef<CanvasEditorRef | null>(null);
   const activeTab = useMemo(() => canvasTabs.find(t => t.id === activeCanvasId) || null, [canvasTabs, activeCanvasId]);
 
-  const backendAvailable = typeof chrome !== 'undefined' && !!(chrome as any)?.runtime?.id;
+  const agentReady = backendAvailable && adapterReady;
 
   // Ensure a document exists when opening the drawer
   useEffect(() => {
@@ -56,6 +100,110 @@ export default function ScratchpadDrawer() {
     centerEditorRef.current?.clear();
     // Update atom content to empty TipTap doc
     updateActiveTabContent({ type: 'doc', content: [] } as any);
+  };
+
+  // Agent submit handler
+  const handleAgentSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!agentReady || !agentInputValue.trim() || !currentSessionId) {
+      console.warn('[Scratchpad] Agent submit blocked:', {
+        agentReady,
+        hasInput: !!agentInputValue.trim(),
+        hasSession: !!currentSessionId
+      });
+      return;
+    }
+
+    setIsAgentThinking(true);
+
+    try {
+      const resp = await extensionApi.queryBackend<{ text: string }>({
+        type: 'SCRATCHPAD_AGENT_PROMPT',
+        text: agentInputValue,
+        sessionId: currentSessionId,
+        model: selectedAgentModel,
+        mode: 'new'
+      });
+      const responseText = (resp && (resp as any).text) || (resp as any) || '';
+
+      // Insert response into Refined column
+      rightEditorRef.current?.insertComposedContent(
+        responseText,
+        {
+          providerId: 'strategist',
+          aiTurnId: `agent-${Date.now()}`,
+          sessionId: currentSessionId,
+          responseType: 'synthesis',
+          responseIndex: 0
+        } as any
+      );
+
+      setAgentInputValue('');
+    } catch (err) {
+      console.error('[Agent] Failed:', err);
+
+      // Insert error message
+      rightEditorRef.current?.insertComposedContent(
+        `Error: ${err instanceof Error ? err.message : 'Agent failed'}`,
+        {
+          providerId: 'error',
+          aiTurnId: 'error',
+          sessionId: currentSessionId,
+          responseType: 'batch',
+          responseIndex: 0
+        } as any
+      );
+    }
+
+    setIsAgentThinking(false);
+  };
+
+  // Agent continue handler (no new input, continue previous conversation)
+  const handleAgentContinue = async () => {
+    if (!agentReady || !currentSessionId) return;
+    setIsAgentThinking(true);
+    try {
+      const resp = await extensionApi.queryBackend<{ text: string }>({
+        type: 'SCRATCHPAD_AGENT_PROMPT',
+        text: 'Continue',
+        sessionId: currentSessionId,
+        model: selectedAgentModel,
+        mode: 'continue'
+      });
+      const responseText = (resp && (resp as any).text) || (resp as any) || '';
+      rightEditorRef.current?.insertComposedContent(
+        responseText,
+        {
+          providerId: 'strategist',
+          aiTurnId: `agent-${Date.now()}`,
+          sessionId: currentSessionId,
+          responseType: 'synthesis',
+          responseIndex: 0
+        } as any
+      );
+    } catch (err) {
+      console.error('[Agent] Continue failed:', err);
+      rightEditorRef.current?.insertComposedContent(
+        `Error: ${err instanceof Error ? err.message : 'Agent failed to continue'}`,
+        {
+          providerId: 'error',
+          aiTurnId: 'error',
+          sessionId: currentSessionId,
+          responseType: 'batch',
+          responseIndex: 0
+        } as any
+      );
+    }
+    setIsAgentThinking(false);
+  };
+
+  const handleNewAgent = async () => {
+    try {
+      if (!agentReady || !currentSessionId) return;
+      await extensionApi.queryBackend({ type: 'SCRATCHPAD_AGENT_NEW', sessionId: currentSessionId });
+    } catch (e) {
+      console.warn('[Agent] reset failed:', e);
+    }
   };
 
   const toggleOpen = () => setOpen(v => !v);
@@ -441,16 +589,115 @@ export default function ScratchpadDrawer() {
               </div>
             </div>
 
-            {/* Right: Refined */}
+            {/* Right: Refined (with agent input) */}
             <div ref={rightColumnRef} style={{ ...columnStyle, borderRight: 'none', maxWidth: '30%', position: 'relative' }}>
-              <div style={{ padding: 4, fontSize: 11, color: '#64748b', borderBottom: '1px solid #334155' }}>✨ Refined</div>
+              <div style={{
+                padding: 4,
+                fontSize: 11,
+                color: '#64748b',
+                borderBottom: '1px solid #334155',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+                justifyContent: 'space-between'
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span>✨ Refined</span>
+                  {/* Model selector */}
+                  <select
+                    value={selectedAgentModel}
+                    onChange={(e) => setSelectedAgentModel(e.target.value as ProviderKey)}
+                    disabled={isAgentThinking || !agentReady}
+                    style={{
+                      fontSize: 10,
+                      padding: '2px 4px',
+                      borderRadius: 4,
+                      border: '1px solid #334155',
+                      background: 'rgba(30,41,59,0.5)',
+                      color: '#94a3b8'
+                    }}
+                  >
+                    {(['claude','gemini','gemini-pro','chatgpt','qwen'] as ProviderKey[])
+                      .filter(p => availableProviders.includes(p))
+                      .map(p => (
+                        <option key={p} value={p}>
+                          {p === 'claude' ? 'Claude' : p === 'gemini' ? 'Gemini' : p === 'gemini-pro' ? 'Gemini Pro' : p === 'chatgpt' ? 'ChatGPT' : 'Qwen'}
+                        </option>
+                      ))}
+                  </select>
+                </div>
+                {/* Agent controls */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <button
+                    onClick={handleAgentContinue}
+                    disabled={isAgentThinking || !agentReady || !currentSessionId}
+                    title="Continue the previous agent conversation"
+                    style={{ fontSize: 11, padding: '4px 8px', borderRadius: 6, border: '1px solid #334155', background: isAgentThinking ? 'rgba(71,85,105,0.5)' : 'rgba(99,102,241,0.25)', color: '#a5b4fc', cursor: isAgentThinking ? 'not-allowed' : 'pointer' }}
+                  >Continue</button>
+                  <button
+                    onClick={handleNewAgent}
+                    disabled={isAgentThinking || !agentReady}
+                    title="Start a new agent session"
+                    style={{ fontSize: 11, padding: '4px 8px', borderRadius: 6, border: '1px solid #334155', background: 'rgba(220,38,38,0.15)', color: '#fca5a5', cursor: isAgentThinking ? 'not-allowed' : 'pointer' }}
+                  >New Agent</button>
+                </div>
+              </div>
+
+              {/* Agent chat input */}
+              <form onSubmit={handleAgentSubmit} style={{
+                padding: '8px',
+                borderBottom: '1px solid #334155',
+                display: 'flex',
+                gap: 4
+              }}>
+                <input
+                  type="text"
+                  placeholder={
+                    !agentReady ? 'Loading...' :
+                    !currentSessionId ? 'No session' :
+                    'Ask The Strategist...'
+                  }
+                  value={agentInputValue}
+                  onChange={(e) => setAgentInputValue(e.target.value)}
+                  disabled={isAgentThinking || !agentReady || !currentSessionId}
+                  style={{
+                    flex: 1,
+                    padding: '6px 8px',
+                    borderRadius: 6,
+                    border: '1px solid rgba(148,163,184,0.35)',
+                    background: 'rgba(30,41,59,0.5)',
+                    color: '#e5e7eb',
+                    fontSize: 12
+                  }}
+                />
+                <button
+                  type="submit"
+                  disabled={isAgentThinking || !agentReady || !currentSessionId || !agentInputValue.trim()}
+                  style={{
+                    padding: '6px 10px',
+                    borderRadius: 6,
+                    border: '1px solid #334155',
+                    background: isAgentThinking ? '#475569' : '#1d4ed8',
+                    color: '#fff',
+                    fontSize: 11,
+                    cursor: isAgentThinking ? 'not-allowed' : 'pointer'
+                  }}
+                >
+                  {isAgentThinking ? '...' : '→'}
+                </button>
+              </form>
               <div
                 style={{ flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'hidden', cursor: floatingSnippet ? 'copy' : 'text' }}
                 onClick={(e) => placeSnippetInto('right', e)}
               >
                 <CanvasEditorV2
                   ref={rightEditorRef}
-                  placeholder="Final version..."
+                  placeholder={
+                    isAgentThinking ? 'Strategist is thinking...' :
+                    !agentReady ? 'Loading agent...' :
+                    !currentSessionId ? 'Select a session first' :
+                    'Final version...'
+                  }
                   initialContent={rightContent as any}
                   onChange={debouncedUpdateRight}
                 />
