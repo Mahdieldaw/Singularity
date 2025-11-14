@@ -383,7 +383,7 @@ const hasSynthesis = !!(
     };
   };
 
-  // Citation support adopted from bbb.tsx (DOM version: no hrefs)
+  // (DOM version: no hrefs)
   const transformCitations = useCallback((text: string) => {
     if (!text) return "";
     let t = text;
@@ -506,6 +506,43 @@ const hasSynthesis = !!(
     }
   }, [handleCitationClick]);
 
+  // Intercept mouseup similar to composer badge to block finalization of native click/tab behaviors
+  const interceptCitationMouseUpCapture = useCallback((e: React.MouseEvent) => {
+    try {
+      const target = e.target as HTMLElement | null;
+      const anchor = target ? (target.closest('a[href^="citation:"]') as HTMLAnchorElement | null) : null;
+      if (!anchor) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const href = anchor.getAttribute('href') || '';
+      const numMatch = href.match(/(\d+)/);
+      const num = numMatch ? parseInt(numMatch[1], 10) : NaN;
+      if (!isNaN(num)) handleCitationClick(num);
+    } catch (err) {
+      console.warn('[AiTurnBlock] interceptCitationMouseUpCapture error', err);
+    }
+  }, [handleCitationClick]);
+
+  // Explicitly intercept auxclick (middle click) to prevent new-tab navigation
+  const interceptCitationAuxClickCapture = useCallback((e: React.MouseEvent) => {
+    try {
+      const target = e.target as HTMLElement | null;
+      const anchor = target ? (target.closest('a[href^="citation:"]') as HTMLAnchorElement | null) : null;
+      if (!anchor) return;
+      const isAux = (e as any).button && (e as any).button !== 0;
+      if (isAux) {
+        e.preventDefault();
+        e.stopPropagation();
+        const href = anchor.getAttribute('href') || '';
+        const numMatch = href.match(/(\d+)/);
+        const num = numMatch ? parseInt(numMatch[1], 10) : NaN;
+        if (!isNaN(num)) handleCitationClick(num);
+      }
+    } catch (err) {
+      console.warn('[AiTurnBlock] interceptCitationAuxClickCapture error', err);
+    }
+  }, [handleCitationClick]);
+
   // Global capture-phase guard to ensure citation:// never triggers browser navigation
   useEffect(() => {
     const onClick = (e: MouseEvent) => {
@@ -521,6 +558,21 @@ const hasSynthesis = !!(
         if (!isNaN(num)) handleCitationClick(num);
       } catch (err) {
         console.warn('[AiTurnBlock] global citation click intercept error', err);
+      }
+    };
+    const onMouseUp = (e: MouseEvent) => {
+      try {
+        const target = e.target as HTMLElement | null;
+        const anchor = target ? (target.closest('a[href^="citation:"]') as HTMLAnchorElement | null) : null;
+        if (!anchor) return;
+        e.preventDefault();
+        e.stopPropagation();
+        const href = anchor.getAttribute('href') || '';
+        const numMatch = href.match(/(\d+)/);
+        const num = numMatch ? parseInt(numMatch[1], 10) : NaN;
+        if (!isNaN(num)) handleCitationClick(num);
+      } catch (err) {
+        console.warn('[AiTurnBlock] global citation mouseup intercept error', err);
       }
     };
     const onMouseDown = (e: MouseEvent) => {
@@ -564,11 +616,16 @@ const hasSynthesis = !!(
 
     document.addEventListener('click', onClick, true);
     document.addEventListener('mousedown', onMouseDown, true);
+    document.addEventListener('mouseup', onMouseUp, true);
     document.addEventListener('pointerdown', onPointerDown, true);
+    // Some environments dispatch auxclick for middle-click; capture to block new-tab
+    document.addEventListener('auxclick', onMouseDown as any, true);
     return () => {
       document.removeEventListener('click', onClick, true);
       document.removeEventListener('mousedown', onMouseDown, true);
+      document.removeEventListener('mouseup', onMouseUp, true);
       document.removeEventListener('pointerdown', onPointerDown, true);
+      document.removeEventListener('auxclick', onMouseDown as any, true);
     };
   }, [handleCitationClick]);
 
@@ -660,63 +717,74 @@ const hasSynthesis = !!(
     const m = mapRef.current;
     if (!m) return;
 
+    let rafId: number | null = null;
     const created: Array<{ btn: HTMLButtonElement; handler: (e: MouseEvent) => void }> = [];
 
-    const anchors = Array.from(m.querySelectorAll('a[href^="citation:"]')) as HTMLAnchorElement[];
-    anchors.forEach((a) => {
-      const href = a.getAttribute('href') || '';
-      const numMatch = href.match(/(\d+)/);
-      const num = numMatch ? parseInt(numMatch[1], 10) : NaN;
-      const label = a.textContent || (isNaN(num) ? '↗' : `↗${num}`);
+    rafId = requestAnimationFrame(() => {
+      const anchors = Array.from(m.querySelectorAll('a[href^="citation:"]')) as HTMLAnchorElement[];
+      anchors.forEach((a) => {
+        if (!(a && a.isConnected && a.ownerDocument === document)) return;
+        const href = a.getAttribute('href') || '';
+        const numMatch = href.match(/(\d+)/);
+        const num = numMatch ? parseInt(numMatch[1], 10) : NaN;
+        const label = a.textContent || (isNaN(num) ? '↗' : `↗${num}`);
 
-      // Build a button to replace the anchor
-      const btn = document.createElement('button');
-      btn.type = 'button';
-      btn.setAttribute('data-citation', String(num));
-      btn.setAttribute('aria-label', isNaN(num) ? 'Citation' : `Citation ${num}`);
-      btn.textContent = label;
-      btn.style.display = 'inline-flex';
-      btn.style.alignItems = 'center';
-      btn.style.gap = '6px';
-      btn.style.padding = '2px 10px';
-      btn.style.marginLeft = '6px';
-      btn.style.marginRight = '6px';
-      btn.style.background = '#2563eb';
-      btn.style.border = '1px solid #1d4ed8';
-      btn.style.borderRadius = '9999px';
-      btn.style.color = '#ffffff';
-      btn.style.fontSize = '12px';
-      btn.style.fontWeight = '700';
-      btn.style.cursor = 'pointer';
-      btn.style.userSelect = 'none';
-      btn.style.lineHeight = '1.4';
-      btn.style.boxShadow = '0 0 0 1px rgba(29,78,216,0.6)';
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.setAttribute('data-citation', String(num));
+        btn.setAttribute('aria-label', isNaN(num) ? 'Citation' : `Citation ${num}`);
+        btn.textContent = label;
+        btn.style.display = 'inline-flex';
+        btn.style.alignItems = 'center';
+        btn.style.gap = '6px';
+        btn.style.padding = '2px 10px';
+        btn.style.marginLeft = '6px';
+        btn.style.marginRight = '6px';
+        btn.style.background = '#2563eb';
+        btn.style.border = '1px solid #1d4ed8';
+        btn.style.borderRadius = '9999px';
+        btn.style.color = '#ffffff';
+        btn.style.fontSize = '12px';
+        btn.style.fontWeight = '700';
+        btn.style.cursor = 'pointer';
+        btn.style.userSelect = 'none';
+        btn.style.lineHeight = '1.4';
+        btn.style.boxShadow = '0 0 0 1px rgba(29,78,216,0.6)';
 
-      const handler = (e: MouseEvent) => {
-        e.preventDefault();
-        e.stopPropagation();
-        if (!isNaN(num)) handleCitationClick(num);
-      };
-      btn.addEventListener('click', handler, { capture: true });
-      created.push({ btn, handler });
+        const handler = (e: MouseEvent) => {
+          e.preventDefault();
+          e.stopPropagation();
+          if (!isNaN(num)) handleCitationClick(num);
+        };
+        btn.addEventListener('click', handler, { capture: true });
+        created.push({ btn, handler });
 
-      // Replace anchor with button
-      a.replaceWith(btn);
+        try {
+          if (a.isConnected && a.parentNode) {
+            a.replaceWith(btn);
+          }
+        } catch (err) {
+          console.warn('[AiTurnBlock] replace citation anchor failed', err);
+        }
+      });
     });
 
     return () => {
-      // Cleanup listeners
+      if (rafId !== null) {
+        try { cancelAnimationFrame(rafId); } catch {}
+      }
       created.forEach(({ btn, handler }) => {
         try { btn.removeEventListener('click', handler, { capture: true } as any); } catch {}
       });
     };
-  }, [mapRef, displayedMappingText, activeMappingPid, mappingTab]);
+  }, [mapRef, displayedMappingText, activeMappingPid]);
 
   // DOM version: wrap plain text tokens "↗N" into clickable buttons inside the mapping box
   useEffect(() => {
     const root = mapRef.current;
     if (!root) return;
 
+    let rafId: number | null = null;
     const created: Array<{ btn: HTMLButtonElement; handler: (e: MouseEvent) => void }> = [];
     const rx = /↗(\d+)/g;
 
@@ -752,48 +820,61 @@ const hasSynthesis = !!(
       return btn;
     };
 
-    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
-    const toReplace: Array<{ node: Text; parts: (string | HTMLButtonElement)[] }> = [];
-    let node: Node | null = walker.nextNode();
-    while (node) {
-      const textNode = node as Text;
-      const value = textNode.nodeValue || '';
-      let match: RegExpExecArray | null;
-      rx.lastIndex = 0;
-      let lastIdx = 0;
-      const parts: (string | HTMLButtonElement)[] = [];
-      while ((match = rx.exec(value)) !== null) {
-        const start = match.index;
-        const end = start + match[0].length;
-        const num = parseInt(match[1], 10);
-        if (start > lastIdx) parts.push(value.slice(lastIdx, start));
-        parts.push(makeBtn(num));
-        lastIdx = end;
+    rafId = requestAnimationFrame(() => {
+      const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+      const toReplace: Array<{ node: Text; parts: (string | HTMLButtonElement)[] }> = [];
+      let node: Node | null = walker.nextNode();
+      while (node) {
+        const textNode = node as Text;
+        if (!(textNode && (textNode as any).isConnected)) {
+          node = walker.nextNode();
+          continue;
+        }
+        const value = textNode.nodeValue || '';
+        let match: RegExpExecArray | null;
+        rx.lastIndex = 0;
+        let lastIdx = 0;
+        const parts: (string | HTMLButtonElement)[] = [];
+        while ((match = rx.exec(value)) !== null) {
+          const start = match.index;
+          const end = start + match[0].length;
+          const num = parseInt(match[1], 10);
+          if (start > lastIdx) parts.push(value.slice(lastIdx, start));
+          parts.push(makeBtn(num));
+          lastIdx = end;
+        }
+        if (parts.length > 0) {
+          if (lastIdx < value.length) parts.push(value.slice(lastIdx));
+          toReplace.push({ node: textNode, parts });
+        }
+        node = walker.nextNode();
       }
-      if (parts.length > 0) {
-        if (lastIdx < value.length) parts.push(value.slice(lastIdx));
-        toReplace.push({ node: textNode, parts });
-      }
-      node = walker.nextNode();
-    }
 
-    toReplace.forEach(({ node, parts }) => {
-      const frag = document.createDocumentFragment();
-      parts.forEach((p) => {
-        if (typeof p === 'string') frag.appendChild(document.createTextNode(p));
-        else frag.appendChild(p);
+      toReplace.forEach(({ node, parts }) => {
+        const frag = document.createDocumentFragment();
+        parts.forEach((p) => {
+          if (typeof p === 'string') frag.appendChild(document.createTextNode(p));
+          else frag.appendChild(p);
+        });
+        try {
+          if ((node as any).isConnected && node.parentNode) {
+            node.parentNode.replaceChild(frag, node);
+          }
+        } catch (err) {
+          console.warn('[AiTurnBlock] replace citation token failed', err);
+        }
       });
-      try {
-        node.parentNode?.replaceChild(frag, node);
-      } catch {}
     });
 
     return () => {
+      if (rafId !== null) {
+        try { cancelAnimationFrame(rafId); } catch {}
+      }
       created.forEach(({ btn, handler }) => {
         try { btn.removeEventListener('click', handler, { capture: true } as any); } catch {}
       });
     };
-  }, [mapRef, displayedMappingText, mappingTab]);
+  }, [mapRef, displayedMappingText]);
 
   const userPrompt: string | null = ((): string | null => {
     const maybe = aiTurn as any;
@@ -922,6 +1003,8 @@ const hasSynthesis = !!(
                       onClickCapture={interceptCitationAnchorClick}
                       onMouseDownCapture={interceptCitationMouseDownCapture}
                       onPointerDownCapture={interceptCitationPointerDownCapture}
+                      onMouseUpCapture={interceptCitationMouseUpCapture}
+                      onAuxClickCapture={interceptCitationAuxClickCapture}
                       onWheelCapture={(e: React.WheelEvent<HTMLDivElement>) => {
                         const el = e.currentTarget;
                         const dy = e.deltaY ?? 0;
@@ -1464,8 +1547,336 @@ const hasSynthesis = !!(
         onClickCapture={interceptCitationAnchorClick}
         onMouseDownCapture={interceptCitationMouseDownCapture}
         onPointerDownCapture={interceptCitationPointerDownCapture}
+        onMouseUpCapture={interceptCitationMouseUpCapture}
+        onAuxClickCapture={interceptCitationAuxClickCapture}
       >
-        {mappingTab === "options"
+        {/* Persistently mounted tab containers to avoid unmount/mount churn */}
+        {(() => {
+          const options = getOptions();
+          const optionsInner = (() => {
+            if (!options) {
+              return (
+                <div style={{ color: "#64748b" }}>
+                  {!activeMappingPid
+                    ? "Select a mapping provider to see options."
+                    : "No options found in the mapping response."}
+                </div>
+              );
+            }
+            const text = String(options || "");
+            const provenance = {
+              source: "ai",
+              sessionId: aiTurn.sessionId,
+              aiTurnId: aiTurn.id,
+              providerId: activeMappingPid || "unknown",
+              responseType: "mapping",
+              responseIndex: 0,
+              timestamp: Date.now(),
+              granularity: "full",
+              sourceText: text,
+            } as any;
+            return (
+              <div>
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    gap: 8,
+                    marginBottom: 8,
+                  }}
+                >
+                  <div style={{ fontSize: 12, color: "#94a3b8" }}>
+                    All Available Options • via {activeMappingPid}
+                  </div>
+                </div>
+                <div
+                  className="prose prose-sm max-w-none dark:prose-invert"
+                  style={{ lineHeight: 1.7, fontSize: 14 }}
+                  onClickCapture={interceptCitationAnchorClick}
+                  onMouseDownCapture={interceptCitationMouseDownCapture}
+                  onPointerDownCapture={interceptCitationPointerDownCapture}
+                >
+                  <ReactMarkdown
+                    remarkPlugins={[remarkGfm]}
+                    components={{ a: CitationLink }}
+                  >
+                    {transformCitations(options)}
+                  </ReactMarkdown>
+                </div>
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                    marginTop: 12,
+                  }}
+                >
+                  <DraggableHandle
+                    id={`drag-options-${aiTurn.id}-${activeMappingPid}`}
+                    text={text}
+                    provenance={provenance}
+                    title="Drag options to Scratchpad"
+                  />
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      try {
+                        document.dispatchEvent(
+                          new CustomEvent("extract-to-canvas", {
+                            detail: { text, provenance, targetColumn: "left" },
+                            bubbles: true,
+                          })
+                        );
+                      } catch (err) {
+                        console.error("Add options to scratchpad failed", err);
+                      }
+                    }}
+                    aria-label="Send options to Scratchpad"
+                    style={{
+                      background: "#1d4ed8",
+                      border: "1px solid #334155",
+                      borderRadius: 6,
+                      padding: "4px 8px",
+                      color: "#ffffff",
+                      fontSize: 12,
+                      cursor: "pointer",
+                    }}
+                  >
+                    ↘ Scratchpad
+                  </button>
+                </div>
+              </div>
+            );
+          })();
+
+          const mapInner = (() => {
+            if (!wasMapRequested) {
+              return (
+                <div
+                  style={{
+                    color: "#64748b",
+                    fontStyle: "italic",
+                    textAlign: "center",
+                  }}
+                >
+                  Mapping not enabled for this turn.
+                </div>
+              );
+            }
+            const latest = displayedMappingTake;
+            const isGenerating =
+              (latest &&
+                (latest.status === "streaming" || latest.status === "pending")) ||
+              isMappingTarget;
+            if (isGenerating) {
+              return (
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: 8,
+                    color: "#94a3b8",
+                  }}
+                >
+                  <span style={{ fontStyle: "italic" }}>
+                    Conflict map generating
+                  </span>
+                  <span className="streaming-dots" />
+                </div>
+              );
+            }
+            if (activeMappingPid) {
+              const take = displayedMappingTake;
+              if (take && take.status === "error") {
+                const errText = String(take.text || "Mapping failed");
+                return (
+                  <div
+                    style={{
+                      background: "#1f2937",
+                      border: "1px solid #ef4444",
+                      color: "#fecaca",
+                      borderRadius: 8,
+                      padding: 12,
+                    }}
+                  >
+                    <div style={{ fontSize: 12, marginBottom: 8 }}>
+                      {activeMappingPid} · error
+                    </div>
+                    <div
+                      className="prose prose-sm max-w-none dark:prose-invert"
+                      style={{ lineHeight: 1.7, fontSize: 14 }}
+                    >
+                      <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                        {errText}
+                      </ReactMarkdown>
+                    </div>
+                  </div>
+                );
+              }
+              if (!take) {
+                return (
+                  <div style={{ color: "#64748b" }}>
+                    No mapping yet for this model.
+                  </div>
+                );
+              }
+
+              const handleCopy = async (e: React.MouseEvent) => {
+                e.stopPropagation();
+                await navigator.clipboard.writeText(displayedMappingText);
+              };
+              return (
+                <div>
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      gap: 8,
+                      marginBottom: 8,
+                    }}
+                  >
+                    <div style={{ fontSize: 12, color: "#94a3b8" }}>
+                      {activeMappingPid} · {take.status}
+                    </div>
+                    <button
+                      onClick={handleCopy}
+                      style={{
+                        background: "#334155",
+                        border: "1px solid #475569",
+                        borderRadius: 6,
+                        padding: "4px 8px",
+                        color: "#94a3b8",
+                        fontSize: 12,
+                        cursor: "pointer",
+                      }}
+                    >
+                      📋 Copy
+                    </button>
+                  </div>
+                  <div
+                    className="prose prose-sm max-w-none dark:prose-invert"
+                    style={{ lineHeight: 1.7, fontSize: 16 }}
+                    onClickCapture={interceptCitationAnchorClick}
+                    onMouseDownCapture={interceptCitationMouseDownCapture}
+                    onPointerDownCapture={interceptCitationPointerDownCapture}
+                  >
+                    <ReactMarkdown
+                      remarkPlugins={[remarkGfm]}
+                      components={{ a: CitationLink }}
+                    >
+                      {transformCitations(displayedMappingText)}
+                    </ReactMarkdown>
+                  </div>
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 8,
+                      marginTop: 12,
+                    }}
+                  >
+                    <DraggableHandle
+                      id={`drag-map-${aiTurn.id}-${activeMappingPid}`}
+                      text={String(displayedMappingText || "")}
+                      provenance={{
+                        source: "ai",
+                        sessionId: aiTurn.sessionId,
+                        aiTurnId: aiTurn.id,
+                        providerId: activeMappingPid || "unknown",
+                        responseType: "mapping",
+                        responseIndex: 0,
+                        timestamp: Date.now(),
+                        granularity: "full",
+                        sourceText: String(displayedMappingText || ""),
+                      } as any}
+                      title="Drag mapping to Scratchpad"
+                    />
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        try {
+                          const text = String(displayedMappingText || "");
+                          const provenance = {
+                            source: "ai",
+                            sessionId: aiTurn.sessionId,
+                            aiTurnId: aiTurn.id,
+                            providerId: activeMappingPid || "unknown",
+                            responseType: "mapping",
+                            responseIndex: 0,
+                            timestamp: Date.now(),
+                            granularity: "full",
+                            sourceText: text,
+                          } as any;
+                          document.dispatchEvent(
+                            new CustomEvent("extract-to-canvas", {
+                              detail: { text, provenance, targetColumn: "left" },
+                              bubbles: true,
+                            })
+                          );
+                        } catch (err) {
+                          console.error("Add mapping to scratchpad failed", err);
+                        }
+                      }}
+                      aria-label="Send mapping to Scratchpad"
+                      style={{
+                        background: "#1d4ed8",
+                        border: "1px solid #334155",
+                        borderRadius: 6,
+                        padding: "4px 8px",
+                        color: "#ffffff",
+                        fontSize: 12,
+                        cursor: "pointer",
+                      }}
+                    >
+                      ↘ Scratchpad
+                    </button>
+                  </div>
+                </div>
+              );
+            }
+            return (
+              <div
+                style={{
+                  color: "#64748b",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  height: "100%",
+                  fontStyle: "italic",
+                }}
+              >
+                Choose a model to map.
+              </div>
+            );
+          })();
+
+          return (
+            <>
+              <div
+                data-tab="options"
+                style={{ display: mappingTab === "options" ? "block" : "none" }}
+                onClickCapture={interceptCitationAnchorClick}
+                onMouseDownCapture={interceptCitationMouseDownCapture}
+                onPointerDownCapture={interceptCitationPointerDownCapture}
+              >
+                {optionsInner}
+              </div>
+              <div
+                data-tab="map"
+                style={{ display: mappingTab === "map" ? "block" : "none" }}
+                onClickCapture={interceptCitationAnchorClick}
+                onMouseDownCapture={interceptCitationMouseDownCapture}
+                onPointerDownCapture={interceptCitationPointerDownCapture}
+              >
+                {mapInner}
+              </div>
+            </>
+          );
+        })()}
+        {false && (mappingTab === "options"
           ? (() => {
               // This logic was already correct in your version!
               const options = getOptions();
@@ -1693,7 +2104,7 @@ const hasSynthesis = !!(
               }
               
               return <div style={{ color: "#64748b", display: "flex", alignItems: "center", justifyContent: "center", height: "100%", fontStyle: "italic" }}> Choose a model to map. </div>;
-            })()}
+            })())}
       </div>
 
       {/* Expand/Collapse buttons - your logic here was already correct */}
