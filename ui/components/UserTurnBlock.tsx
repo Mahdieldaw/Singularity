@@ -3,7 +3,6 @@ import { UserIcon, ChevronDownIcon, ChevronUpIcon } from './Icons';
 import { useState, useCallback } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { useDraggable } from '@dnd-kit/core';
 
 
 const CopyButton = ({ text, label, onClick }: { text: string; label: string; onClick?: () => void }) => {
@@ -51,8 +50,29 @@ interface UserTurnBlockProps {
 }
 
 const UserTurnBlock = ({ userTurn, isExpanded, onToggle }: UserTurnBlockProps) => {
-  // ...
-
+  const [selectionMenu, setSelectionMenu] = useState<{ x: number; y: number; text: string; prov: any } | null>(null);
+  const hideSelectionMenu = useCallback(() => setSelectionMenu(null), []);
+  const showSelectionMenu = useCallback((e: React.MouseEvent) => {
+    const sel = window.getSelection();
+    if (!sel || sel.isCollapsed) return;
+    const selected = sel.toString().trim();
+    if (!selected) return;
+    const range = sel.getRangeAt(0);
+    const rect = range.getBoundingClientRect();
+    setSelectionMenu({
+      x: rect.left + window.scrollX,
+      y: rect.top + window.scrollY - 36,
+      text: selected,
+      prov: {
+        source: "user",
+        sessionId: userTurn.sessionId,
+        userTurnId: userTurn.id,
+        timestamp: Date.now(),
+        granularity: "fragment",
+        sourceText: String(userTurn.text || ""),
+      } as any,
+    });
+  }, [userTurn.id, userTurn.sessionId]);
   const date = new Date(userTurn.createdAt);
   const readableTimestamp = date.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
   const isoTimestamp = date.toISOString();
@@ -101,6 +121,7 @@ const UserTurnBlock = ({ userTurn, isExpanded, onToggle }: UserTurnBlockProps) =
           <>
             <div
               className="user-message prose prose-sm max-w-none dark:prose-invert"
+              onMouseUp={showSelectionMenu}
               style={{
                 fontSize: '14px',
                 lineHeight: '1.5',
@@ -110,7 +131,7 @@ const UserTurnBlock = ({ userTurn, isExpanded, onToggle }: UserTurnBlockProps) =
               }}
             >
               <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                {String(userTurn.text || '')}
+                {String(userTurn.text || "")}
               </ReactMarkdown>
             </div>
             <div
@@ -142,7 +163,6 @@ const UserTurnBlock = ({ userTurn, isExpanded, onToggle }: UserTurnBlockProps) =
                 } as any;
                 return (
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginLeft: '8px' }}>
-                    <DraggableHandle id={`drag-user-${userTurn.id}`} text={userTurn.text || ''} provenance={provenance} title="Drag user prompt to Scratchpad" />
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
@@ -203,7 +223,6 @@ const UserTurnBlock = ({ userTurn, isExpanded, onToggle }: UserTurnBlockProps) =
           } as any;
           return (
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '6px' }}>
-              <DraggableHandle id={`drag-user-${userTurn.id}`} text={userTurn.text || ''} provenance={provenance} title="Drag user prompt to Scratchpad" />
               <button
                 onClick={(e) => {
                   e.stopPropagation();
@@ -230,33 +249,46 @@ const UserTurnBlock = ({ userTurn, isExpanded, onToggle }: UserTurnBlockProps) =
             </div>
           );
         })()}
-        
+        {selectionMenu && (
+          <div style={{ position: 'fixed', top: selectionMenu.y, left: selectionMenu.x, zIndex: 9999 }}>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                try {
+                  document.dispatchEvent(
+                    new CustomEvent('extract-to-canvas', {
+                      detail: {
+                        text: selectionMenu.text,
+                        provenance: selectionMenu.prov,
+                        targetColumn: 'left',
+                      },
+                      bubbles: true,
+                    })
+                  );
+                } finally {
+                  hideSelectionMenu();
+                  const sel = window.getSelection();
+                  if (sel) sel.removeAllRanges();
+                }
+              }}
+              style={{
+                background: '#1d4ed8',
+                border: '1px solid #334155',
+                borderRadius: '6px',
+                padding: '4px 8px',
+                color: '#ffffff',
+                fontSize: '12px',
+                cursor: 'pointer',
+                boxShadow: '0 6px 20px rgba(0,0,0,0.3)',
+              }}
+            >
+              Extract to Canvas
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );
 };
 
 export default UserTurnBlock;
-const DraggableHandle = ({ id, text, provenance, title }: { id: string; text: string; provenance: any; title?: string }) => {
-  const { setNodeRef, listeners } = useDraggable({ id, data: { text, provenance } });
-  return (
-    <button
-      ref={setNodeRef as any}
-      {...(listeners as any)}
-      aria-label="Drag to Scratchpad"
-      style={{
-        background: 'rgba(99, 102, 241, 0.25)',
-        border: '1px solid #334155',
-        borderRadius: '6px',
-        padding: '4px 8px',
-        color: '#e5e7eb',
-        fontSize: '12px',
-        cursor: 'grab',
-        marginRight: '8px'
-      }}
-      title={title || 'Drag to Scratchpad'}
-    >
-      ⇳ Drag
-    </button>
-  );
-};

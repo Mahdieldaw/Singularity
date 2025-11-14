@@ -55,7 +55,7 @@ export const CanvasEditorV2 = React.forwardRef<CanvasEditorRef, CanvasEditorProp
     editorProps: {
       attributes: {
         class: `prose prose-sm focus:outline-none ${props.className || ''}`,
-        style: 'min-height: 100%; padding: 12px; cursor: text; width: 100%;',
+        style: 'min-height: 100%; padding: 12px; cursor: text; width: 100%; font-size: 14px;',
       },
       handleDrop: () => false,
       handleClick: (view) => { view.focus(); return false; },

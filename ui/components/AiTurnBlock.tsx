@@ -15,7 +15,6 @@ import { hasComposableContent } from "../utils/composerUtils";
 import { LLM_PROVIDERS_CONFIG } from "../constants";
 import ClipsCarousel from "./ClipsCarousel";
 import { ChevronDownIcon, ChevronUpIcon, ListIcon } from "./Icons";
-import { useDraggable } from "@dnd-kit/core";
 import {
   normalizeResponseArray,
   getLatestResponse,
@@ -203,6 +202,43 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
   const [isSynthesisExpanded, setIsSynthesisExpanded] = useState(true);
   const [isMappingExpanded, setIsMappingExpanded] = useState(true);
   const [mappingTab, setMappingTab] = useState<"map" | "options">("map");
+
+  // Selection menu for "Extract to Canvas"
+  const [selectionMenu, setSelectionMenu] = useState<{ x: number; y: number; text: string; provenance: any } | null>(null);
+  const hideSelectionMenu = useCallback(() => setSelectionMenu(null), []);
+  useEffect(() => {
+    const onScroll = () => hideSelectionMenu();
+    window.addEventListener("scroll", onScroll, true);
+    return () => window.removeEventListener("scroll", onScroll, true);
+  }, [hideSelectionMenu]);
+
+  const showSelectionMenu = useCallback(
+    (e: React.MouseEvent, responseType: "synthesis" | "mapping", providerId: string, sourceText: string) => {
+      const sel = window.getSelection();
+      if (!sel || sel.isCollapsed) return;
+      const selected = sel.toString().trim();
+      if (!selected) return;
+      const range = sel.getRangeAt(0);
+      const rect = range.getBoundingClientRect();
+      setSelectionMenu({
+        x: rect.left + window.scrollX,
+        y: rect.top + window.scrollY - 36,
+        text: selected,
+        provenance: {
+          source: "ai",
+          sessionId: aiTurn.sessionId,
+          aiTurnId: aiTurn.id,
+          providerId: providerId || "unknown",
+          responseType,
+          responseIndex: 0,
+          timestamp: Date.now(),
+          granularity: "fragment",
+          sourceText,
+        },
+      });
+    },
+    [aiTurn.sessionId, aiTurn.id]
+  );
 
   // Track which section is manually expanded (if truncated)
   const [synthExpanded, setSynthExpanded] = useState(false);
@@ -685,30 +721,7 @@ const hasSynthesis = !!(
     );
   };
 
-  // Lightweight draggable handle for dragging text into the Scratchpad (local to AiTurnBlock)
-  const DraggableHandle: React.FC<{ id: string; text: string; provenance?: any; title?: string }> = ({ id, text, provenance, title = "Drag to Scratchpad" }) => {
-    const { attributes, listeners, setNodeRef } = useDraggable({ id, data: { text, provenance } });
-    return (
-      <button
-        ref={setNodeRef}
-        {...listeners}
-        {...attributes}
-        onClick={(e) => e.stopPropagation()}
-        title={title}
-        style={{
-          background: "#0b1220",
-          border: "1px solid #334155",
-          borderRadius: 6,
-          padding: "4px 8px",
-          color: "#e2e8f0",
-          fontSize: 12,
-          cursor: "grab",
-        }}
-      >
-        ⇅ Drag
-      </button>
-    );
-  };
+  
 
   // DOM version: aggressively replace any rendered <a href="citation://N"> inside the mapping box
   // with real <button> elements that call handleCitationClick(N). This avoids relying on
@@ -1004,6 +1017,15 @@ const hasSynthesis = !!(
                       onMouseDownCapture={interceptCitationMouseDownCapture}
                       onPointerDownCapture={interceptCitationPointerDownCapture}
                       onMouseUpCapture={interceptCitationMouseUpCapture}
+                      onMouseUp={(e) => {
+                        if (activeSynthPid) {
+                          try {
+                            const take = getLatestResponse(synthesisResponses[activeSynthPid]);
+                            const sourceText = String(take?.text || "");
+                            showSelectionMenu(e, "synthesis", activeSynthPid, sourceText);
+                          } catch {}
+                        }
+                      }}
                       onAuxClickCapture={interceptCitationAuxClickCapture}
                       onWheelCapture={(e: React.WheelEvent<HTMLDivElement>) => {
                         const el = e.currentTarget;
@@ -1154,6 +1176,7 @@ const hasSynthesis = !!(
                               <div
                                 className="prose prose-sm max-w-none dark:prose-invert"
                                 style={{ lineHeight: 1.7, fontSize: 16 }}
+                                onMouseUp={(e) => showSelectionMenu(e, "synthesis", activeSynthPid || "unknown", String(take.text || ""))}
                               >
                                 <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ a: CitationLink }}>
                                   {String(take.text || "")}
@@ -1175,7 +1198,6 @@ const hasSynthesis = !!(
                                 } as any;
                                 return (
                                   <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 12 }}>
-                                    <DraggableHandle id={`drag-synth-${aiTurn.id}-${activeSynthPid}`} text={text} provenance={provenance} title="Drag synthesis to Scratchpad" />
                                     <button
                                       onClick={(e) => {
                                         e.stopPropagation();
@@ -1267,12 +1289,6 @@ const hasSynthesis = !!(
                                 zIndex: 2,
                               }}
                             >
-                              <DraggableHandle
-                                id={`drag-synth-overlay-${aiTurn.id}-${activeSynthPid}`}
-                                text={text}
-                                provenance={provenance}
-                                title="Drag synthesis to Scratchpad"
-                              />
                               <button
                                 onClick={(e) => {
                                   e.stopPropagation();
@@ -1548,6 +1564,14 @@ const hasSynthesis = !!(
         onMouseDownCapture={interceptCitationMouseDownCapture}
         onPointerDownCapture={interceptCitationPointerDownCapture}
         onMouseUpCapture={interceptCitationMouseUpCapture}
+        onMouseUp={(e) => {
+          const text = String(displayedMappingText || "");
+          if (activeMappingPid) {
+            try {
+              showSelectionMenu(e, "mapping", activeMappingPid, text);
+            } catch {}
+          }
+        }}
         onAuxClickCapture={interceptCitationAuxClickCapture}
       >
         {/* Persistently mounted tab containers to avoid unmount/mount churn */}
@@ -1589,6 +1613,27 @@ const hasSynthesis = !!(
                   <div style={{ fontSize: 12, color: "#94a3b8" }}>
                     All Available Options • via {activeMappingPid}
                   </div>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      try {
+                        navigator.clipboard.writeText(text);
+                      } catch (err) {
+                        console.error("Copy options failed", err);
+                      }
+                    }}
+                    style={{
+                      background: "#334155",
+                      border: "1px solid #475569",
+                      borderRadius: 6,
+                      padding: "4px 8px",
+                      color: "#94a3b8",
+                      fontSize: 12,
+                      cursor: "pointer",
+                    }}
+                  >
+                    📋 Copy
+                  </button>
                 </div>
                 <div
                   className="prose prose-sm max-w-none dark:prose-invert"
@@ -1596,6 +1641,11 @@ const hasSynthesis = !!(
                   onClickCapture={interceptCitationAnchorClick}
                   onMouseDownCapture={interceptCitationMouseDownCapture}
                   onPointerDownCapture={interceptCitationPointerDownCapture}
+                  onMouseUp={(e) => {
+                    try {
+                      showSelectionMenu(e, "mapping", activeMappingPid || "unknown", text);
+                    } catch {}
+                  }}
                 >
                   <ReactMarkdown
                     remarkPlugins={[remarkGfm]}
@@ -1612,12 +1662,6 @@ const hasSynthesis = !!(
                     marginTop: 12,
                   }}
                 >
-                  <DraggableHandle
-                    id={`drag-options-${aiTurn.id}-${activeMappingPid}`}
-                    text={text}
-                    provenance={provenance}
-                    title="Drag options to Scratchpad"
-                  />
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
@@ -1762,11 +1806,9 @@ const hasSynthesis = !!(
                     onClickCapture={interceptCitationAnchorClick}
                     onMouseDownCapture={interceptCitationMouseDownCapture}
                     onPointerDownCapture={interceptCitationPointerDownCapture}
+                    onMouseUp={(e) => showSelectionMenu(e, "mapping", activeMappingPid || "unknown", String(displayedMappingText || ""))}
                   >
-                    <ReactMarkdown
-                      remarkPlugins={[remarkGfm]}
-                      components={{ a: CitationLink }}
-                    >
+                    <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ a: CitationLink }}>
                       {transformCitations(displayedMappingText)}
                     </ReactMarkdown>
                   </div>
@@ -1778,22 +1820,6 @@ const hasSynthesis = !!(
                       marginTop: 12,
                     }}
                   >
-                    <DraggableHandle
-                      id={`drag-map-${aiTurn.id}-${activeMappingPid}`}
-                      text={String(displayedMappingText || "")}
-                      provenance={{
-                        source: "ai",
-                        sessionId: aiTurn.sessionId,
-                        aiTurnId: aiTurn.id,
-                        providerId: activeMappingPid || "unknown",
-                        responseType: "mapping",
-                        responseIndex: 0,
-                        timestamp: Date.now(),
-                        granularity: "full",
-                        sourceText: String(displayedMappingText || ""),
-                      } as any}
-                      title="Drag mapping to Scratchpad"
-                    />
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
@@ -1881,7 +1907,7 @@ const hasSynthesis = !!(
       </div>
 
       {/* Expand/Collapse buttons - your logic here was already correct */}
-      {mapTruncated && !mapExpanded && (
+      {mapTruncated && !mapExpanded && mappingTab === "map" && (
                       <>
                         <div
                           style={{
@@ -1921,12 +1947,6 @@ const hasSynthesis = !!(
                                 zIndex: 2,
                               }}
                             >
-                              <DraggableHandle
-                                id={`drag-map-overlay-${aiTurn.id}-${activeMappingPid}`}
-                                text={text}
-                                provenance={provenance}
-                                title="Drag mapping to Scratchpad"
-                              />
                               <button
                                 onClick={(e) => {
                                   e.stopPropagation();
@@ -2068,6 +2088,46 @@ const hasSynthesis = !!(
           </div>
         </div>
       </div>
+      {selectionMenu && (
+        <div
+          style={{
+            position: "fixed",
+            top: selectionMenu.y,
+            left: selectionMenu.x,
+            zIndex: 9999,
+          }}
+        >
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              try {
+                document.dispatchEvent(
+                  new CustomEvent("extract-to-canvas", {
+                    detail: { text: selectionMenu.text, provenance: selectionMenu.provenance, targetColumn: "left" },
+                    bubbles: true,
+                  })
+                );
+              } finally {
+                hideSelectionMenu();
+                const sel = window.getSelection();
+                if (sel) sel.removeAllRanges();
+              }
+            }}
+            style={{
+              background: "#1d4ed8",
+              border: "1px solid #334155",
+              borderRadius: 6,
+              padding: "4px 8px",
+              color: "#ffffff",
+              fontSize: 12,
+              cursor: "pointer",
+              boxShadow: "0 6px 20px rgba(0,0,0,0.3)",
+            }}
+          >
+            Extract to Canvas
+          </button>
+        </div>
+      )}
     </div>
   );
 };

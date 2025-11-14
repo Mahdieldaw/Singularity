@@ -68,7 +68,7 @@ export default function ScratchpadDrawer() {
     borderTop: '1px solid rgba(148,163,184,0.2)',
     background: 'rgba(2,6,23,0.75)',
     position: 'relative',
-    zIndex: dragActive ? 9999 : (open ? 20 : 'auto'),
+    zIndex: dragActive ? 9999 : (open ? 3001 : 'auto'),
     transition: 'z-index 0.2s ease',
   };
 
@@ -462,7 +462,7 @@ export default function ScratchpadDrawer() {
             </div>
           </div>
           {floatingSnippet && (
-            <div style={{ position: 'fixed', left: Math.min(floatingSnippet.x + 16, window.innerWidth - 240), top: Math.min(floatingSnippet.y + 16, window.innerHeight - 80), pointerEvents: 'none', zIndex: 999999, background: 'rgba(2,6,23,0.95)', border: '1px solid rgba(148,163,184,0.35)', color: '#e2e8f0', borderRadius: 8, padding: '6px 8px', fontSize: 12, maxWidth: 260, boxShadow: '0 2px 12px rgba(0,0,0,0.35)' }}>
+            <div style={{ position: 'fixed', left: Math.min(floatingSnippet.x + 16, window.innerWidth - 240), top: Math.min(floatingSnippet.y + 16, window.innerHeight - 80), pointerEvents: 'none', zIndex: 999999999, background: 'rgba(2,6,23,0.95)', border: '1px solid rgba(148,163,184,0.35)', color: '#e2e8f0', borderRadius: 8, padding: '6px 8px', fontSize: 12, maxWidth: 260, boxShadow: '0 2px 12px rgba(0,0,0,0.35)' }}>
               <div style={{ marginBottom: 4, color: '#94a3b8', fontSize: 11 }}>
                 {floatingSnippet.mode ? '📍 Click to place in Refined' : 'Click to place'}
               </div>

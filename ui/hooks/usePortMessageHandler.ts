@@ -282,8 +282,12 @@ export function usePortMessageHandler() {
               const existing = draft.get(activeId);
               if (!existing || existing.type !== 'ai') return;
               const aiTurn = existing as AiTurn;
-              // Apply batched updates using helper
+
+              // Apply batched updates
               applyStreamingUpdates(aiTurn, updates);
+
+              // CRITICAL: ensure the Map entry is observed as changed
+              draft.set(activeId, { ...aiTurn });
             });
           });
         }
@@ -380,6 +384,9 @@ export function usePortMessageHandler() {
                   }
                 } as any;
               }
+
+              // CRITICAL: ensure the Map entry is observed as changed
+              draft.set(targetId, { ...aiTurn });
             });
 
             if (data?.meta) {
@@ -422,6 +429,7 @@ export function usePortMessageHandler() {
                   const aiTurn = existing as AiTurn;
                   const errText = typeof error === 'string' ? error : (result?.text || '');
                   const now = Date.now();
+
                   if (stepType === 'synthesis') {
                     const arr = Array.isArray(aiTurn.synthesisResponses?.[providerId!])
                       ? [...(aiTurn.synthesisResponses![providerId!] as any[])]
