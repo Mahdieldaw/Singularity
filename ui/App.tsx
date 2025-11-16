@@ -1,6 +1,5 @@
-import React, { useRef, lazy, Suspense } from 'react';
-const ComposerMode = lazy(() => import('./components/composer/ComposerMode'));
-import { useAtom, useSetAtom } from 'jotai';
+import React, { useRef, Suspense } from 'react';
+import { useAtom } from 'jotai';
 import { usePortMessageHandler } from './hooks/usePortMessageHandler';
 import { useConnectionMonitoring } from './hooks/useConnectionMonitoring';
 import { useHistoryLoader } from './hooks/useHistoryLoader';
@@ -11,8 +10,7 @@ import HistoryPanelConnected from './components/HistoryPanelConnected';
 import BannerConnected from './components/BannerConnected';
 import CompactModelTrayConnected from './components/CompactModelTrayConnected';
 import SettingsPanel from './components/SettingsPanel';
-import { isHistoryPanelOpenAtom, viewModeAtom } from './state/atoms';
-import { ViewMode } from './types';
+import { isHistoryPanelOpenAtom } from './state/atoms';
 import { useInitialization } from './hooks/useInitialization'; // Import the new hook
 import { useOnClickOutside } from 'usehooks-ts';
 import { useKey } from './hooks/useKey';
@@ -29,7 +27,6 @@ export default function App() {
   useResponsiveLoadingGuard({ idleWarnMs: 15000, idleCriticalMs: 45000 });
 
   const [isHistoryOpen, setIsHistoryOpen] = useAtom(isHistoryPanelOpenAtom);
-  const [viewMode] = useAtom(viewModeAtom);
 
   const historyPanelRef = useRef<HTMLDivElement>(null);
 
@@ -76,13 +73,7 @@ export default function App() {
           position: 'relative',
           minHeight: 0,
         }}>
-         {viewMode === ViewMode.COMPOSER ? (
-  <Suspense fallback={<div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%' }}><div className="loading-spinner" /></div>}>
-    <ComposerMode />
-  </Suspense>
-) : (
-  <ChatView />  // ← Just ChatView, remove the fragment and ModelTray
-)}
+          <ChatView />
         </main>
         
         {/* History Panel Overlay */}

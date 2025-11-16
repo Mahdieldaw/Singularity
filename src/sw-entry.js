@@ -39,20 +39,16 @@ import { SessionManager } from './persistence/SessionManager.js';
 import { initializePersistenceLayer } from './persistence/index.js';
 import { errorHandler } from './utils/ErrorHandler.js';
 import { persistenceMonitor } from './debug/PersistenceMonitor.js';
-// Scratchpad Strategist services
-import { ContextGraphService } from './services/ContextGraphService.js';
-import { ScratchpadAgentService } from './services/ScratchpadAgentService.js';
+// Prompt refinement service
+import { PromptRefinerService } from './services/PromptRefinerService.ts';
 
 // ============================================================================
 // FEATURE FLAGS (Source of Truth)
 // ============================================================================
 // ✅ CHANGED: Enable persistence by default for production use
 globalThis.HTOS_PERSISTENCE_ENABLED = true;
-globalThis.HTOS_ENABLE_DOCUMENT_PERSISTENCE = true;
-globalThis.HTOS_ENABLE_PROVENANCE_TRACKING = false; // Optional advanced feature
 
 const HTOS_PERSISTENCE_ENABLED = globalThis.HTOS_PERSISTENCE_ENABLED;
-const HTOS_ENABLE_DOCUMENT_PERSISTENCE = globalThis.HTOS_ENABLE_DOCUMENT_PERSISTENCE;
 
 // ============================================================================
 // GLOBAL STATE MANAGEMENT
@@ -60,7 +56,7 @@ const HTOS_ENABLE_DOCUMENT_PERSISTENCE = globalThis.HTOS_ENABLE_DOCUMENT_PERSIST
 let sessionManager = null;
 let persistenceLayer = null;
 const __HTOS_SESSIONS = (self.__HTOS_SESSIONS = self.__HTOS_SESSIONS || {});
-let scratchpadAgentService = null;
+let promptRefinerService = null;
 
 // Ensure fetch is correctly bound
 try {
@@ -78,21 +74,16 @@ self.BusController = BusController;
 async function initializePersistence() {
   const operationId = persistenceMonitor.startOperation('INITIALIZE_PERSISTENCE', {
     useAdapter: true,
-    enableDocumentPersistence: HTOS_ENABLE_DOCUMENT_PERSISTENCE
   });
   
   try {
-    persistenceLayer = await initializePersistenceLayer({
-      dbName: 'HTOSPersistenceDB',
-      version: 1,
-      enableProvenance: globalThis.HTOS_ENABLE_PROVENANCE_TRACKING || false
-    });
+    persistenceLayer = await initializePersistenceLayer();
     // Expose globally for UI bridge and debugging
     self.__HTOS_PERSISTENCE_LAYER = persistenceLayer;
     
     persistenceMonitor.recordConnection('HTOSPersistenceDB', 1, [
       'sessions', 'threads', 'turns', 'provider_responses', 
-      'documents', 'canvas_blocks', 'ghosts', 'provider_contexts', 'metadata'
+      'provider_contexts', 'metadata'
     ]);
     
     console.log('[SW] ✅ Persistence layer initialized');
@@ -452,15 +443,9 @@ async function initializeGlobalServices() {
     const compiler = new WorkflowCompiler(sessionManager);
     const contextResolver = new ContextResolver(sessionManager);
 
-    // Initialize Strategist agent service (lazy if needed later)
-    try {
-      const graphService = new ContextGraphService(sessionManager.adapter);
-      scratchpadAgentService = new ScratchpadAgentService(graphService, sessionManager, providerRegistry);
-      console.log('[SW] ✓ ScratchpadAgentService initialized');
-    } catch (e) {
-      console.warn('[SW] ScratchpadAgentService init failed (will initialize lazily on first use):', e);
-      scratchpadAgentService = null;
-    }
+    // Initialize PromptRefinerService
+    promptRefinerService = new PromptRefinerService({ refinerModel: 'gemini' });
+    console.log('[SW] ✓ PromptRefinerService initialized');
     
     console.log("[SW] ✅ Global services ready");
     return {
@@ -469,7 +454,7 @@ async function initializeGlobalServices() {
       compiler,
       contextResolver,
       persistenceLayer: pl, // Expose persistence layer to other modules
-      scratchpadAgentService,
+      promptRefinerService,
     };
   })();
 
@@ -673,7 +658,6 @@ async function handleUnifiedMessage(message, sender, sendResponse) {
           data: { 
             availableProviders: providerRegistry.listProviders(),
             persistenceEnabled: !!ps.persistenceEnabled,
-            documentsEnabled: HTOS_ENABLE_DOCUMENT_PERSISTENCE,
             sessionManagerType: sm?.constructor?.name || 'unknown',
             persistenceLayerAvailable: !!layer,
             adapterReady: !!ps.adapterReady,
@@ -684,56 +668,70 @@ async function handleUnifiedMessage(message, sender, sendResponse) {
       }
 
       // ========================================================================
-      // SCRATCHPAD STRATEGIST AGENT ENDPOINTS
+      // PROMPT REFINEMENT
       // ========================================================================
-      case 'SCRATCHPAD_AGENT_PROMPT': {
+      case 'REFINE_PROMPT': {
         try {
-          const text = message.text || message.payload?.text || message.userInput || '';
-          const sessionId = message.sessionId || message.payload?.sessionId || message.mainSessionId;
-          const model = String(message.model || message.payload?.model || 'claude').toLowerCase();
-          const mode = (message.mode || message.payload?.mode || 'continue');
+          const draftPrompt = message.draftPrompt || message.payload?.draftPrompt || '';
+          const sessionId = message.sessionId || message.payload?.sessionId;
 
-          if (!sessionId) {
-            sendResponse({ success: false, error: 'Missing sessionId' });
+          if (!String(draftPrompt).trim()) {
+            sendResponse({ success: false, error: 'Missing draftPrompt' });
             return true;
           }
 
-          // Ensure agent service exists
-          try {
-            if (!scratchpadAgentService) {
-              const graphService = new ContextGraphService(sm.adapter);
-              scratchpadAgentService = new ScratchpadAgentService(graphService, sm, providerRegistry);
+          // Build full turn context for refiner
+          let turnContext = null;
+          if (sessionId) {
+            try {
+              const session = await sm.adapter.get('sessions', sessionId);
+              if (session?.lastTurnId) {
+                const lastTurn = await sm.adapter.get('turns', session.lastTurnId);
+                if (lastTurn) {
+                  // Get all responses from last turn
+                  const responses = await sm.adapter.getResponsesByTurnId(lastTurn.id);
+
+                  // Find user prompt from last turn
+                  const userTurn = await sm.adapter.get('turns', lastTurn.userTurnId);
+                  const lastUserPrompt = userTurn?.content || userTurn?.text || '';
+
+                  // Find synthesis and mapping responses
+                  const synthesisResponse = Array.isArray(responses) ? responses.find(r => r.responseType === 'synthesis') : null;
+                  const mappingResponse = Array.isArray(responses) ? responses.find(r => r.responseType === 'mapping') : null;
+
+                  turnContext = {
+                    userPrompt: lastUserPrompt,
+                    synthesisText: synthesisResponse?.text || '',
+                    mappingText: mappingResponse?.text || ''
+                  };
+                }
+              }
+            } catch (e) {
+              console.warn('[SW] Could not fetch last turn context:', e);
             }
-          } catch (e) {
-            console.error('[SW] Failed to initialize ScratchpadAgentService lazily:', e);
-            sendResponse({ success: false, error: e?.message || String(e) });
+          }
+
+          if (!promptRefinerService) {
+            promptRefinerService = new PromptRefinerService({ refinerModel: 'gemini' });
+          }
+
+          const result = await promptRefinerService.refinePrompt(draftPrompt, turnContext);
+
+          if (!result) {
+            sendResponse({ success: false, error: 'Refiner returned no result' });
             return true;
           }
 
-          const textResp = await scratchpadAgentService.handlePrompt(text, sessionId, model, { mode });
-          sendResponse({ success: true, data: { text: textResp } });
+          sendResponse({
+            success: true,
+            data: {
+              refinedPrompt: result.refinedPrompt,
+              explanation: result.explanation,
+              originalPrompt: draftPrompt
+            }
+          });
         } catch (e) {
-          console.error('[SW] SCRATCHPAD_AGENT_PROMPT failed:', e);
-          sendResponse({ success: false, error: e?.message || String(e) });
-        }
-        return true;
-      }
-
-      case 'SCRATCHPAD_AGENT_NEW': {
-        try {
-          const sessionId = message.sessionId || message.payload?.sessionId || message.mainSessionId;
-          if (!sessionId) {
-            sendResponse({ success: false, error: 'Missing sessionId' });
-            return true;
-          }
-          if (!scratchpadAgentService) {
-            const graphService = new ContextGraphService(sm.adapter);
-            scratchpadAgentService = new ScratchpadAgentService(graphService, sm, providerRegistry);
-          }
-          await scratchpadAgentService.newAgent(sessionId);
-          sendResponse({ success: true });
-        } catch (e) {
-          console.error('[SW] SCRATCHPAD_AGENT_NEW failed:', e);
+          console.error('[SW] REFINE_PROMPT failed:', e);
           sendResponse({ success: false, error: e?.message || String(e) });
         }
         return true;
@@ -886,217 +884,11 @@ async function handleUnifiedMessage(message, sender, sendResponse) {
         const layer = self.__HTOS_PERSISTENCE_LAYER || persistenceLayer;
         const status = {
           persistenceEnabled: HTOS_PERSISTENCE_ENABLED,
-          documentPersistenceEnabled: HTOS_ENABLE_DOCUMENT_PERSISTENCE,
           sessionManagerType: sm?.constructor?.name || 'unknown',
           persistenceLayerAvailable: !!layer,
           adapterStatus: sm?.getPersistenceStatus ? sm.getPersistenceStatus() : null
         };
         sendResponse({ success: true, status });
-        return true;
-      }
-        
-
-        
-      // ========================================================================
-      // DOCUMENT OPERATIONS (When document persistence is enabled)
-      // ========================================================================
-      case 'SAVE_DOCUMENT': {
-        const layer = self.__HTOS_PERSISTENCE_LAYER || persistenceLayer;
-        if (HTOS_ENABLE_DOCUMENT_PERSISTENCE && layer && layer.documentManager) {
-          try {
-            await layer.documentManager.saveDocument(
-              message.documentId,
-              message.document,
-              message.content
-            );
-          } catch (e) {
-            // If document doesn't exist yet, create it (upsert) and retry save
-            const msg = (e && e.message) ? e.message : String(e);
-            if (msg && msg.toLowerCase().includes('not found')) {
-              try {
-                const now = Date.now();
-                const baseDoc = {
-                  id: message.documentId,
-                  title: (message.document && message.document.title) || 'Untitled Document',
-                  sourceSessionId: message.document?.sourceSessionId,
-                  canvasContent: Array.isArray(message.content) ? message.content : (message.document?.canvasContent || []),
-                  // Persist canvas tabs state when upserting a new document
-                  canvasTabs: Array.isArray(message.document?.canvasTabs) ? message.document.canvasTabs : [],
-                  activeTabId: message.document?.activeTabId || (Array.isArray(message.document?.canvasTabs) ? message.document.canvasTabs[0]?.id : undefined),
-                  granularity: message.document?.granularity || 'paragraph',
-                  isDirty: false,
-                  createdAt: message.document?.createdAt || now,
-                  updatedAt: now,
-                  lastModified: now,
-                  version: message.document?.version || 1,
-                  blockCount: Array.isArray(message.content) ? message.content.length : (message.document?.blockCount || 0),
-                  refinementHistory: message.document?.refinementHistory || [],
-                  exportHistory: message.document?.exportHistory || [],
-                  snapshots: message.document?.snapshots || [],
-                };
-                await layer.adapter.put('documents', baseDoc);
-                // Retry save to let the manager decompose and update derived fields
-                await layer.documentManager.saveDocument(
-                  message.documentId,
-                  message.document,
-                  message.content
-                );
-              } catch (inner) {
-                console.error('[SW] SAVE_DOCUMENT upsert failed:', inner);
-                sendResponse({ success: false, error: inner?.message || String(inner) });
-                return true;
-              }
-            } else {
-              console.error('[SW] SAVE_DOCUMENT failed:', e);
-              sendResponse({ success: false, error: msg });
-              return true;
-            }
-          }
-          sendResponse({ success: true });
-        } else {
-          const reason = !HTOS_ENABLE_DOCUMENT_PERSISTENCE
-            ? 'HTOS_ENABLE_DOCUMENT_PERSISTENCE is false'
-            : 'Persistence layer unavailable';
-          console.warn('[SW] SAVE_DOCUMENT skipped:', reason);
-          sendResponse({ success: false, error: `Document persistence not enabled: ${reason}` });
-        }
-        return true;
-      }
-        
-      case 'LOAD_DOCUMENT': {
-        const layer = self.__HTOS_PERSISTENCE_LAYER || persistenceLayer;
-        if (HTOS_ENABLE_DOCUMENT_PERSISTENCE && layer && layer.documentManager) {
-          const document = await layer.documentManager.loadDocument(
-            message.documentId,
-            message.reconstructContent
-          );
-          sendResponse({ success: true, document });
-        } else {
-          const reason = !HTOS_ENABLE_DOCUMENT_PERSISTENCE
-            ? 'HTOS_ENABLE_DOCUMENT_PERSISTENCE is false'
-            : 'Persistence layer unavailable';
-          console.warn('[SW] LOAD_DOCUMENT skipped:', reason);
-          sendResponse({ success: false, error: `Document persistence not enabled: ${reason}` });
-        }
-        return true;
-      }
-        
-      case 'CREATE_GHOST': {
-        const layer = self.__HTOS_PERSISTENCE_LAYER || persistenceLayer;
-        if (HTOS_ENABLE_DOCUMENT_PERSISTENCE && layer && layer.documentManager) {
-          const ghost = await layer.documentManager.createGhost(
-            message.documentId,
-            message.text,
-            message.provenance
-          );
-          sendResponse({ success: true, ghost });
-        } else {
-          const reason = !HTOS_ENABLE_DOCUMENT_PERSISTENCE
-            ? 'HTOS_ENABLE_DOCUMENT_PERSISTENCE is false'
-            : 'Persistence layer unavailable';
-          console.warn('[SW] CREATE_GHOST skipped:', reason);
-          sendResponse({ success: false, error: `Document persistence not enabled: ${reason}` });
-        }
-        return true;
-      }
-
-      case 'GET_DOCUMENT_GHOSTS': {
-        const layer = self.__HTOS_PERSISTENCE_LAYER || persistenceLayer;
-        if (HTOS_ENABLE_DOCUMENT_PERSISTENCE && layer && (layer.documentManager || layer.adapter)) {
-          try {
-            let ghosts = [];
-            // Prefer documentManager API if available
-            if (layer.documentManager && typeof layer.documentManager.getDocumentGhosts === 'function') {
-              ghosts = await layer.documentManager.getDocumentGhosts(message.documentId);
-            } else if (layer.adapter && typeof layer.adapter.getGhostsByDocumentId === 'function') {
-              // Prefer adapter convenience wrapper
-              ghosts = await layer.adapter.getGhostsByDocumentId(message.documentId);
-            } else if (layer.adapter && typeof layer.adapter.getByIndex === 'function') {
-              // Fallback to generic indexed query if available
-              ghosts = await layer.adapter.getByIndex('ghosts', 'byDocumentId', message.documentId);
-            } else {
-              throw new Error('Adapter method getGhostsByDocumentId is not available');
-            }
-            sendResponse({ success: true, ghosts });
-          } catch (err) {
-            console.error('[SW] GET_DOCUMENT_GHOSTS failed:', err);
-            sendResponse({ success: false, error: err?.message || String(err) });
-          }
-        } else {
-          sendResponse({ success: false, error: 'Document persistence not enabled' });
-        }
-        return true;
-      }
-
-      case 'DELETE_GHOST': {
-        const layer = self.__HTOS_PERSISTENCE_LAYER || persistenceLayer;
-        if (HTOS_ENABLE_DOCUMENT_PERSISTENCE && layer && (layer.documentManager || layer.adapter)) {
-          try {
-            if (layer.documentManager && typeof layer.documentManager.deleteGhost === 'function') {
-              await layer.documentManager.deleteGhost(message.ghostId);
-            } else if (layer.adapter) {
-              // Try a few common adapter delete method names
-              if (typeof layer.adapter.delete === 'function') {
-                await layer.adapter.delete('ghosts', message.ghostId);
-              } else if (typeof layer.adapter.remove === 'function') {
-                await layer.adapter.remove('ghosts', message.ghostId);
-              } else if (typeof layer.adapter.deleteRecord === 'function') {
-                await layer.adapter.deleteRecord('ghosts', message.ghostId);
-              } else {
-                throw new Error('Adapter does not expose a delete method for ghosts');
-              }
-            } else {
-              throw new Error('No persistence API available to delete ghost');
-            }
-            sendResponse({ success: true });
-          } catch (err) {
-            console.error('[SW] DELETE_GHOST failed:', err);
-            sendResponse({ success: false, error: err?.message || String(err) });
-          }
-        } else {
-          sendResponse({ success: false, error: 'Document persistence not enabled' });
-        }
-        return true;
-      }
-      
-      case 'DELETE_DOCUMENT': {
-        const layer = self.__HTOS_PERSISTENCE_LAYER || persistenceLayer;
-        if (HTOS_ENABLE_DOCUMENT_PERSISTENCE && layer && layer.documentManager) {
-          await layer.documentManager.deleteDocument(message.documentId);
-          sendResponse({ success: true });
-        } else {
-          const reason = !HTOS_ENABLE_DOCUMENT_PERSISTENCE
-            ? 'HTOS_ENABLE_DOCUMENT_PERSISTENCE is false'
-            : 'Persistence layer unavailable';
-          console.warn('[SW] DELETE_DOCUMENT skipped:', reason);
-          sendResponse({ success: false, error: `Document persistence not enabled: ${reason}` });
-        }
-        return true;
-      }
-
-      case 'LIST_DOCUMENTS': {
-        const layer = self.__HTOS_PERSISTENCE_LAYER || persistenceLayer;
-        if (HTOS_ENABLE_DOCUMENT_PERSISTENCE && layer && layer.adapter) {
-          try {
-            // Prefer adapter listing for summaries
-            const docs = await layer.adapter.listDocuments();
-            const summaries = (docs || []).map(d => ({ 
-              id: d.id, 
-              title: d.title, 
-              lastModified: d.lastModified ?? d.updatedAt ?? d.createdAt 
-            }));
-            sendResponse({ success: true, documents: summaries });
-          } catch (e) {
-            console.error('[SW] LIST_DOCUMENTS error:', e);
-            sendResponse({ success: false, error: e?.message || String(e) });
-          }
-        } else {
-          const reason = !HTOS_ENABLE_DOCUMENT_PERSISTENCE
-            ? 'HTOS_ENABLE_DOCUMENT_PERSISTENCE is false'
-            : 'Persistence layer unavailable';
-          console.warn('[SW] LIST_DOCUMENTS skipped:', reason);
-          sendResponse({ success: false, error: `Document persistence not enabled: ${reason}` });
-        }
         return true;
       }
         
@@ -1250,7 +1042,6 @@ function getHealthStatus() {
     persistenceLayer: layer ? 'active' : 'disabled',
     featureFlags: {
       persistenceEnabled: HTOS_PERSISTENCE_ENABLED,
-      documentPersistence: HTOS_ENABLE_DOCUMENT_PERSISTENCE
     },
     providers,
     details: {
@@ -1303,7 +1094,6 @@ globalThis.__HTOS_SW = {
     self.__HTOS_INIT_STATE = {
       initializedAt: Date.now(),
       persistenceEnabled: HTOS_PERSISTENCE_ENABLED,
-      documentPersistenceEnabled: HTOS_ENABLE_DOCUMENT_PERSISTENCE,
       persistenceReady: !!services.persistenceLayer,
       providers: services?.orchestrator ? providerRegistry.listProviders() : []
     };

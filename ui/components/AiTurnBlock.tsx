@@ -11,7 +11,6 @@ import {
   useEffect,
   useLayoutEffect,
 } from "react";
-import { hasComposableContent } from "../utils/composerUtils";
 import { LLM_PROVIDERS_CONFIG } from "../constants";
 import ClipsCarousel from "./ClipsCarousel";
 import { ChevronDownIcon, ChevronUpIcon, ListIcon } from "./Icons";
@@ -177,7 +176,6 @@ interface AiTurnBlockProps {
   currentAppStep?: AppStep;
   showSourceOutputs?: boolean;
   onToggleSourceOutputs?: () => void;
-  onEnterComposerMode?: (aiTurn: AiTurn) => void;
   activeSynthesisClipProviderId?: string;
   activeMappingClipProviderId?: string;
   onClipClick?: (type: "synthesis" | "mapping", providerId: string) => void;
@@ -188,7 +186,6 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
   aiTurn,
   onToggleSourceOutputs,
   showSourceOutputs = false,
-  onEnterComposerMode,
   isReducedMotion = false,
   isLoading = false,
   isLive = false,
@@ -205,51 +202,13 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
   const mapProseRef = useRef<HTMLDivElement>(null);
   const optionsProseRef = useRef<HTMLDivElement>(null);
 
-  // Selection menu for "Extract to Canvas"
-  const [selectionMenu, setSelectionMenu] = useState<{ x: number; y: number; text: string; provenance: any } | null>(null);
-  const hideSelectionMenu = useCallback(() => setSelectionMenu(null), []);
-  useEffect(() => {
-    const onScroll = () => hideSelectionMenu();
-    window.addEventListener("scroll", onScroll, true);
-    return () => window.removeEventListener("scroll", onScroll, true);
-  }, [hideSelectionMenu]);
 
-  const showSelectionMenu = useCallback(
-    (e: React.MouseEvent, responseType: "synthesis" | "mapping", providerId: string, sourceText: string) => {
-      const sel = window.getSelection();
-      if (!sel || sel.isCollapsed) return;
-      const selected = sel.toString().trim();
-      if (!selected) return;
-      const range = sel.getRangeAt(0);
-      const rect = range.getBoundingClientRect();
-      setSelectionMenu({
-        x: rect.left + window.scrollX,
-        y: rect.top + window.scrollY - 36,
-        text: selected,
-        provenance: {
-          source: "ai",
-          sessionId: aiTurn.sessionId,
-          aiTurnId: aiTurn.id,
-          providerId: providerId || "unknown",
-          responseType,
-          responseIndex: 0,
-          timestamp: Date.now(),
-          granularity: "fragment",
-          sourceText,
-        },
-      });
-    },
-    [aiTurn.sessionId, aiTurn.id]
-  );
 
   // Track which section is manually expanded (if truncated)
   const [synthExpanded, setSynthExpanded] = useState(false);
   const [mapExpanded, setMapExpanded] = useState(false);
 
   // ✅ CRITICAL: Move all hooks to top level (before any conditional logic)
-  const handleEnterComposerMode = useCallback(() => {
-    onEnterComposerMode?.(aiTurn);
-  }, [onEnterComposerMode, aiTurn]);
 
   const synthesisResponses = useMemo(() => {
     if (!aiTurn.synthesisResponses) aiTurn.synthesisResponses = {};
@@ -1165,15 +1124,7 @@ const hasSynthesis = !!(
                       onMouseDownCapture={interceptCitationMouseDownCapture}
                       onPointerDownCapture={interceptCitationPointerDownCapture}
                       onMouseUpCapture={interceptCitationMouseUpCapture}
-                      onMouseUp={(e) => {
-                        if (activeSynthPid) {
-                          try {
-                            const take = getLatestResponse(synthesisResponses[activeSynthPid]);
-                            const sourceText = String(take?.text || "");
-                            showSelectionMenu(e, "synthesis", activeSynthPid, sourceText);
-                          } catch {}
-                        }
-                      }}
+
                       onAuxClickCapture={interceptCitationAuxClickCapture}
                       onWheelCapture={(e: React.WheelEvent<HTMLDivElement>) => {
                         const el = e.currentTarget;
@@ -1324,53 +1275,12 @@ const hasSynthesis = !!(
                               <div
                                 className="prose prose-sm max-w-none dark:prose-invert"
                                 style={{ lineHeight: 1.7, fontSize: 16 }}
-                                onMouseUp={(e) => showSelectionMenu(e, "synthesis", activeSynthPid || "unknown", String(take.text || ""))}
                               >
                                 <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ a: CitationLink }}>
                                   {String(take.text || "")}
                                 </ReactMarkdown>
                               </div>
-                              {/* Synthesis actions: drag + scratchpad */}
-                              {(() => {
-                                const text = String(take.text || "");
-                                const provenance = {
-                                  source: "ai",
-                                  sessionId: aiTurn.sessionId,
-                                  aiTurnId: aiTurn.id,
-                                  providerId: activeSynthPid || 'unknown',
-                                  responseType: "synthesis",
-                                  responseIndex: 0,
-                                  timestamp: Date.now(),
-                                  granularity: "full",
-                                  sourceText: text,
-                                } as any;
-                                return (
-                                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 12 }}>
-                                    <button
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        try {
-                                          document.dispatchEvent(new CustomEvent("extract-to-canvas", { detail: { text, provenance, targetColumn: 'left' }, bubbles: true }));
-                                        } catch (err) {
-                                          console.error("Add synthesis to scratchpad failed", err);
-                                        }
-                                      }}
-                                      aria-label="Send synthesis to Scratchpad"
-                                      style={{
-                                        background: "#1d4ed8",
-                                        border: "1px solid #334155",
-                                        borderRadius: 6,
-                                        padding: "4px 8px",
-                                        color: "#ffffff",
-                                        fontSize: 12,
-                                        cursor: "pointer",
-                                      }}
-                                    >
-                                      ↘ Scratchpad
-                                    </button>
-                                  </div>
-                                );
-                              })()}
+
                             </div>
                           );
                         }
@@ -1406,70 +1316,7 @@ const hasSynthesis = !!(
                             borderRadius: "0 0 8px 8px",
                           }}
                         />
-                        {/* Always show actions in truncated view (overlay at bottom-left) */}
-                        {(() => {
-                          const latest = activeSynthPid
-                            ? getLatestResponse(
-                                synthesisResponses[activeSynthPid]
-                              )
-                            : undefined;
-                          const text = String(latest?.text || "");
-                          const provenance = {
-                            source: "ai",
-                            sessionId: aiTurn.sessionId,
-                            aiTurnId: aiTurn.id,
-                            providerId: activeSynthPid || 'unknown',
-                            responseType: "synthesis",
-                            responseIndex: 0,
-                            timestamp: Date.now(),
-                            granularity: "full",
-                            sourceText: text,
-                          } as any;
-                          return (
-                            <div
-                              style={{
-                                position: "absolute",
-                                bottom: 12,
-                                left: 12,
-                                display: "flex",
-                                alignItems: "center",
-                                gap: 8,
-                                zIndex: 2,
-                              }}
-                            >
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  try {
-                                    document.dispatchEvent(
-                                      new CustomEvent("extract-to-canvas", {
-                                        detail: { text, provenance, targetColumn: 'left' },
-                                        bubbles: true,
-                                      })
-                                    );
-                                  } catch (err) {
-                                    console.error(
-                                      "Add synthesis to scratchpad failed",
-                                      err
-                                    );
-                                  }
-                                }}
-                                aria-label="Send synthesis to Scratchpad"
-                                style={{
-                                  background: "#1d4ed8",
-                                  border: "1px solid #334155",
-                                  borderRadius: 6,
-                                  padding: "4px 8px",
-                                  color: "#ffffff",
-                                  fontSize: 12,
-                                  cursor: "pointer",
-                                }}
-                              >
-                                ↘ Scratchpad
-                              </button>
-                            </div>
-                          );
-                        })()}
+
                         <button
                           onClick={() => setSynthExpanded(true)}
                           style={{
@@ -1736,17 +1583,6 @@ const hasSynthesis = !!(
               );
             }
             const text = String(options || "");
-            const provenance = {
-              source: "ai",
-              sessionId: aiTurn.sessionId,
-              aiTurnId: aiTurn.id,
-              providerId: activeMappingPid || "unknown",
-              responseType: "mapping",
-              responseIndex: 0,
-              timestamp: Date.now(),
-              granularity: "full",
-              sourceText: text,
-            } as any;
             return (
               <div>
                 <div
@@ -1790,11 +1626,7 @@ const hasSynthesis = !!(
                   onClickCapture={interceptCitationAnchorClick}
                   onMouseDownCapture={interceptCitationMouseDownCapture}
                   onPointerDownCapture={interceptCitationPointerDownCapture}
-                  onMouseUp={(e) => {
-                    try {
-                      showSelectionMenu(e, "mapping", activeMappingPid || "unknown", text);
-                    } catch {}
-                  }}
+
                 >
                   <ReactMarkdown
                     remarkPlugins={[remarkGfm]}
@@ -1803,42 +1635,7 @@ const hasSynthesis = !!(
                     {transformCitations(options)}
                   </ReactMarkdown>
                 </div>
-                <div
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 8,
-                    marginTop: 12,
-                  }}
-                >
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      try {
-                        document.dispatchEvent(
-                          new CustomEvent("extract-to-canvas", {
-                            detail: { text, provenance, targetColumn: "left" },
-                            bubbles: true,
-                          })
-                        );
-                      } catch (err) {
-                        console.error("Add options to scratchpad failed", err);
-                      }
-                    }}
-                    aria-label="Send options to Scratchpad"
-                    style={{
-                      background: "#1d4ed8",
-                      border: "1px solid #334155",
-                      borderRadius: 6,
-                      padding: "4px 8px",
-                      color: "#ffffff",
-                      fontSize: 12,
-                      cursor: "pointer",
-                    }}
-                  >
-                    ↘ Scratchpad
-                  </button>
-                </div>
+
               </div>
             );
           })();
@@ -1956,59 +1753,11 @@ const hasSynthesis = !!(
                     onClickCapture={interceptCitationAnchorClick}
                     onMouseDownCapture={interceptCitationMouseDownCapture}
                     onPointerDownCapture={interceptCitationPointerDownCapture}
-                    onMouseUp={(e) => showSelectionMenu(e, "mapping", activeMappingPid || "unknown", String(displayedMappingText || ""))}
+
                   >
                     <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ a: CitationLink }}>
                       {transformCitations(displayedMappingText)}
                     </ReactMarkdown>
-                  </div>
-                  <div
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 8,
-                      marginTop: 12,
-                    }}
-                  >
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        try {
-                          const text = String(displayedMappingText || "");
-                          const provenance = {
-                            source: "ai",
-                            sessionId: aiTurn.sessionId,
-                            aiTurnId: aiTurn.id,
-                            providerId: activeMappingPid || "unknown",
-                            responseType: "mapping",
-                            responseIndex: 0,
-                            timestamp: Date.now(),
-                            granularity: "full",
-                            sourceText: text,
-                          } as any;
-                          document.dispatchEvent(
-                            new CustomEvent("extract-to-canvas", {
-                              detail: { text, provenance, targetColumn: "left" },
-                              bubbles: true,
-                            })
-                          );
-                        } catch (err) {
-                          console.error("Add mapping to scratchpad failed", err);
-                        }
-                      }}
-                      aria-label="Send mapping to Scratchpad"
-                      style={{
-                        background: "#1d4ed8",
-                        border: "1px solid #334155",
-                        borderRadius: 6,
-                        padding: "4px 8px",
-                        color: "#ffffff",
-                        fontSize: 12,
-                        cursor: "pointer",
-                      }}
-                    >
-                      ↘ Scratchpad
-                    </button>
                   </div>
                 </div>
               );
@@ -2071,65 +1820,6 @@ const hasSynthesis = !!(
                             borderRadius: "0 0 8px 8px",
                           }}
                         />
-                        {/* Always show actions in truncated mapping view (overlay at bottom-left) */}
-                        {(() => {
-                          const text = String(displayedMappingText || "");
-                          const provenance = {
-                            source: "ai",
-                            sessionId: aiTurn.sessionId,
-                            aiTurnId: aiTurn.id,
-                            providerId: activeMappingPid || 'unknown',
-                            responseType: "mapping",
-                            responseIndex: 0,
-                            timestamp: Date.now(),
-                            granularity: "full",
-                            sourceText: text,
-                          } as any;
-                          return (
-                            <div
-                              style={{
-                                position: "absolute",
-                                bottom: 12,
-                                left: 12,
-                                display: "flex",
-                                alignItems: "center",
-                                gap: 8,
-                                zIndex: 2,
-                              }}
-                            >
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  try {
-                                    document.dispatchEvent(
-                                      new CustomEvent("extract-to-canvas", {
-                                        detail: { text, provenance, targetColumn: 'left' },
-                                        bubbles: true,
-                                      })
-                                    );
-                                  } catch (err) {
-                                    console.error(
-                                      "Add mapping to scratchpad failed",
-                                      err
-                                    );
-                                  }
-                                }}
-                                aria-label="Send mapping to Scratchpad"
-                                style={{
-                                  background: "#1d4ed8",
-                                  border: "1px solid #334155",
-                                  borderRadius: 6,
-                                  padding: "4px 8px",
-                                  color: "#ffffff",
-                                  fontSize: 12,
-                                  cursor: "pointer",
-                                }}
-                              >
-                                ↘ Scratchpad
-                              </button>
-                            </div>
-                          );
-                        })()}
                         <button
                           onClick={() => setMapExpanded(true)}
                           style={{
@@ -2217,67 +1907,9 @@ const hasSynthesis = !!(
                 </div>
               </div>
             )}
-
-            {hasComposableContent(aiTurn) && (
-              <div className="composer-entry" style={{ textAlign: "center" }}>
-                <button
-                  onClick={handleEnterComposerMode}
-                  style={{
-                    padding: "8px 12px",
-                    borderRadius: 8,
-                    border: "1px solid #334155",
-                    background: "#1d4ed8",
-                    color: "#fff",
-                    cursor: "pointer",
-                  }}
-                >
-                  Open in Composer
-                </button>
-              </div>
-            )}
           </div>
         </div>
       </div>
-      {selectionMenu && (
-        <div
-          style={{
-            position: "fixed",
-            top: selectionMenu.y,
-            left: selectionMenu.x,
-            zIndex: 9999,
-          }}
-        >
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              try {
-                document.dispatchEvent(
-                  new CustomEvent("extract-to-canvas", {
-                    detail: { text: selectionMenu.text, provenance: selectionMenu.provenance, targetColumn: "left" },
-                    bubbles: true,
-                  })
-                );
-              } finally {
-                hideSelectionMenu();
-                const sel = window.getSelection();
-                if (sel) sel.removeAllRanges();
-              }
-            }}
-            style={{
-              background: "#1d4ed8",
-              border: "1px solid #334155",
-              borderRadius: 6,
-              padding: "4px 8px",
-              color: "#ffffff",
-              fontSize: 12,
-              cursor: "pointer",
-              boxShadow: "0 6px 20px rgba(0,0,0,0.3)",
-            }}
-          >
-            Extract to Canvas
-          </button>
-        </div>
-      )}
     </div>
   );
 };

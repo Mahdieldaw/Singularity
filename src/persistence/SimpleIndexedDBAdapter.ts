@@ -47,7 +47,7 @@ export class SimpleIndexedDBAdapter {
       }
       if (!repaired) {
         // verify required object stores exist if no repair was needed
-        const requiredStores = ['sessions', 'threads', 'turns', 'provider_responses', 'documents', 'canvas_blocks', 'ghosts', 'provider_contexts', 'metadata'];
+        const requiredStores = ['sessions', 'threads', 'turns', 'provider_responses', 'provider_contexts', 'metadata'];
         const missingStores = requiredStores.filter(storeName => !this.db!.objectStoreNames.contains(storeName));
         if (missingStores.length > 0) {
           console.error('persistence:init - Missing required object stores:', missingStores);
@@ -224,16 +224,6 @@ export class SimpleIndexedDBAdapter {
     return this.getByIndex('provider_contexts', 'bySessionId', sessionId);
   }
 
-  async getDocumentsBySourceSessionId(sessionId: string): Promise<SimpleRecord[]> {
-    // documents.bySourceSessionId
-    return this.getByIndex('documents', 'bySourceSessionId', sessionId);
-  }
-
-  async getDocumentsBySessionId(sessionId: string): Promise<SimpleRecord[]> {
-    // documents.bySessionId
-    return this.getByIndex('documents', 'bySessionId', sessionId);
-  }
-
   async getResponsesBySessionId(sessionId: string): Promise<SimpleRecord[]> {
     // provider_responses.bySessionId
     return this.getByIndex('provider_responses', 'bySessionId', sessionId);
@@ -242,28 +232,6 @@ export class SimpleIndexedDBAdapter {
   async getMetadataBySessionId(sessionId: string): Promise<SimpleRecord[]> {
     // metadata.bySessionId
     return this.getByIndex('metadata', 'bySessionId', sessionId);
-  }
-
-  async getCanvasBlocksByDocumentId(documentId: string): Promise<SimpleRecord[]> {
-    return this.getByIndex('canvas_blocks', 'byDocumentId', documentId);
-  }
-
-  async getCanvasBlocksBySessionId(sessionId: string): Promise<SimpleRecord[]> {
-    // provenance.sessionId indexed as bySessionId
-    return this.getByIndex('canvas_blocks', 'bySessionId', sessionId);
-  }
-
-  async getGhostsByDocumentId(documentId: string): Promise<SimpleRecord[]> {
-    return this.getByIndex('ghosts', 'byDocumentId', documentId);
-  }
-
-  async getGhostsBySessionId(sessionId: string): Promise<SimpleRecord[]> {
-    return this.getByIndex('ghosts', 'bySessionId', sessionId);
-  }
-
-  async getGhostsByEntityId(entityId: string): Promise<SimpleRecord[]> {
-    // ghosts.byEntityId
-    return this.getByIndex('ghosts', 'byEntityId', entityId);
   }
 
   async getMetadataByEntityId(entityId: string): Promise<SimpleRecord[]> {
@@ -319,7 +287,6 @@ export class SimpleIndexedDBAdapter {
   private resolveStoreName(name: string): string {
     const map: Record<string, string> = {
       providerResponses: 'provider_responses',
-      canvasBlocks: 'canvas_blocks',
       providerContexts: 'provider_contexts'
     };
     return map[name] || name;

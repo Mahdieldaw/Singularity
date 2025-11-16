@@ -891,11 +891,7 @@ export default function App() {
       
       <div style={{ display: 'flex', flex: 1 }}>
         <main style={{ flex: 1 }}>
-          {viewMode === ViewMode.COMPOSER ? (
-            <ComposerMode />
-          ) : (
-            <ChatView />
-          )}
+          <ChatView />
         </main>
         
         {isHistoryOpen && <HistoryPanelConnected />}

@@ -18,7 +18,9 @@ import {
   activeAiTurnIdAtom, 
   currentAppStepAtom, 
   uiPhaseAtom, 
-  isHistoryPanelOpenAtom 
+  isHistoryPanelOpenAtom,
+  refinerDataAtom,
+  isRefinerOpenAtom,
 } from '../state/atoms';
 // Optimistic AI turn creation is now handled upon TURN_CREATED from backend
 import type { ProviderKey, PrimitiveWorkflowRequest } from '../../shared/contract';
@@ -56,6 +58,8 @@ export function useChat() {
   const setCurrentAppStep = useSetAtom(currentAppStepAtom);
   const setUiPhase = useSetAtom(uiPhaseAtom);
   const setIsHistoryPanelOpen = useSetAtom(isHistoryPanelOpenAtom);
+  const setRefinerData = useSetAtom(refinerDataAtom);
+  const setIsRefinerOpen = useSetAtom(isRefinerOpenAtom);
 
   const sendMessage = useCallback(async (prompt: string, mode: 'new' | 'continuation') => {
     if (!prompt || !prompt.trim()) return;
@@ -330,6 +334,45 @@ export function useChat() {
     }
   }, [currentSessionId, setCurrentSessionId, setTurnsMap, setTurnIds, setActiveAiTurnId]);
 
+  const turnsMap = useAtomValue(turnsMapAtom);
+
+  const refinePrompt = useCallback(async (draftPrompt: string) => {
+    if (!draftPrompt || !draftPrompt.trim()) return;
+
+    const lastTurnId = turnIds[turnIds.length - 1];
+    if (!lastTurnId) return;
+
+    const lastTurn = turnsMap.get(lastTurnId);
+
+    if (!lastTurn || lastTurn.type !== 'ai') return;
+
+    const aiTurn = lastTurn as AiTurn;
+
+    const userTurn = turnsMap.get(aiTurn.userTurnId);
+    const userPrompt = userTurn?.type === 'user' ? userTurn.text : '';
+
+    const synthesisText = Object.values(aiTurn.synthesisResponses || {})
+      .flat()
+      .map(r => r.text)
+      .join('\n\n');
+
+    const mappingText = Object.values(aiTurn.mappingResponses || {})
+      .flat()
+      .map(r => r.text)
+      .join('\n\n');
+
+    const batchText = Object.values(aiTurn.batchResponses || {})
+      .map(r => `[${r.providerId}]: ${r.text}`)
+      .join('\n\n');
+
+    await api.refinePrompt(draftPrompt, {
+      userPrompt,
+      synthesisText,
+      mappingText,
+      batchText,
+    });
+  }, [turnIds, turnsMap]);
+
   const abort = useCallback(async (): Promise<void> => {
     try {
       const sid = currentSessionId;
@@ -349,5 +392,5 @@ export function useChat() {
 
   // Backward-compat: derive messages for consumers still expecting it
   const messages = useAtomValue(messagesAtom);
-  return { sendMessage, newChat, selectChat, deleteChat, deleteChats, abort, messages };
+  return { sendMessage, newChat, selectChat, deleteChat, deleteChats, abort, refinePrompt, messages };
 }

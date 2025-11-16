@@ -1,7 +1,6 @@
 import React from 'react';
 import { useAtom, useSetAtom } from 'jotai';
-import { isHistoryPanelOpenAtom, isSettingsOpenAtom, viewModeAtom } from '../state/atoms';
-import { ViewMode } from '../types';
+import { isHistoryPanelOpenAtom, isSettingsOpenAtom } from '../state/atoms';
 
 // MenuIcon component (inline for simplicity)
 const MenuIcon = ({ style }: { style?: React.CSSProperties }) => (
@@ -15,11 +14,6 @@ const MenuIcon = ({ style }: { style?: React.CSSProperties }) => (
 export default function Header() {
   const [isHistoryPanelOpen, setIsHistoryPanelOpen] = useAtom(isHistoryPanelOpenAtom);
   const setIsSettingsOpen = useSetAtom(isSettingsOpenAtom);
-  const [viewMode, setViewMode] = useAtom(viewModeAtom);
-
-  const handleSwitchViewMode = (mode: ViewMode) => {
-    setViewMode(mode);
-  };
 
   return (
     <header
@@ -77,21 +71,6 @@ export default function Header() {
           }}
         >
           ⚙️ Models
-        </button>
-        <button
-          className="mode-btn"
-          onClick={() => handleSwitchViewMode(viewMode === ViewMode.CHAT ? ViewMode.COMPOSER : ViewMode.CHAT)}
-          style={{
-            padding: '8px 12px',
-            background: 'rgba(255, 255, 255, 0.1)',
-            border: '1px solid rgba(255, 255, 255, 0.2)',
-            borderRadius: '8px',
-            color: '#e2e8f0',
-            cursor: 'pointer',
-            transition: 'all 0.2s ease',
-          }}
-        >
-          {viewMode === ViewMode.CHAT ? 'Composer' : 'Chat'}
         </button>
       </div>
     </header>

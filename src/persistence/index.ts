@@ -3,26 +3,20 @@
 export * from "./types";
 export * from "./database.js";
 export * from "./transactions.js";
-export * from "./DocumentManager.js";
 export * from "./SessionManager.js";
 
 import { openDatabase, STORE_CONFIGS, SCHEMA_VERSION } from "./database.js";
-// Removed unused imports
-
-import { createDocumentManager } from "./DocumentManager.js";
-import { SimpleIndexedDBAdapter } from "./SimpleIndexedDBAdapter.js"; // Import the adapter that is actually used
-import type { DocumentManagerConfig } from "./DocumentManager.js";
+import { SimpleIndexedDBAdapter } from "./SimpleIndexedDBAdapter.js";
+import type { SessionManager } from "./SessionManager.js";
 
 // Simplified PersistenceLayer interface
 export interface PersistenceLayer {
-  adapter: SimpleIndexedDBAdapter; // Use the concrete type
-  documentManager: any; // You can tighten this type if you import DocumentManager
+  adapter: SimpleIndexedDBAdapter;
+  sessionManager: SessionManager;
   close: () => Promise<void>;
 }
 
-export async function initializePersistenceLayer(
-  documentManagerConfig?: DocumentManagerConfig
-): Promise<PersistenceLayer> {
+export async function initializePersistenceLayer(): Promise<PersistenceLayer> {
   const db = await openDatabase();
   const storeNames = Array.from(db.objectStoreNames);
   const expectedStores = STORE_CONFIGS.map((cfg) => cfg.name);
@@ -62,32 +56,22 @@ export async function initializePersistenceLayer(
     );
   }
 
-  // NOTE: We directly instantiate SimpleIndexedDBAdapter because it's what SessionManager uses.
-  // We no longer use the complex adapter/repository pattern.
   const adapter = new SimpleIndexedDBAdapter();
   await adapter.init({ autoRepair: true });
 
-  // DocumentManager needs an adapter. We provide the one we just created.
-  const documentManager = createDocumentManager(adapter, documentManagerConfig);
+  // SessionManager is now the primary manager
+  const { createSessionManager } = await import('./SessionManager.js');
+  const sessionManager = createSessionManager(adapter);
 
   return {
     adapter,
-    documentManager,
+    sessionManager,
     close: async () => {
-      documentManager.dispose();
       await adapter.close();
       db.close();
     },
   };
 }
-
-export const PERSISTENCE_FEATURE_FLAGS = {
-  USE_PERSISTENCE_ADAPTER: false, // This seems misleading now, but leaving it as-is from original code
-  ENABLE_AUTO_DECOMPOSITION: true,
-  ENABLE_AUTO_SAVE: true,
-  ENABLE_PROVENANCE_TRACKING: true,
-  ENABLE_GHOST_RAIL: true,
-} as const;
 
 export function isPersistenceAvailable(): boolean {
   return typeof indexedDB !== "undefined" && typeof IDBDatabase !== "undefined";

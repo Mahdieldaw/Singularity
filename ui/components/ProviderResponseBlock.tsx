@@ -25,7 +25,6 @@ interface ProviderResponseBlockProps {
   isReducedMotion?: boolean;
   aiTurnId?: string;
   sessionId?: string;
-  onEnterComposerMode?: () => void;
 }
 
 const CopyButton = ({ text, label }: { text: string; label: string }) => {
@@ -68,49 +67,10 @@ const ProviderResponseBlock = ({
   isLoading, 
   isReducedMotion = false,
   aiTurnId,
-  sessionId,
-  onEnterComposerMode
+  sessionId
 }: ProviderResponseBlockProps) => {
   const providerContexts = useAtomValue(providerContextsAtom);
-  const [selectionMenu, setSelectionMenu] = useState<{
-    x: number;
-    y: number;
-    text: string;
-    prov: any;
-  } | null>(null);
-  const hideSelectionMenu = useCallback(() => setSelectionMenu(null), []);
-  useEffect(() => {
-    const onScroll = () => hideSelectionMenu();
-    window.addEventListener('scroll', onScroll, true);
-    return () => window.removeEventListener('scroll', onScroll, true);
-  }, [hideSelectionMenu]);
-  const showSelectionMenu = useCallback(
-    (e: React.MouseEvent, providerId: string, sourceText: string) => {
-      const sel = window.getSelection();
-      if (!sel || sel.isCollapsed) return;
-      const selected = sel.toString().trim();
-      if (!selected) return;
-      const range = sel.getRangeAt(0);
-      const rect = range.getBoundingClientRect();
-      setSelectionMenu({
-        x: rect.left + window.scrollX,
-        y: rect.top + window.scrollY - 36,
-        text: selected,
-        prov: {
-          source: 'ai',
-          sessionId: sessionId,
-          aiTurnId: aiTurnId,
-          providerId: providerId,
-          responseType: 'batch',
-          responseIndex: 0,
-          timestamp: Date.now(),
-          granularity: 'fragment',
-          sourceText,
-        },
-      });
-    },
-    [aiTurnId, sessionId]
-  );
+
   
   // Normalize responses
   const effectiveProviderResponses = providerResponses 
@@ -387,9 +347,6 @@ const ProviderResponseBlock = ({
                    if (anchor && (isAux || isMod)) { e.preventDefault(); e.stopPropagation(); }
                  } catch {}
                }}
-               onMouseUp={(e) =>
-                 showSelectionMenu(e, providerId, String(state?.text || ''))
-               }
                style={{ 
             fontSize: '13px', 
             lineHeight: '1.5', 
@@ -429,40 +386,7 @@ const ProviderResponseBlock = ({
           flexShrink: 0,
           height: '32px'
         }}>
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              try {
-                onEnterComposerMode?.();
-                const text = String(state?.text || '');
-                const provenance = {
-                  providerId: providerId || 'unknown',
-                  aiTurnId: aiTurnId,
-                  sessionId: sessionId,
-                  granularity: 'full',
-                  sourceText: text,
-                  responseType: 'batch',
-                  responseIndex: 0,
-                  timestamp: Date.now()
-                } as any;
-                setTimeout(() => {
-                  document.dispatchEvent(new CustomEvent('extract-to-canvas', { detail: { text, provenance, targetColumn: 'left' }, bubbles: true }));
-                }, 50);
-              } catch (err) { console.error('Copy to canvas failed', err); }
-            }}
-            aria-label={`Send ${provider?.name || providerId} to Canvas`}
-            style={{
-              background: '#1d4ed8',
-              border: '1px solid #334155',
-              borderRadius: '6px',
-              padding: '4px 8px',
-              color: '#ffffff',
-              fontSize: '12px',
-              cursor: 'pointer',
-            }}
-          >
-            ↘ Scratchpad
-          </button>
+
           <CopyButton text={state?.text} label={`Copy ${provider?.name || providerId}`} />
           <ProviderPill id={providerId as any} />
         </div>
@@ -622,50 +546,7 @@ const ProviderResponseBlock = ({
               {renderSideIndicator(hiddenProviders.right)}
             </div>
           )}
-          {selectionMenu && (
-            <div
-              style={{
-                position: 'fixed',
-                top: selectionMenu.y,
-                left: selectionMenu.x,
-                zIndex: 9999,
-              }}
-            >
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  try {
-                    document.dispatchEvent(
-                      new CustomEvent('extract-to-canvas', {
-                        detail: {
-                          text: selectionMenu.text,
-                          provenance: selectionMenu.prov,
-                          targetColumn: 'left',
-                        },
-                        bubbles: true,
-                      })
-                    );
-                  } finally {
-                    hideSelectionMenu();
-                    const sel = window.getSelection();
-                    if (sel) sel.removeAllRanges();
-                  }
-                }}
-                style={{
-                  background: '#1d4ed8',
-                  border: '1px solid #334155',
-                  borderRadius: '6px',
-                  padding: '4px 8px',
-                  color: '#ffffff',
-                  fontSize: '12px',
-                  cursor: 'pointer',
-                  boxShadow: '0 6px 20px rgba(0,0,0,0.3)',
-                }}
-              >
-                Extract to Canvas
-              </button>
-            </div>
-          )}
+
         </div>
       </div>
     </div>

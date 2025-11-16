@@ -6,7 +6,6 @@ import { SimpleIndexedDBAdapter } from './SimpleIndexedDBAdapter.js';
 // Global session cache (maintains backward compatibility)
 const __HTOS_SESSIONS = (self.__HTOS_SESSIONS = self.__HTOS_SESSIONS || {});
 
-import { TurnDigestService } from '../services/TurnDigestService.js';
 export class SessionManager {
   constructor() {
     this.sessions = __HTOS_SESSIONS;
@@ -16,8 +15,6 @@ export class SessionManager {
     // Persistence layer components will be injected
     this.adapter = null;
     this.isInitialized = false;
-    // Initialize lightweight digest service (non-blocking summarization)
-    this.digestService = new TurnDigestService({ digestModel: 'gemini', maxDigestTokens: 512, temperature: 0.2 });
   }
 
   /**
@@ -100,7 +97,7 @@ export class SessionManager {
     };
     await this.adapter.put('turns', userTurnRecord);
 
-    // 4) AI turn with contexts (WITHOUT digest; will be appended asynchronously)
+    // 4) AI turn with contexts
     const aiTurnId = request.canonicalAiTurnId || `ai-${now}`;
     const providerContexts = this._extractContextsFromResult(result);
     const aiTurnRecord = {
@@ -112,7 +109,6 @@ export class SessionManager {
       userTurnId,
       createdAt: now,
       updatedAt: now,
-      digest: null,
       providerContexts,
       sequence: 1,
       batchResponseCount: this.countResponses(result.batchOutputs),
@@ -138,11 +134,6 @@ export class SessionManager {
       lastTurnId: sessionRecord.lastTurnId,
       lastActivity: sessionRecord.updatedAt || now
     };
-
-    // 8) FIRE-AND-FORGET digest generation (append to turn once ready)
-    this._generateDigestAsync(aiTurnId, request, result).catch(err => {
-      console.warn('[SessionManager] Fire-and-forget digest failed (non-critical):', err);
-    });
 
     return { sessionId, userTurnId, aiTurnId };
   }
@@ -201,7 +192,7 @@ export class SessionManager {
     const newContexts = this._extractContextsFromResult(result);
     const mergedContexts = { ...(lastTurn.providerContexts || {}), ...newContexts };
 
-    // 3) AI turn (WITHOUT digest; will be appended asynchronously)
+    // 3) AI turn
     const aiTurnId = request.canonicalAiTurnId || `ai-${now}`;
     const aiTurnRecord = {
       id: aiTurnId,
@@ -212,7 +203,6 @@ export class SessionManager {
       userTurnId,
       createdAt: now,
       updatedAt: now,
-      digest: null,
       providerContexts: mergedContexts,
       sequence: nextSequence + 1,
       batchResponseCount: this.countResponses(result.batchOutputs),
@@ -248,43 +238,7 @@ export class SessionManager {
       lastActivity: session.lastActivity
     };
 
-    // 7) FIRE-AND-FORGET digest generation (append to turn once ready)
-    this._generateDigestAsync(aiTurnId, request, result).catch(err => {
-      console.warn('[SessionManager] Fire-and-forget digest failed (non-critical):', err);
-    });
-
     return { sessionId, userTurnId, aiTurnId };
-  }
-
-  /**
-   * Fire-and-forget digest generation (non-blocking)
-   * Called after turn is already persisted and returned to UI
-   * @private
-   */
-  async _generateDigestAsync(aiTurnId, request, result) {
-    if (!this.digestService) {
-      console.warn('[SessionManager] Digest service not available, skipping digest generation');
-      return;
-    }
-    try {
-      console.log(`[SessionManager] Starting background digest generation for ${aiTurnId}`);
-      const digest = await this.digestService.generateDigest(request, result);
-      if (!digest || typeof digest !== 'string' || digest.trim().length === 0) {
-        console.warn(`[SessionManager] Digest generation returned empty result for ${aiTurnId}`);
-        return;
-      }
-      const turn = await this.adapter.get('turns', aiTurnId);
-      if (!turn) {
-        console.warn(`[SessionManager] Turn ${aiTurnId} not found when appending digest`);
-        return;
-      }
-      turn.digest = digest;
-      turn.updatedAt = Date.now();
-      await this.adapter.put('turns', turn);
-      console.log(`[SessionManager] ✅ Digest appended to turn ${aiTurnId} (${digest.length} chars)`);
-    } catch (e) {
-      console.error(`[SessionManager] Background digest generation failed for ${aiTurnId}:`, e);
-    }
   }
 
   /**
@@ -591,9 +545,6 @@ export class SessionManager {
         'turns',
         'provider_responses',
         'provider_contexts',
-        'documents',
-        'canvas_blocks',
-        'ghosts',
         'metadata'
       ], 'readwrite', async (tx) => {
         const getAllByIndex = (store, indexName, key) => new Promise((resolve, reject) => {
@@ -656,51 +607,7 @@ export class SessionManager {
           });
         }
 
-        // 6) Documents associated to session (indexed; cover both sourceSessionId and sessionId)
-        const documentsStore = tx.objectStore('documents');
-        const docsBySource = await getAllByIndex(documentsStore, 'bySourceSessionId', sessionId);
-        const docsBySession = await getAllByIndex(documentsStore, 'bySessionId', sessionId);
-        const uniqueDocIds = new Set([
-          ...Array.from(docsBySource || []).map(d => d.id),
-          ...Array.from(docsBySession || []).map(d => d.id)
-        ]);
-        const deletedDocIds = [];
-        for (const docId of uniqueDocIds) {
-          await new Promise((resolve, reject) => {
-            const req = documentsStore.delete(docId);
-            req.onsuccess = () => resolve(true);
-            req.onerror = () => reject(req.error);
-          });
-          deletedDocIds.push(docId);
-        }
-
-        // 7) Canvas blocks by document only (cascade via deletedDocIds)
-        const blocksStore = tx.objectStore('canvas_blocks');
-        for (const docId of deletedDocIds) {
-          const blocksByDoc = await getAllByIndex(blocksStore, 'byDocumentId', docId);
-          for (const b of blocksByDoc) {
-            await new Promise((resolve, reject) => {
-              const req = blocksStore.delete(b.id);
-              req.onsuccess = () => resolve(true);
-              req.onerror = () => reject(req.error);
-            });
-          }
-        }
-
-        // 8) Ghosts by document only (cascade via deletedDocIds)
-        const ghostsStore = tx.objectStore('ghosts');
-        for (const docId of deletedDocIds) {
-          const ghostsByDoc = await getAllByIndex(ghostsStore, 'byDocumentId', docId);
-          for (const g of ghostsByDoc) {
-            await new Promise((resolve, reject) => {
-              const req = ghostsStore.delete(g.id);
-              req.onsuccess = () => resolve(true);
-              req.onerror = () => reject(req.error);
-            });
-          }
-        }
-
-        // 9) Metadata scoped to this session (indexed by sessionId; avoid full-store scans)
+        // 6) Metadata scoped to this session (indexed by sessionId; avoid full-store scans)
         const metaStore = tx.objectStore('metadata');
         const metasBySession = await getAllByIndex(metaStore, 'bySessionId', sessionId);
         for (const m of metasBySession) {

@@ -8,11 +8,8 @@ import ChatInputConnected from '../components/ChatInputConnected';
 import WelcomeScreen from '../components/WelcomeScreen';
 import { useScrollPersistence } from '../hooks/useScrollPersistence';
 import CompactModelTrayConnected from '../components/CompactModelTrayConnected';
-import ScratchpadDrawer from '../components/ScratchpadDrawer';
-import { DndContext } from '@dnd-kit/core';
-import { useMemo as useReactMemo } from 'react';
-import { scratchpadDragActiveAtom } from '../state/atoms';
 import { useChat } from '../hooks/useChat';
+import RefinerOverlay from '../components/RefinerOverlay';
 
 export default function ChatView() {
   const [turnIds] = useAtom(turnIdsAtom as any) as [string[], any];
@@ -54,42 +51,6 @@ export default function ChatView() {
       />
     ))
   ), [scrollerRef]);
-
-  // Handle drag end to drop text/provenance into the scratchpad canvas
-  const [, setDragActive] = useAtom(scratchpadDragActiveAtom);
-
-  const handleDragEnd = useReactMemo(() => {
-    return (event: any) => {
-      try {
-        const over = event?.over;
-        const data = event?.active?.data?.current || event?.active?.data || {};
-        const text: string = String(data.text || '');
-        const provenance = data.provenance || { source: 'drag', timestamp: Date.now() };
-        if (!over || !text) { setDragActive(false); return; }
-        // Clean implementation: only support scratchpad-specific dropzones
-        if (over.id === 'scratchpad-header-dropzone' || over.id === 'scratchpad-gather-dropzone') {
-          // Append to Gather (left) column
-          document.dispatchEvent(new CustomEvent('extract-to-canvas', { detail: { text, provenance, targetColumn: 'left' }, bubbles: true }));
-        }
-        setDragActive(false);
-      } catch (e) {
-        console.warn('[ChatView] Drag end handler failed', e);
-        setDragActive(false);
-      }
-    };
-  }, []);
-
-  const handleDragStart = useReactMemo(() => {
-    return () => {
-      try { setDragActive(true); } catch {}
-    };
-  }, []);
-
-  const handleDragCancel = useReactMemo(() => {
-    return () => {
-      try { setDragActive(false); } catch {}
-    };
-  }, []);
 
   // Jump-to-turn event listener with optional cross-session loading
   useEffect(() => {
@@ -160,38 +121,33 @@ export default function ChatView() {
   }, [turnIds, currentSessionId, selectChat]);
 
   return (
-    <DndContext onDragStart={handleDragStart as any} onDragEnd={handleDragEnd as any} onDragCancel={handleDragCancel as any}>
-      <div className="chat-view" style={{ 
-        display: 'flex', 
-        flexDirection: 'column', 
-        height: '100%', 
-        width: '100%',
-        flex: 1,
-        minHeight: 0
-      }}>
-        {showWelcome ? (
-          <WelcomeScreen />
-        ) : (
-          <Virtuoso
-            style={{ flex: 1 }}
-            data={turnIds}
-            followOutput={(isAtBottom: boolean) => (isAtBottom ? 'smooth' : false)}
-            increaseViewportBy={{ top: 800, bottom: 600 }}
-            components={{ 
-              Scroller: ScrollerComponent as unknown as React.ComponentType<any>
-            }}
-            itemContent={itemContent}
-            computeItemKey={(index, turnId) => turnId || `fallback-${index}`}
-            ref={virtuosoRef as any}
-          />
-        )}
-
-        {/* Scratchpad drawer mounted between transcript and input */}
-        <ScratchpadDrawer />
-
-        <ChatInputConnected />
-        <CompactModelTrayConnected />  
-      </div>
-    </DndContext>
+    <div className="chat-view" style={{ 
+      display: 'flex', 
+      flexDirection: 'column', 
+      height: '100%', 
+      width: '100%',
+      flex: 1,
+      minHeight: 0
+    }}>
+      <RefinerOverlay />
+      {showWelcome ? (
+        <WelcomeScreen />
+      ) : (
+        <Virtuoso
+          style={{ flex: 1 }}
+          data={turnIds}
+          followOutput={(isAtBottom: boolean) => (isAtBottom ? 'smooth' : false)}
+          increaseViewportBy={{ top: 800, bottom: 600 }}
+          components={{ 
+            Scroller: ScrollerComponent as unknown as React.ComponentType<any>
+          }}
+          itemContent={itemContent}
+          computeItemKey={(index, turnId) => turnId || `fallback-${index}`}
+          ref={virtuosoRef as any}
+        />
+      )}
+      <ChatInputConnected />
+      <CompactModelTrayConnected />  
+    </div>
   );
 }

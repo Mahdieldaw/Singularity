@@ -11,13 +11,11 @@ import {
   showSourceOutputsAtom, 
   activeClipsAtom, 
   activeAiTurnIdAtom, 
-  viewModeAtom,
   activeRecomputeStateAtom,
 } from '../state/atoms';
 import { useClipActions } from '../hooks/useClipActions';
 import { useEligibility } from '../hooks/useEligibility';
 import type { AiTurn } from '../types';
-import { ViewMode } from '../types'; 
 
 interface AiTurnBlockConnectedProps {
   aiTurn: AiTurn;
@@ -30,7 +28,6 @@ export default function AiTurnBlockConnected({ aiTurn }: AiTurnBlockConnectedPro
   const [showSourceOutputs, setShowSourceOutputs] = useAtom(showSourceOutputsAtom);
   const [activeClips] = useAtom(activeClipsAtom);
   const [activeAiTurnId] = useAtom(activeAiTurnIdAtom);
-  const setViewMode = useSetAtom(viewModeAtom);
   const { handleClipClick } = useClipActions();
   const { eligibilityMaps } = useEligibility();
   const [activeRecomputeState] = useAtom(activeRecomputeStateAtom);
@@ -49,7 +46,6 @@ export default function AiTurnBlockConnected({ aiTurn }: AiTurnBlockConnectedPro
       currentAppStep={currentAppStep}
       showSourceOutputs={showSourceOutputs}
       onToggleSourceOutputs={useCallback(() => setShowSourceOutputs(prev => !prev), [setShowSourceOutputs])}
-      onEnterComposerMode={useCallback(() => setViewMode(ViewMode.COMPOSER), [setViewMode])}
       activeSynthesisClipProviderId={turnClips.synthesis}
       activeMappingClipProviderId={turnClips.mapping}
       onClipClick={useCallback((type: 'synthesis' | 'mapping', pid: string) => {

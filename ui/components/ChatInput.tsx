@@ -1,8 +1,11 @@
-import { useState, useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { useAtom } from 'jotai';
+import { chatInputValueAtom } from '../state/atoms';
 
 interface ChatInputProps {
   onSendPrompt: (prompt: string) => void;
   onContinuation: (prompt: string) => void;
+  onRefinePrompt?: (prompt: string) => void;
   // Abort/Stop current workflow
   onAbort?: () => void;
   isLoading: boolean;
@@ -21,6 +24,7 @@ interface ChatInputProps {
 const ChatInput = ({
     onSendPrompt,
     onContinuation,
+    onRefinePrompt,
   onAbort,
   isLoading,
   isReducedMotion = false,
@@ -33,33 +37,8 @@ const ChatInput = ({
   mappingActive = false,
   onHeightChange,
 }: ChatInputProps) => {
-  const [prompt, setPrompt] = useState("");
-  const [saved, setSaved] = useState(false);
+  const [prompt, setPrompt] = useAtom(chatInputValueAtom);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
-
-  const CHAT_INPUT_STORAGE_KEY = 'htos_chatinput_prompt';
-
-  // Restore saved prompt on mount
-  useEffect(() => {
-    try {
-      const savedPrompt = localStorage.getItem(CHAT_INPUT_STORAGE_KEY);
-      if (savedPrompt) {
-        setPrompt(savedPrompt);
-      }
-    } catch {}
-  }, []);
-
-  // Persist prompt on change (clear when empty)
-  useEffect(() => {
-    try {
-      const value = prompt.trim();
-      if (value) {
-        localStorage.setItem(CHAT_INPUT_STORAGE_KEY, value);
-      } else {
-        localStorage.removeItem(CHAT_INPUT_STORAGE_KEY);
-      }
-    } catch {}
-  }, [prompt]);
 
   useEffect(() => {
     if (textareaRef.current) {
@@ -85,9 +64,6 @@ const ChatInput = ({
       onSendPrompt(trimmed);
     }
     setPrompt("");
-    try { localStorage.removeItem(CHAT_INPUT_STORAGE_KEY); } catch {}
-    setSaved(true);
-    setTimeout(() => setSaved(false), 600);
   };
   
   const buttonText = isContinuationMode ? 'Continue' : 'Send';
@@ -171,6 +147,29 @@ const ChatInput = ({
           <span style={{ color: '#94a3b8' }}>System</span>
           <span>• {activeProviderCount}</span>
         </div>
+
+        {/* Refine Button */}
+        {onRefinePrompt && (
+          <button
+            type="button"
+            onClick={() => onRefinePrompt(prompt)}
+            disabled={isDisabled}
+            className="action-button"
+            style={{
+              padding: '0px 14px', height: '38px',
+              background: 'rgba(255, 255, 255, 0.1)', border: '1px solid rgba(255, 255, 255, 0.2)',
+              borderRadius: '16px', color: '#e2e8f0', fontWeight: 600, cursor: 'pointer',
+              transition: isReducedMotion ? undefined : 'all 0.2s ease', display: 'flex', alignItems: 'center', gap: '8px',
+              minWidth: '90px', justifyContent: 'center',
+              opacity: isDisabled ? 0.5 : 1
+            }}
+          >
+            <span className="magic-icon" style={{ fontSize: '16px' }}>
+              🪄
+            </span>
+            <span>Refine</span>
+          </button>
+        )}
 
         {/* Send Button */}
         <button

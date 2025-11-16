@@ -50,29 +50,7 @@ interface UserTurnBlockProps {
 }
 
 const UserTurnBlock = ({ userTurn, isExpanded, onToggle }: UserTurnBlockProps) => {
-  const [selectionMenu, setSelectionMenu] = useState<{ x: number; y: number; text: string; prov: any } | null>(null);
-  const hideSelectionMenu = useCallback(() => setSelectionMenu(null), []);
-  const showSelectionMenu = useCallback((e: React.MouseEvent) => {
-    const sel = window.getSelection();
-    if (!sel || sel.isCollapsed) return;
-    const selected = sel.toString().trim();
-    if (!selected) return;
-    const range = sel.getRangeAt(0);
-    const rect = range.getBoundingClientRect();
-    setSelectionMenu({
-      x: rect.left + window.scrollX,
-      y: rect.top + window.scrollY - 36,
-      text: selected,
-      prov: {
-        source: "user",
-        sessionId: userTurn.sessionId,
-        userTurnId: userTurn.id,
-        timestamp: Date.now(),
-        granularity: "fragment",
-        sourceText: String(userTurn.text || ""),
-      } as any,
-    });
-  }, [userTurn.id, userTurn.sessionId]);
+
   const date = new Date(userTurn.createdAt);
   const readableTimestamp = date.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
   const isoTimestamp = date.toISOString();
@@ -152,43 +130,7 @@ const UserTurnBlock = ({ userTurn, isExpanded, onToggle }: UserTurnBlockProps) =
                   Session: {userTurn.sessionId.slice(-6)}
                 </span>
               )}
-              {/** Inline action bar slightly to the right of the session id */}
-              {(() => {
-                const provenance = {
-                  source: 'user',
-                  sessionId: userTurn.sessionId,
-                  userTurnId: userTurn.id,
-                  timestamp: Date.now(),
-                  granularity: 'full',
-                } as any;
-                return (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginLeft: '8px' }}>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        try {
-                          document.dispatchEvent(new CustomEvent('extract-to-canvas', { detail: { text: userTurn.text || '', provenance, targetColumn: 'left' }, bubbles: true }));
-                        } catch (err) {
-                          console.error('Add to scratchpad failed', err);
-                        }
-                      }}
-                      aria-label="Send user prompt to Scratchpad"
-                      style={{
-                        background: '#1d4ed8',
-                        border: '1px solid #334155',
-                        borderRadius: '6px',
-                        padding: '4px 8px',
-                        color: '#ffffff',
-                        fontSize: '12px',
-                        cursor: 'pointer',
-                      }}
-                    >
-                      ↘ Scratchpad
-                    </button>
-                    <CopyButton text={userTurn.text} label="Copy user prompt" />
-                  </div>
-                );
-              })()}
+
             </div>
             
           </>
@@ -212,80 +154,8 @@ const UserTurnBlock = ({ userTurn, isExpanded, onToggle }: UserTurnBlockProps) =
               {userTurn.text}
             </div>
         )}
-        {/** Bottom-left action bar in collapsed state */}
-        {!isExpanded && (() => {
-          const provenance = {
-            source: 'user',
-            sessionId: userTurn.sessionId,
-            userTurnId: userTurn.id,
-            timestamp: Date.now(),
-            granularity: 'full',
-          } as any;
-          return (
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '6px' }}>
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  try {
-                    document.dispatchEvent(new CustomEvent('extract-to-canvas', { detail: { text: userTurn.text || '', provenance, targetColumn: 'left' }, bubbles: true }));
-                  } catch (err) {
-                    console.error('Add to scratchpad failed', err);
-                  }
-                }}
-                aria-label="Send user prompt to Scratchpad"
-                style={{
-                  background: '#1d4ed8',
-                  border: '1px solid #334155',
-                  borderRadius: '6px',
-                  padding: '4px 8px',
-                  color: '#ffffff',
-                  fontSize: '12px',
-                  cursor: 'pointer',
-                }}
-              >
-                ↘ Scratchpad
-              </button>
-              <CopyButton text={userTurn.text} label="Copy user prompt" />
-            </div>
-          );
-        })()}
-        {selectionMenu && (
-          <div style={{ position: 'fixed', top: selectionMenu.y, left: selectionMenu.x, zIndex: 9999 }}>
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                try {
-                  document.dispatchEvent(
-                    new CustomEvent('extract-to-canvas', {
-                      detail: {
-                        text: selectionMenu.text,
-                        provenance: selectionMenu.prov,
-                        targetColumn: 'left',
-                      },
-                      bubbles: true,
-                    })
-                  );
-                } finally {
-                  hideSelectionMenu();
-                  const sel = window.getSelection();
-                  if (sel) sel.removeAllRanges();
-                }
-              }}
-              style={{
-                background: '#1d4ed8',
-                border: '1px solid #334155',
-                borderRadius: '6px',
-                padding: '4px 8px',
-                color: '#ffffff',
-                fontSize: '12px',
-                cursor: 'pointer',
-                boxShadow: '0 6px 20px rgba(0,0,0,0.3)',
-              }}
-            >
-              Extract to Canvas
-            </button>
-          </div>
-        )}
+
+
       </div>
     </div>
   );

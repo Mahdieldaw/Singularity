@@ -3,10 +3,10 @@
 import { StoreConfig, MetadataRecord } from './types';
 
 export const DB_NAME = 'OpusDeusDB';
-export const DB_VERSION = 4;
-export const SCHEMA_VERSION = 4;
+export const DB_VERSION = 5;
+export const SCHEMA_VERSION = 5;
 
-// Store configurations matching the schema specification
+// Store configurations - conversation-only architecture
 export const STORE_CONFIGS: StoreConfig[] = [
   // 1. Sessions Store
   {
@@ -54,53 +54,11 @@ export const STORE_CONFIGS: StoreConfig[] = [
       { name: 'byResponseType', keyPath: 'responseType', unique: false },
       { name: 'byCompoundKey', keyPath: ['aiTurnId', 'providerId', 'responseType', 'responseIndex'], unique: true },
       { name: 'bySessionId_providerId', keyPath: ['sessionId', 'providerId'], unique: false },
-      // New: direct sessionId index to support fast session-level response queries/cascade deletes
       { name: 'bySessionId', keyPath: 'sessionId', unique: false }
     ]
   },
   
-  // 5. Documents Store
-  {
-    name: 'documents',
-    keyPath: 'id',
-    indices: [
-      { name: 'byCreatedAt', keyPath: 'createdAt', unique: false },
-      { name: 'byLastModified', keyPath: 'lastModified', unique: false },
-      { name: 'bySourceSessionId', keyPath: 'sourceSessionId', unique: false },
-      // New: allow fast lookups for documents linked by sessionId (not only sourceSessionId)
-      { name: 'bySessionId', keyPath: 'sessionId', unique: false }
-    ]
-  },
-  
-  // 6. Canvas Blocks Store
-  {
-    name: 'canvas_blocks',
-    keyPath: 'id',
-    indices: [
-      { name: 'byDocumentId', keyPath: 'documentId', unique: false },
-      { name: 'bySessionId', keyPath: 'provenance.sessionId', unique: false },
-      { name: 'byAiTurnId', keyPath: 'provenance.aiTurnId', unique: false },
-      { name: 'byProviderId', keyPath: 'provenance.providerId', unique: false },
-      { name: 'byDocumentId_order', keyPath: ['documentId', 'order'], unique: true },
-      { name: 'byUpdatedAt', keyPath: 'updatedAt', unique: false }
-    ]
-  },
-  
-  // 7. Ghosts Store
-  {
-    name: 'ghosts',
-    keyPath: 'id',
-    indices: [
-      { name: 'byDocumentId', keyPath: 'documentId', unique: false },
-      { name: 'bySessionId', keyPath: 'provenance.sessionId', unique: false },
-      { name: 'byAiTurnId', keyPath: 'provenance.aiTurnId', unique: false },
-      { name: 'byCreatedAt', keyPath: 'createdAt', unique: false },
-      // New: index ghosts by entityId for fast duplicate checks
-      { name: 'byEntityId', keyPath: 'entityId', unique: false }
-    ]
-  },
-  
-  // 8. Provider Contexts Store
+  // 5. Provider Contexts Store
   {
     name: 'provider_contexts',
     keyPath: ['sessionId', 'providerId'],
@@ -110,14 +68,12 @@ export const STORE_CONFIGS: StoreConfig[] = [
     ]
   },
   
-  // 9. Metadata Store
+  // 6. Metadata Store (generic key-value for system data)
   {
     name: 'metadata',
     keyPath: 'key',
     indices: [
-      // New: index metadata by sessionId to avoid full-store scans
       { name: 'bySessionId', keyPath: 'sessionId', unique: false },
-      // New: index metadata by entityId to support cascade deletes by document/entity
       { name: 'byEntityId', keyPath: 'entityId', unique: false }
     ]
   }
@@ -137,54 +93,39 @@ export async function openDatabase(): Promise<IDBDatabase> {
       
       console.log(`Upgrading database from version ${oldVersion} to ${DB_VERSION}`);
       
+      // Initial schema creation
       if (oldVersion < 1) {
-        // Initial schema creation
         createInitialSchema(db);
         
-        // Set initial metadata
         const metadataStore = transaction.objectStore('metadata');
-        const now = Date.now(); // Create a timestamp to use for both createdAt and updatedAt
+        const now = Date.now();
         const schemaVersionRecord: MetadataRecord = {
           id: 'schema_version_record',
           key: 'schema_version',
-          value: 1,
-          createdAt: now, // <-- ADD THIS LINE
+          value: SCHEMA_VERSION,
+          createdAt: now,
           updatedAt: now
         };
         metadataStore.add(schemaVersionRecord);
       }
       
-      // Migration to v2: bump schema_version
-      if (oldVersion < 2) {
-        const metadataStore = transaction.objectStore('metadata');
-        const now = Date.now();
-        try {
-          // Bump schema_version
-          const rec: MetadataRecord = {
-            id: 'schema_version_record',
-            key: 'schema_version',
-            value: SCHEMA_VERSION,
-            createdAt: now,
-            updatedAt: now
-          } as any;
-          metadataStore.put(rec);
-        } catch (_) {}
-      }
-
-      // Migration to v3: add bySessionId indexes to documents, metadata, and provider_responses
-      if (oldVersion < 3) {
-        const documentsStore = transaction.objectStore('documents');
-        const docIndexNames = Array.from(documentsStore.indexNames as any);
-        if (!docIndexNames.includes('bySessionId')) {
-          documentsStore.createIndex('bySessionId', 'sessionId', { unique: false });
+      // Migration to v5: Remove document-related stores only
+      if (oldVersion < 5 && oldVersion > 0) {
+        // Delete document stores (documents, canvas_blocks, ghosts)
+        const storesToDelete = ['documents', 'canvas_blocks', 'ghosts'];
+        
+        for (const storeName of storesToDelete) {
+          if (db.objectStoreNames.contains(storeName)) {
+            db.deleteObjectStore(storeName);
+            console.log(`Deleted document store: ${storeName}`);
+          }
         }
-
+        
+        // Verify/reconcile all remaining stores and indices
+        reconcileSchema(db, transaction);
+        
+        // Update schema version in metadata
         const metadataStore = transaction.objectStore('metadata');
-        const metaIndexNames = Array.from(metadataStore.indexNames as any);
-        if (!metaIndexNames.includes('bySessionId')) {
-          metadataStore.createIndex('bySessionId', 'sessionId', { unique: false });
-        }
-        // Also bump schema_version metadata value to 3
         const now = Date.now();
         const rec: MetadataRecord = {
           id: 'schema_version_record',
@@ -192,39 +133,7 @@ export async function openDatabase(): Promise<IDBDatabase> {
           value: SCHEMA_VERSION,
           createdAt: now,
           updatedAt: now
-        } as any;
-        metadataStore.put(rec);
-
-        const responsesStore = transaction.objectStore('provider_responses');
-        const respIndexNames = Array.from(responsesStore.indexNames as any);
-        if (!respIndexNames.includes('bySessionId')) {
-          responsesStore.createIndex('bySessionId', 'sessionId', { unique: false });
-        }
-      }
-
-      // Migration to v4: add byEntityId index to ghosts and metadata
-      if (oldVersion < 4) {
-        const ghostsStore = transaction.objectStore('ghosts');
-        const ghostIndexNames = Array.from(ghostsStore.indexNames as any);
-        if (!ghostIndexNames.includes('byEntityId')) {
-          ghostsStore.createIndex('byEntityId', 'entityId', { unique: false });
-        }
-
-        const metadataStore = transaction.objectStore('metadata');
-        const metaIndexNames = Array.from(metadataStore.indexNames as any);
-        if (!metaIndexNames.includes('byEntityId')) {
-          metadataStore.createIndex('byEntityId', 'entityId', { unique: false });
-        }
-
-        // Bump schema_version metadata value to 4
-        const now = Date.now();
-        const rec: MetadataRecord = {
-          id: 'schema_version_record',
-          key: 'schema_version',
-          value: SCHEMA_VERSION,
-          createdAt: now,
-          updatedAt: now
-        } as any;
+        };
         metadataStore.put(rec);
       }
     };
@@ -232,12 +141,10 @@ export async function openDatabase(): Promise<IDBDatabase> {
     request.onsuccess = () => {
       const db = request.result;
       
-      // Handle database errors
       db.onerror = (event) => {
         console.error('Database error:', (event.target as IDBRequest).error);
       };
       
-      // Handle version change (another tab upgraded the schema)
       db.onversionchange = () => {
         db.close();
         console.warn('Database schema was upgraded in another tab. Please reload.');
@@ -272,7 +179,6 @@ function createInitialSchema(db: IDBDatabase): void {
   for (const config of STORE_CONFIGS) {
     console.log(`Creating store: ${config.name}`);
     
-    // Create object store
     const storeOptions: IDBObjectStoreParameters = {
       keyPath: config.keyPath
     };
@@ -283,7 +189,6 @@ function createInitialSchema(db: IDBDatabase): void {
     
     const store = db.createObjectStore(config.name, storeOptions);
     
-    // Create indices
     for (const indexConfig of config.indices) {
       console.log(`  Creating index: ${indexConfig.name}`);
       
@@ -297,6 +202,51 @@ function createInitialSchema(db: IDBDatabase): void {
   }
   
   console.log('Initial schema creation completed');
+}
+
+/**
+ * Reconciles existing schema with expected schema
+ * Creates missing stores and indices, useful for recovery from corruption
+ */
+function reconcileSchema(db: IDBDatabase, transaction: IDBTransaction): void {
+  console.log('Reconciling database schema...');
+  
+  for (const config of STORE_CONFIGS) {
+    let store: IDBObjectStore;
+    
+    // Create store if missing
+    if (!db.objectStoreNames.contains(config.name)) {
+      console.log(`Creating missing store: ${config.name}`);
+      
+      const storeOptions: IDBObjectStoreParameters = {
+        keyPath: config.keyPath
+      };
+      
+      if (config.autoIncrement) {
+        storeOptions.autoIncrement = true;
+      }
+      
+      store = db.createObjectStore(config.name, storeOptions);
+    } else {
+      store = transaction.objectStore(config.name);
+    }
+    
+    // Verify/create indices
+    const existingIndices = new Set(Array.from(store.indexNames));
+    
+    for (const indexConfig of config.indices) {
+      if (!existingIndices.has(indexConfig.name)) {
+        console.log(`  Creating missing index: ${indexConfig.name} in ${config.name}`);
+        const indexOptions: IDBIndexParameters = {
+          unique: indexConfig.unique || false,
+          multiEntry: indexConfig.multiEntry || false
+        };
+        store.createIndex(indexConfig.name, indexConfig.keyPath, indexOptions);
+      }
+    }
+  }
+  
+  console.log('Schema reconciliation completed');
 }
 
 /**
@@ -330,7 +280,6 @@ export async function checkDatabaseHealth(): Promise<{
 }> {
   try {
     const db = await openDatabase();
-    const currentVersion = await getCurrentSchemaVersion(db);
     const issues: string[] = [];
     
     // Check if all expected stores exist
@@ -346,16 +295,16 @@ export async function checkDatabaseHealth(): Promise<{
     db.close();
     
     return {
-      isHealthy: issues.length === 0 && currentVersion === SCHEMA_VERSION,
-      currentVersion,
-      expectedVersion: SCHEMA_VERSION,
+      isHealthy: issues.length === 0 && db.version === DB_VERSION,
+      currentVersion: db.version,
+      expectedVersion: DB_VERSION,
       issues
     };
   } catch (error) {
     return {
       isHealthy: false,
       currentVersion: 0,
-      expectedVersion: SCHEMA_VERSION,
+      expectedVersion: DB_VERSION,
       issues: [`Database error: ${error instanceof Error ? error.message : 'Unknown error'}`]
     };
   }

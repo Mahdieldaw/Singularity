@@ -19,9 +19,6 @@ import { isUserTurn as isUserTurnContract, isAiTurn as isAiTurnContract } from '
 
 // Import types from persistence layer (schema types)
 import type {
-  DocumentRecord as SchemaDocumentRecord,
-  CanvasBlockRecord,
-  GhostRecord,
   SessionRecord,
   ThreadRecord,
   TurnRecord,
@@ -29,18 +26,6 @@ import type {
   AiTurnRecord,
   ProviderResponseRecord
 } from '../src/persistence/types';
-
-// Import UI typing for Tiptap editor content
-import type { JSONContent } from '@tiptap/react';
-
-// UI typing for canvas tabs
-export interface CanvasTabData {
-  id: string;
-  title: string;
-  content: JSONContent;
-  createdAt: number;
-  updatedAt: number;
-}
 
 // =============================================================================
 // RE-EXPORTED TYPES FROM SHARED CONTRACT
@@ -62,9 +47,7 @@ export type {
   TurnRecord,
   UserTurnRecord,
   AiTurnRecord,
-  ProviderResponseRecord,
-  CanvasBlockRecord,
-  GhostRecord
+  ProviderResponseRecord
 } from '../src/persistence/types';
 
 // =============================================================================
@@ -78,11 +61,7 @@ export type AppStep = 'initial' | 'awaitingSynthesis' | 'synthesis' | 'synthesis
 export type UiPhase = 'idle' | 'streaming' | 'awaiting_action';
 
 /** Defines the primary view mode of the application. */
-export enum ViewMode {
-  CHAT = 'chat',
-  COMPOSER = 'composer',
-  HISTORY = 'history'
-}
+
 
 /** Defines the properties for rendering a supported LLM provider in the UI. */
 export interface LLMProvider {
@@ -114,7 +93,6 @@ export interface UserTurn {
  */
 export interface AiTurn extends Omit<ContractAiTurn, 'type'> {
   type: 'ai';
-  composerState?: ComposerState;
   hiddenBatchOutputs?: Record<string, ProviderResponse>;
 }
 
@@ -157,110 +135,4 @@ export interface FullSessionPayload {
   lastActivity: number;
   turns: TurnMessage[];
   providerContexts: Record<string, any>;
-}
-
-// =============================================================================
-// COMPOSER MODE TYPE DEFINITIONS
-// =============================================================================
-
-export interface Provenance {
-  sessionId: string;
-  aiTurnId: string;
-  providerId: string;
-  responseType: 'batch' | 'synthesis' | 'mapping' | 'hidden';
-  responseIndex: number;
-  textRange?: [number, number];
-}
-
-export interface DocumentRecord extends Omit<SchemaDocumentRecord, 'canvasContent' | 'canvasTabs'> {
-  canvasContent: JSONContent;
-  canvasTabs?: CanvasTabData[];
-  activeTabId?: string;
-  _tempStorage?: boolean;
-}
-
-export interface ContentSourceMap {
-  [nodeId: string]: {
-    providerId: string;
-    sourceType: 'batch' | 'synthesis' | 'mapping' | 'hidden';
-    originalIndex: number;
-    granularity: 'full' | 'paragraph' | 'sentence';
-    text: string;
-    timestamp: number;
-    metadata?: Record<string, any>;
-  };
-}
-
-export interface RefinementEntry {
-  id: string;
-  timestamp: number;
-  inputContent: string;
-  refinedContent: string;
-  refinementType: 'grammar' | 'style' | 'tone' | 'structure' | 'custom';
-  model: string;
-  status: 'pending' | 'completed' | 'error';
-  userRating?: number;
-  appliedChanges: boolean;
-  error?: string;
-}
-
-export interface ExportEntry {
-  id: string;
-  timestamp: number;
-  format: 'markdown' | 'html' | 'text' | 'json';
-  content: string;
-  metadata?: Record<string, any>;
-}
-
-export interface Ghost {
-  id: string;
-  text: string;
-  preview: string;
-  provenance: Provenance;
-  order: number;
-  createdAt: number;
-  isPinned: boolean;
-}
-
-export interface ComposerState {
-  canvasContent: JSONContent;
-  granularity: 'full' | 'paragraph' | 'sentence';
-  sourceMap: ContentSourceMap;
-  isDirty: boolean;
-  createdAt: number;
-  lastModified: number;
-  lastSaved?: number;
-  refinementHistory: RefinementEntry[];
-  exportHistory: ExportEntry[];
-  ghosts: Ghost[];
-  documentId?: string;
-  content: JSONContent;
-}
-
-export interface GranularUnit {
-  id: string;
-  text: string;
-  type: 'full' | 'paragraph' | 'sentence';
-  sourceId: string;
-  providerId: string;
-  index: number;
-}
-
-export interface ComposableSource {
-  id: string;
-  type: 'batch' | 'synthesis' | 'mapping' | 'hidden';
-  providerId: string;
-  content: string;
-  status: ProviderResponseStatus;
-  metadata?: Record<string, any>;
-}
-
-export interface ComposerContextValue {
-  activeAiTurn: AiTurn | null;
-  canvasContent: JSONContent;
-  granularityLevel: 'full' | 'paragraph' | 'sentence';
-  selectedSources: ComposableSource[];
-  updateCanvas: (content: JSONContent) => void;
-  persistComposerState: () => void;
-  setGranularity: (level: 'full' | 'paragraph' | 'sentence') => void;
 }

@@ -82,20 +82,6 @@ export interface AiTurnRecord extends BaseTurnRecord {
   batchResponseCount: number;
   synthesisResponseCount: number;
   mappingResponseCount: number;
-  /**
-   * Optional compact digest capturing the essence of this AI turn.
-   * Populated by TurnDigestService after workflow completion.
-   *
-   * New format (preferred): plain string paragraph.
-   * Legacy format (still supported): structured object with summary/keyPoints.
-   */
-  digest?: string | {
-    summary: string;
-    keyPoints: string[];
-    sources?: Record<string, { type: string; length: number }>;
-    model?: string;
-    createdAt: number;
-  };
   providerContexts?: Record<string, any>;
 }
 
@@ -123,105 +109,6 @@ export interface ProviderResponseRecord {
     promptTokens: number;
     completionTokens: number;
   };
-}
-
-// 5. Documents Store
-export interface RefinementEntry {
-  id: string;
-  timestamp: number;
-  type: string;
-  description: string;
-}
-
-export interface ExportEntry {
-  id: string;
-  timestamp: number;
-  format: string;
-  destination: string;
-}
-
-export interface DocumentSnapshot {
-  id: string;
-  timestamp: number;
-  canvasContent: any[];
-  blockCount: number;
-  label?: string;
-}
-
-export interface DocumentRecord {
-  id: string;
-  title: string;
-  sourceSessionId?: string;
-  sessionId?: string;
-  canvasContent: any[];
-  canvasTabs?: any[];
-  activeTabId?: string;
-  granularity: 'full' | 'paragraph' | 'sentence';
-  isDirty: boolean;
-  createdAt: number;
-  lastModified: number;
-  version: number;
-  blockCount: number;
-  refinementHistory: RefinementEntry[];
-  exportHistory: ExportEntry[];
-  snapshots: DocumentSnapshot[];
-  updatedAt: number;
-  content?: string;
-  metadata?: Record<string, any>;
-  type?: string;
-}
-
-// 6. Canvas Blocks Store
-export interface CanvasBlockRecord {
-  id: string;
-  documentId: string;
-  order: number;
-  nodeType: string;
-  text: string;
-  slateNode: any;
-  provenance: {
-    sessionId: string;
-    aiTurnId: string;
-    providerId: string;
-    responseType: 'batch' | 'synthesis' | 'mapping' | 'hidden';
-    responseIndex: number;
-    textRange?: [number, number];
-  };
-  cachedSourceText?: string;
-  isOrphaned?: boolean;
-  createdAt: number;
-  updatedAt: number;
-  parentId?: string;
-  children?: string[];
-  content?: string;
-  metadata?: Record<string, any>;
-  type?: string;
-}
-
-// 7. Ghosts Store
-export interface GhostRecord {
-  id: string;
-  documentId: string;
-  text: string;
-  preview: string;
-  provenance: {
-    sessionId: string;
-    aiTurnId: string;
-    providerId: string;
-    responseType: 'batch' | 'synthesis' | 'mapping' | 'hidden';
-    responseIndex: number;
-    textRange?: [number, number];
-  };
-  order: number;
-  createdAt: number;
-  isPinned: boolean;
-  timestamp?: number;
-  entityId?: string;
-  entityType?: string;
-  operation?: string;
-  sessionId?: string;
-  state?: string;
-  metadata?: Record<string, any>;
 }
 
 // 8. Provider Contexts Store

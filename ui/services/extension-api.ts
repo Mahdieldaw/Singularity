@@ -7,9 +7,10 @@ import {
   DELETE_SESSION,
   DELETE_SESSIONS,
   RENAME_SESSION,
+  REFINE_PROMPT,
 } from "../../shared/messaging";
 
-import type { HistorySessionSummary, HistoryApiResponse, DocumentRecord } from "../types";
+import type { HistorySessionSummary, HistoryApiResponse } from "../types";
 import type { PrimitiveWorkflowRequest } from "../../shared/contract";
 import { PortHealthManager } from './port-health-manager';
 
@@ -201,63 +202,11 @@ class ExtensionAPI {
     });
   }
 
-  // === DOCUMENT & GHOST METHODS ===
-  async saveDocument(doc: DocumentRecord): Promise<void> {
-    await this.queryBackend<void>({
-      type: 'SAVE_DOCUMENT',
-      documentId: doc.id,
-      document: doc,
-      content: doc.canvasContent
+  refinePrompt(draftPrompt: string, context: any): Promise<{ refinedPrompt: string, explanation: string }> {
+    return this.queryBackend<{ refinedPrompt: string, explanation: string }>({
+      type: REFINE_PROMPT,
+      payload: { draftPrompt, context }
     });
-  }
-
-  async loadDocument(id: string): Promise<DocumentRecord | null> {
-    const response = await this.queryBackend<any>({
-      type: 'LOAD_DOCUMENT',
-      documentId: id,
-      reconstructContent: true
-    });
-    if (!response) return null;
-    return response.document ?? response;
-  }
-
-  async listDocuments(): Promise<Array<{ id: string; title: string; lastModified: number }>> {
-    const response = await this.queryBackend<{ documents?: any[] }>({
-      type: 'LIST_DOCUMENTS'
-    }).catch((e) => {
-      console.error('[API] listDocuments failed:', e);
-      return { documents: [] };
-    });
-    return response?.documents || [];
-  }
-
-  async deleteDocument(id: string): Promise<void> {
-    await this.queryBackend<void>({ type: 'DELETE_DOCUMENT', documentId: id });
-  }
-
-  async createGhost(documentId: string, text: string, provenance: any): Promise<any> {
-    const response = await this.queryBackend<{ ghost?: any }>({
-      type: 'CREATE_GHOST',
-      documentId,
-      text,
-      provenance
-    });
-    return response?.ghost;
-  }
-
-  async getDocumentGhosts(documentId: string): Promise<any[]> {
-    const response = await this.queryBackend<{ ghosts?: any[] }>({
-      type: 'GET_DOCUMENT_GHOSTS',
-      documentId
-    }).catch((e) => {
-      console.error('[API] getDocumentGhosts failed:', e);
-      return { ghosts: [] };
-    });
-    return response?.ghosts || [];
-  }
-
-  async deleteGhost(ghostId: string): Promise<void> {
-    await this.queryBackend<void>({ type: 'DELETE_GHOST', ghostId });
   }
 
   // === DEPRECATED & NO-OP HELPERS ===

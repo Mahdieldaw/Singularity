@@ -11,11 +11,7 @@ import type {
   UiPhase,
   AppStep,
   HistorySessionSummary,
-  ComposerState,
-  DocumentRecord,
-  CanvasTabData
 } from '../types';
-import { ViewMode } from '../types';
 
 // =============================================================================
 // ATOMIC STATE PRIMITIVES (Map + ID index)
@@ -87,7 +83,6 @@ export const isContinuationModeAtom = atom(
 // -----------------------------
 // UI visibility
 // -----------------------------
-export const viewModeAtom = atom<ViewMode>(ViewMode.CHAT);
 export const isHistoryPanelOpenAtom = atom<boolean>(false);
 export const isSettingsOpenAtom = atom<boolean>(false);
 export const showWelcomeAtom = atom((get) => get(turnIdsAtom).length === 0);
@@ -114,22 +109,7 @@ export const isReducedMotionAtom = atomWithStorage<boolean>('htos_reduced_motion
 // Provider Contexts
 export const providerContextsAtom = atomWithImmer<Record<string, any>>({});
 
-// -----------------------------
-// Scratchpad drawer state (persisted)
-// -----------------------------
-// Controls visibility of the bottom Scratchpad drawer
-export const scratchpadOpenAtom = atomWithStorage<boolean>('htos_scratchpad_open', false);
-// Height of the open drawer in pixels (resizable in future)
-export const scratchpadHeightAtom = atomWithStorage<number>('htos_scratchpad_height', 240);
 
-// Drag overlay: true while a drag is in progress, used to bring the collapsed scratchpad header to foreground
-export const scratchpadDragActiveAtom = atom<boolean>(false);
-
-// Three-column scratchpad data
-// Left column: gathered blocks (array of { text, provenance, timestamp })
-export const scratchpadLeftBlocksAtom = atomWithStorage<any[]>('htos_scratchpad_left_blocks', []);
-// Right column: refined editor JSON content
-export const scratchpadRightContentAtom = atomWithStorage<any>('htos_scratchpad_right_json', { type: 'doc', content: [] });
 
 // -----------------------------
 // Precise recompute targeting
@@ -158,19 +138,6 @@ export const activeClipsAtom = atom<Record<string, { synthesis?: string; mapping
 export const historySessionsAtom = atomWithImmer<HistorySessionSummary[]>([]);
 export const isHistoryLoadingAtom = atom<boolean>(false);
 // -----------------------------
-// Composer mode state
-// -----------------------------
-export const composerStateAtom = atom<ComposerState | null>(null);
-
-// New: Composer atoms used by useComposer
-export const currentDocumentAtom = atomWithImmer<DocumentRecord | null>(null);
-export const canvasTabsAtom = atomWithImmer<CanvasTabData[]>([]);
-export const activeCanvasIdAtom = atom<string | null>(null);
-export const isComposerDirtyAtom = atom<boolean>(false);
-export const documentsRefreshTickAtom = atom<number>(0);
-
-
-// -----------------------------
 // Connection & system state
 // -----------------------------
 export const connectionStatusAtom = atom<{ isConnected: boolean; isReconnecting: boolean }>({ isConnected: false, isReconnecting: true });
@@ -192,3 +159,10 @@ export const isFirstTurnAtom = atom((get) => {
   const map = get(turnsMapAtom);
   return !ids.some(id => map.get(id)?.type === 'user');
 });
+
+// -----------------------------
+// Prompt Refiner State
+// -----------------------------
+export const refinerDataAtom = atom<{ refinedPrompt: string, explanation: string } | null>(null);
+export const isRefinerOpenAtom = atom<boolean>(false);
+export const chatInputValueAtom = atomWithStorage<string>('htos_chat_input_value', '');
