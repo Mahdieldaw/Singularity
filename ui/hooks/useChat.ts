@@ -336,7 +336,7 @@ export function useChat() {
 
   const turnsMap = useAtomValue(turnsMapAtom);
 
-  const refinePrompt = useCallback(async (draftPrompt: string) => {
+  const refinePrompt = useCallback(async (draftPrompt: string, model?: string) => {
     if (!draftPrompt || !draftPrompt.trim()) return;
 
     const lastTurnId = turnIds[turnIds.length - 1];
@@ -365,13 +365,19 @@ export function useChat() {
       .map(r => `[${r.providerId}]: ${r.text}`)
       .join('\n\n');
 
-    await api.refinePrompt(draftPrompt, {
+    const result = await api.refinePrompt(draftPrompt, {
       userPrompt,
       synthesisText,
       mappingText,
       batchText,
+      model: model || null,
+      sessionId: currentSessionId || null,
     });
-  }, [turnIds, turnsMap]);
+    if (result && result.refinedPrompt) {
+      setRefinerData({ refinedPrompt: result.refinedPrompt, explanation: result.explanation || '' });
+      setIsRefinerOpen(true);
+    }
+  }, [turnIds, turnsMap, setRefinerData, setIsRefinerOpen]);
 
   const abort = useCallback(async (): Promise<void> => {
     try {

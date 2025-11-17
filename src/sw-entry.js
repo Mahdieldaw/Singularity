@@ -673,7 +673,9 @@ async function handleUnifiedMessage(message, sender, sendResponse) {
       case 'REFINE_PROMPT': {
         try {
           const draftPrompt = message.draftPrompt || message.payload?.draftPrompt || '';
-          const sessionId = message.sessionId || message.payload?.sessionId;
+          const incomingContext = message.payload?.context || {};
+          const sessionId = message.sessionId || message.payload?.sessionId || incomingContext.sessionId;
+          const desiredModel = incomingContext.model;
 
           if (!String(draftPrompt).trim()) {
             sendResponse({ success: false, error: 'Missing draftPrompt' });
@@ -682,13 +684,25 @@ async function handleUnifiedMessage(message, sender, sendResponse) {
 
           // Build full turn context for refiner
           let turnContext = null;
+          const providedContext = {
+            userPrompt: incomingContext.userPrompt || '',
+            synthesisText: incomingContext.synthesisText || '',
+            mappingText: incomingContext.mappingText || '',
+            batchText: incomingContext.batchText || ''
+          };
+
+          const hasProvided = Object.values(providedContext).some(v => String(v || '').trim().length > 0);
+
+          if (hasProvided) {
+            turnContext = providedContext;
+          }
+
           if (sessionId) {
             try {
               const session = await sm.adapter.get('sessions', sessionId);
               if (session?.lastTurnId) {
                 const lastTurn = await sm.adapter.get('turns', session.lastTurnId);
-                if (lastTurn) {
-                  // Get all responses from last turn
+                if (lastTurn?.type === 'ai') {
                   const responses = await sm.adapter.getResponsesByTurnId(lastTurn.id);
 
                   // Find user prompt from last turn
@@ -698,22 +712,30 @@ async function handleUnifiedMessage(message, sender, sendResponse) {
                   // Find synthesis and mapping responses
                   const synthesisResponse = Array.isArray(responses) ? responses.find(r => r.responseType === 'synthesis') : null;
                   const mappingResponse = Array.isArray(responses) ? responses.find(r => r.responseType === 'mapping') : null;
+                  const batchResponses = Array.isArray(responses) ? responses.filter(r => r.responseType === 'batch') : [];
+                  const batchText = batchResponses.map(r => `**${(r.providerId || 'unknown').toUpperCase()}**:\n${r.text}`).join('\n\n');
 
-                  turnContext = {
+                  const fetchedContext = {
                     userPrompt: lastUserPrompt,
                     synthesisText: synthesisResponse?.text || '',
-                    mappingText: mappingResponse?.text || ''
+                    mappingText: mappingResponse?.text || '',
+                    batchText: batchText || ''
+                  };
+
+                  turnContext = {
+                    userPrompt: (turnContext?.userPrompt && turnContext.userPrompt.trim()) ? turnContext.userPrompt : fetchedContext.userPrompt,
+                    synthesisText: (turnContext?.synthesisText && turnContext.synthesisText.trim()) ? turnContext.synthesisText : fetchedContext.synthesisText,
+                    mappingText: (turnContext?.mappingText && turnContext.mappingText.trim()) ? turnContext.mappingText : fetchedContext.mappingText,
+                    batchText: (turnContext?.batchText && turnContext.batchText.trim()) ? turnContext.batchText : fetchedContext.batchText
                   };
                 }
               }
             } catch (e) {
-              console.warn('[SW] Could not fetch last turn context:', e);
+              console.error('[SW] Refiner: Error fetching last turn context:', e);
             }
           }
 
-          if (!promptRefinerService) {
-            promptRefinerService = new PromptRefinerService({ refinerModel: 'gemini' });
-          }
+          promptRefinerService = new PromptRefinerService({ refinerModel: desiredModel });
 
           const result = await promptRefinerService.refinePrompt(draftPrompt, turnContext);
 
@@ -1008,7 +1030,7 @@ chrome.runtime.onInstalled.addListener(async (details) => {
 // ============================================================================
 // PERIODIC MAINTENANCE (started post-init)
 // ============================================================================
-let __cleanupTimer = null;
+
 
 // ============================================================================
 // LIFECYCLE HANDLERS
@@ -1103,15 +1125,6 @@ globalThis.__HTOS_SW = {
     } catch (e) {
       console.error('[SW] Resume inflight workflows failed:', e);
     }
-
-    // Start periodic cleanup only after init
-    if (!__cleanupTimer) {
-      // Remove repository-based cleanup entirely
-__cleanupTimer = setInterval(async () => {
-  console.log('[SW] Periodic cleanup disabled (repositories removed)');
-  // Manual cleanup can be triggered via dev tools if needed
-}, 60000 * 30);
-    }
   } catch (e) {
     if (e instanceof Error && e.message.includes('Initialization timed out')) {
       console.error('[SW:INIT] Timeout occurred. Current init state:', self.__HTOS_INIT_STATE);
@@ -1175,6 +1188,27 @@ async function resumeInflightWorkflows(services) {
 
       const resolved = await contextResolver.resolve(primitive);
       const workflowRequest = compiler.compile(primitive, resolved);
+
+      try {
+        const prior = rec.entityId ? (await sessionManager.adapter.getResponsesByTurnId(rec.entityId)) : [];
+        const resumeMap = {};
+        (prior || []).forEach((resp) => {
+          const pid = resp && resp.providerId ? String(resp.providerId) : '';
+          const txt = resp && typeof resp.text === 'string' ? resp.text : '';
+          const ts = resp && (resp.updatedAt || resp.createdAt) ? (resp.updatedAt || resp.createdAt) : 0;
+          if (!pid || !txt) return;
+          const prev = resumeMap[pid];
+          if (!prev || (prev._ts || 0) < ts) {
+            resumeMap[pid] = { _txt: txt, _ts: ts };
+          }
+        });
+        const normalized = {};
+        Object.entries(resumeMap).forEach(([pid, obj]) => {
+          if (obj && obj._txt) normalized[pid] = obj._txt;
+        });
+        workflowRequest.context = workflowRequest.context || {};
+        workflowRequest.context.resumeFromTextByProvider = normalized;
+      } catch (_) {}
 
       const nullPort = { postMessage: () => {} };
       const engine = new (await import('./core/workflow-engine.js')).WorkflowEngine(orchestrator, sessionManager, nullPort);

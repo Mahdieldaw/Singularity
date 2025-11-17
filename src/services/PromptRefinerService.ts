@@ -71,29 +71,61 @@ export class PromptRefinerService {
       if (contextSection) contextSection += '\n';
     }
 
-    return `You are a prompt refinement assistant. The user is about to send this prompt to 5 different AI models for parallel synthesis.
+    return `You are a prompt refinement assistant analyzing a draft prompt before it's sent to 5 AI models for parallel synthesis.
+
+Your task: Infer the user's true intent by reading between the lines. Look at what they're responding to, what they're building on, what they're pushing back against. Then refine their draft to maximize the quality of responses they'll receive.
 ${contextSection}
+
 <DRAFT_PROMPT>
 ${draftPrompt}
 </DRAFT_PROMPT>
 
-Your task: Review this draft prompt in the context of the conversation and suggest improvements for:
+Analysis Framework:
 
-1. **Clarity** - Is the ask unambiguous?
-2. **Context** - Does it reference previous insights appropriately? Is there enough information?
-3. **Precision** - Are there vague terms that could cause divergent interpretations?
-4. **Continuity** - Does it build naturally on what came before, or does it need to reference prior conclusions?
-5. **Completeness** - What might be missing given the conversation so far?
+1. **Intent Inference**
+   - What is the user *actually* trying to do, beyond what they literally said?
+   - Are they exploring, deciding, clarifying, challenging, or building?
+   - If responding to previous outputs: what resonated? what didn't? what's missing?
 
-Respond in this exact format:
+2. **Clarity Check**
+   - Is the ask unambiguous, or could models interpret it differently?
+   - Are there vague terms that need grounding?
+   - Is the scope clear (broad exploration vs. focused answer)?
+
+3. **Context Completeness**
+   - Does the prompt reference relevant insights from previous outputs?
+   - Are key constraints or requirements stated explicitly?
+   - Would models benefit from knowing what the user already understands?
+
+4. **Continuity Assessment**
+   - Does this naturally build on what came before?
+   - Should it explicitly reference previous conclusions?
+   - Is the user pivoting to something new, and does that need to be clear?
+
+5. **Strategic Framing**
+   - Is the prompt framed to elicit depth rather than surface answers?
+   - Does it invite models to surface tensions and trade-offs?
+   - Would rephrasing unlock better responses?
+
+Output Format:
 
 REFINED_PROMPT:
-[Your improved version of the prompt, or the original if no changes needed]
+[Your improved version that captures the user's true intent and maximizes response quality. If no changes needed, return the original.]
 
 EXPLANATION:
-[2-3 sentences explaining what you changed and why, or why the original is already good]
+[2-4 sentences explaining:
+- What you inferred about the user's real intent
+- What you changed and why
+- How this will improve the responses they receive
+OR if unchanged: why the original already captures their intent effectively]
 
-Keep your refined prompt concise. Don't add unnecessary elaboration—focus on removing ambiguity, adding essential context, and ensuring continuity with the previous turn.`;
+Principles:
+- Preserve the user's voice and direction
+- Add clarity without adding verbosity
+- Make implicit intent explicit only when it helps models respond better
+- Don't over-engineer—sometimes the original is already optimal
+
+Begin your analysis.`;
   }
 
   private async _callRefinerModel(prompt: string): Promise<any> {

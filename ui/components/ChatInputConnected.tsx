@@ -32,8 +32,8 @@ const ChatInputConnected = () => {
     void abort();
   }, [abort]);
 
-  const handleRefine = useCallback((prompt: string) => {
-    void refinePrompt(prompt);
+  const handleRefine = useCallback((prompt: string, model?: string) => {
+    void refinePrompt(prompt, model);
   }, [refinePrompt]);
 
   return (
