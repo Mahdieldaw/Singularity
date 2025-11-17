@@ -3,8 +3,8 @@
 import { StoreConfig, MetadataRecord } from './types';
 
 export const DB_NAME = 'OpusDeusDB';
-export const DB_VERSION = 5;
-export const SCHEMA_VERSION = 5;
+export const DB_VERSION = 6;
+export const SCHEMA_VERSION = 6;
 
 // Store configurations - conversation-only architecture
 export const STORE_CONFIGS: StoreConfig[] = [
@@ -39,7 +39,8 @@ export const STORE_CONFIGS: StoreConfig[] = [
       { name: 'byType', keyPath: 'type', unique: false },
       { name: 'bySessionId_createdAt', keyPath: ['sessionId', 'createdAt'], unique: false },
       { name: 'byThreadId_createdAt', keyPath: ['threadId', 'createdAt'], unique: false },
-      { name: 'byUserTurnId', keyPath: 'userTurnId', unique: false }
+      { name: 'byUserTurnId', keyPath: 'userTurnId', unique: false },
+      { name: 'byIsComplete', keyPath: 'isComplete', unique: false }
     ]
   },
   
@@ -135,6 +136,32 @@ export async function openDatabase(): Promise<IDBDatabase> {
           updatedAt: now
         };
         metadataStore.put(rec);
+      }
+
+      // Migration to v6: Add byIsComplete index to turns store
+      if (oldVersion < 6) {
+        try {
+          const turnsStore = transaction.objectStore('turns');
+          const existing = new Set(Array.from(turnsStore.indexNames));
+          if (!existing.has('byIsComplete')) {
+            turnsStore.createIndex('byIsComplete', 'isComplete', { unique: false });
+            console.log('Created index turns.byIsComplete during v6 migration');
+          }
+        } catch (e) {
+          console.warn('Failed to create turns.byIsComplete during v6 migration:', e);
+        }
+        try {
+          const metadataStore = transaction.objectStore('metadata');
+          const now = Date.now();
+          const rec: MetadataRecord = {
+            id: 'schema_version_record',
+            key: 'schema_version',
+            value: SCHEMA_VERSION,
+            createdAt: now,
+            updatedAt: now
+          };
+          metadataStore.put(rec);
+        } catch (_) {}
       }
     };
     

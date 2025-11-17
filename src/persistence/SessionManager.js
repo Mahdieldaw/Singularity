@@ -110,10 +110,12 @@ export class SessionManager {
       createdAt: now,
       updatedAt: now,
       providerContexts,
+      isComplete: true,
       sequence: 1,
       batchResponseCount: this.countResponses(result.batchOutputs),
       synthesisResponseCount: this.countResponses(result.synthesisOutputs),
-      mappingResponseCount: this.countResponses(result.mappingOutputs)
+      mappingResponseCount: this.countResponses(result.mappingOutputs),
+      meta: await this._attachRunIdMeta(aiTurnId)
     };
     await this.adapter.put('turns', aiTurnRecord);
 
@@ -204,10 +206,12 @@ export class SessionManager {
       createdAt: now,
       updatedAt: now,
       providerContexts: mergedContexts,
+      isComplete: true,
       sequence: nextSequence + 1,
       batchResponseCount: this.countResponses(result.batchOutputs),
       synthesisResponseCount: this.countResponses(result.synthesisOutputs),
-      mappingResponseCount: this.countResponses(result.mappingOutputs)
+      mappingResponseCount: this.countResponses(result.mappingOutputs),
+      meta: await this._attachRunIdMeta(aiTurnId)
     };
     await this.adapter.put('turns', aiTurnRecord);
 
@@ -264,11 +268,12 @@ export class SessionManager {
       createdAt: now,
       updatedAt: now,
       providerContexts: context?.providerContextsAtSourceTurn || {},
+      isComplete: true,
       sequence: -1,
       batchResponseCount: 0,
       synthesisResponseCount: stepType === 'synthesis' ? 1 : 0,
       mappingResponseCount: stepType === 'mapping' ? 1 : 0,
-      meta: { isHistoricalRerun: true, recomputeMetadata: { stepType, targetProvider } }
+      meta: { isHistoricalRerun: true, recomputeMetadata: { stepType, targetProvider }, ...(await this._attachRunIdMeta(aiTurnId)) }
     };
     await this.adapter.put('turns', aiTurnRecord);
 
@@ -425,6 +430,17 @@ export class SessionManager {
     
 
     // Migrations removed; adapter initialization completes without migration step
+  }
+
+  async _attachRunIdMeta(aiTurnId) {
+    try {
+      const metas = await this.adapter.getMetadataByEntityId(aiTurnId);
+      const inflight = (metas || []).find((m) => m && m.type === 'inflight_workflow');
+      if (inflight && inflight.runId) {
+        return { runId: inflight.runId };
+      }
+    } catch (_) {}
+    return {};
   }
 
   

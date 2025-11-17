@@ -3,6 +3,7 @@ import { UserIcon, ChevronDownIcon, ChevronUpIcon } from './Icons';
 import { useState, useCallback } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import CodeBlock from './CodeBlock';
 
 
 const CopyButton = ({ text, label, onClick }: { text: string; label: string; onClick?: () => void }) => {
@@ -97,18 +98,17 @@ const UserTurnBlock = ({ userTurn, isExpanded, onToggle }: UserTurnBlockProps) =
 
         {isExpanded ? (
           <>
-            <div
-              className="user-message prose prose-sm max-w-none dark:prose-invert"
-              onMouseUp={showSelectionMenu}
-              style={{
-                fontSize: '14px',
-                lineHeight: '1.5',
-                color: '#f1f5f9',
-                wordBreak: 'break-word',
+          <div
+            className="user-message prose prose-sm max-w-none dark:prose-invert"
+            style={{
+              fontSize: '14px',
+              lineHeight: '1.5',
+              color: '#f1f5f9',
+              wordBreak: 'break-word',
                 marginBottom: '8px',
               }}
             >
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>
+              <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ code: CodeBlock }}>
                 {String(userTurn.text || "")}
               </ReactMarkdown>
             </div>
@@ -130,7 +130,12 @@ const UserTurnBlock = ({ userTurn, isExpanded, onToggle }: UserTurnBlockProps) =
                   Session: {userTurn.sessionId.slice(-6)}
                 </span>
               )}
-
+</div>
+            <div style={{ marginTop: 'auto', display: 'flex', justifyContent: 'flex-end' }}>
+              <CopyButton 
+                text={userTurn.text} 
+                label="Copy user prompt" 
+              />
             </div>
             
           </>
@@ -155,6 +160,14 @@ const UserTurnBlock = ({ userTurn, isExpanded, onToggle }: UserTurnBlockProps) =
             </div>
         )}
 
+        {!isExpanded && (
+          <div style={{ marginTop: 'auto', display: 'flex', justifyContent: 'flex-end' }}>
+            <CopyButton 
+              text={String(userTurn.text || '')} 
+              label="Copy user prompt" 
+            />
+          </div>
+        )}
 
       </div>
     </div>

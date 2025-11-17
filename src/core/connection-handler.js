@@ -228,6 +228,24 @@ console.log('[ConnectionHandler] Passing primitive directly to compiler');
             aiTurnId
           });
         } catch (_) {}
+
+        try {
+          const key = `inflight:${workflowRequest.context.sessionId}:${aiTurnId}`;
+          const runId = crypto.randomUUID();
+          await this.services.sessionManager.adapter.put('metadata', {
+            key,
+            sessionId: workflowRequest.context.sessionId,
+            entityId: aiTurnId,
+            type: 'inflight_workflow',
+            requestType: executeRequest.type,
+            userMessage: executeRequest.userMessage,
+            providers: executeRequest.providers || [],
+            providerMeta: executeRequest.providerMeta || {},
+            runId,
+            createdAt: Date.now(),
+            updatedAt: Date.now()
+          });
+        } catch (_) {}
       }
 
       // NOTE: TURN_CREATED now emits from WorkflowEngine after persistence
@@ -238,6 +256,11 @@ console.log('[ConnectionHandler] Passing primitive directly to compiler');
       // Execute
       // ========================================================================
       await this.workflowEngine.execute(workflowRequest, resolvedContext);
+
+      try {
+        const key = `inflight:${workflowRequest.context.sessionId}:${workflowRequest.context.canonicalAiTurnId}`;
+        await this.services.sessionManager.adapter.delete('metadata', key);
+      } catch (_) {}
 
     } catch (error) {
       console.error('[ConnectionHandler] Workflow failed:', error);

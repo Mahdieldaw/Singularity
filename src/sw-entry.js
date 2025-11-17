@@ -124,7 +124,7 @@ async function initializeSessionManager(persistenceLayer) {
     // ✅ CRITICAL: Ensure sessions reference is fresh
     sessionManager.sessions = __HTOS_SESSIONS;
 
-    await sessionManager.initialize({});
+    await sessionManager.initialize({ adapter: persistenceLayer?.adapter });
 
     console.log("[SW:INIT:6] ✅ Session manager initialized with persistence");
 
@@ -1084,11 +1084,11 @@ globalThis.__HTOS_SW = {
     });
     const services = await Promise.race([initializeGlobalServices(), timeoutPromise]);
     SWBootstrap.init(services);
-    console.log("[SW] 🚀 Bootstrap complete. System ready.");
-    
-    // Log health status
-    const health = await getHealthStatus();
-    console.log("[SW] Health Status:", health);
+  console.log("[SW] 🚀 Bootstrap complete. System ready.");
+  
+  // Log health status
+  const health = await getHealthStatus();
+  console.log("[SW] Health Status:", health);
 
     // Track init state
     self.__HTOS_INIT_STATE = {
@@ -1097,6 +1097,12 @@ globalThis.__HTOS_SW = {
       persistenceReady: !!services.persistenceLayer,
       providers: services?.orchestrator ? providerRegistry.listProviders() : []
     };
+
+    try {
+      await resumeInflightWorkflows(services);
+    } catch (e) {
+      console.error('[SW] Resume inflight workflows failed:', e);
+    }
 
     // Start periodic cleanup only after init
     if (!__cleanupTimer) {
@@ -1113,3 +1119,81 @@ __cleanupTimer = setInterval(async () => {
     console.error("[SW] Bootstrap failed:", e);
   }
 })();
+
+async function resumeInflightWorkflows(services) {
+  const { sessionManager, compiler, contextResolver, orchestrator } = services;
+  if (!sessionManager?.adapter?.isReady || !sessionManager.adapter.isReady()) {
+    console.warn('[SW] Adapter not ready; skipping inflight resume');
+    return;
+  }
+
+  let records = [];
+  try {
+    records = await sessionManager.adapter.getAll('metadata');
+  } catch (e) {
+    console.warn('[SW] Failed to read metadata for resume:', e);
+    return;
+  }
+
+  const inflight = (records || []).filter(r => r && r.type === 'inflight_workflow');
+  if (inflight.length === 0) return;
+
+  console.log(`[SW] Resuming ${inflight.length} inflight workflows`);
+
+  for (const rec of inflight) {
+    try {
+      const sessionId = rec.sessionId;
+      const userMessage = rec.userMessage || '';
+      const providers = Array.isArray(rec.providers) ? rec.providers : [];
+      const providerMeta = rec.providerMeta || {};
+      const runId = rec.runId;
+
+      // Idempotency: if the AI turn already persisted with same runId and isComplete, skip and delete inflight
+      try {
+        if (rec.entityId) {
+          const existingTurn = await sessionManager.adapter.get('turns', rec.entityId);
+          if (existingTurn && existingTurn.isComplete && existingTurn.meta && existingTurn.meta.runId === runId) {
+            if (rec.key) {
+              try { await sessionManager.adapter.delete('metadata', rec.key); } catch (_) {}
+            }
+            continue;
+          }
+        }
+      } catch (_) {}
+
+      const primitive = {
+        type: 'extend',
+        sessionId,
+        userMessage,
+        providers,
+        includeMapping: false,
+        includeSynthesis: providers.length > 1,
+        useThinking: false,
+        providerMeta,
+        clientUserTurnId: `user-${Date.now()}`
+      };
+
+      const resolved = await contextResolver.resolve(primitive);
+      const workflowRequest = compiler.compile(primitive, resolved);
+
+      const nullPort = { postMessage: () => {} };
+      const engine = new (await import('./core/workflow-engine.js')).WorkflowEngine(orchestrator, sessionManager, nullPort);
+      await engine.execute(workflowRequest, resolved);
+
+      try {
+        const sessionRecord = await sessionManager.adapter.get('sessions', sessionId);
+        if (sessionRecord) {
+          sessionRecord.hasUnreadUpdates = true;
+          sessionRecord.updatedAt = Date.now();
+          await sessionManager.adapter.put('sessions', sessionRecord);
+        }
+      } catch (_) {}
+
+      if (rec.key) {
+        try { await sessionManager.adapter.delete('metadata', rec.key); } catch (_) {}
+      }
+    } catch (e) {
+      console.warn('[SW] Inflight resume for record failed:', e);
+    }
+  }
+}

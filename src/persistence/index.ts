@@ -7,12 +7,10 @@ export * from "./SessionManager.js";
 
 import { openDatabase, STORE_CONFIGS, SCHEMA_VERSION } from "./database.js";
 import { SimpleIndexedDBAdapter } from "./SimpleIndexedDBAdapter.js";
-import type { SessionManager } from "./SessionManager.js";
 
 // Simplified PersistenceLayer interface
 export interface PersistenceLayer {
   adapter: SimpleIndexedDBAdapter;
-  sessionManager: SessionManager;
   close: () => Promise<void>;
 }
 
@@ -59,13 +57,8 @@ export async function initializePersistenceLayer(): Promise<PersistenceLayer> {
   const adapter = new SimpleIndexedDBAdapter();
   await adapter.init({ autoRepair: true });
 
-  // SessionManager is now the primary manager
-  const { createSessionManager } = await import('./SessionManager.js');
-  const sessionManager = createSessionManager(adapter);
-
   return {
     adapter,
-    sessionManager,
     close: async () => {
       await adapter.close();
       db.close();

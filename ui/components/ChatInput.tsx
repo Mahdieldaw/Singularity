@@ -37,6 +37,7 @@ const ChatInput = ({
   mappingActive = false,
   onHeightChange,
 }: ChatInputProps) => {
+  const CHAT_INPUT_STORAGE_KEY = 'htos_chat_input_value';
   const [prompt, setPrompt] = useAtom(chatInputValueAtom);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
@@ -188,8 +189,6 @@ const ChatInput = ({
         >
           {isLoading ? (
             <div className="loading-spinner"></div>
-          ) : saved ? (
-            '✓'
           ) : (
             <>
               <span className="magic-icon" style={{ fontSize: '16px' }}>

@@ -100,8 +100,10 @@ export function usePortMessageHandler() {
 
         // Always adopt the backend sessionId for TURN_CREATED
         if (msgSessionId) {
-          setCurrentSessionId(msgSessionId);
-          try { api.setSessionId(msgSessionId); } catch {}
+          if (!currentSessionId || currentSessionId === msgSessionId) {
+            setCurrentSessionId(msgSessionId);
+            try { api.setSessionId(msgSessionId); } catch {}
+          }
         }
 
         // Compute active providers at the time of creation
@@ -160,8 +162,10 @@ export function usePortMessageHandler() {
         
         // Adopt sessionId on finalization to ensure coherence
         if (msgSessionId) {
-          setCurrentSessionId(msgSessionId);
-          try { api.setSessionId(msgSessionId); } catch {}
+          if (!currentSessionId || currentSessionId === msgSessionId) {
+            setCurrentSessionId(msgSessionId);
+            try { api.setSessionId(msgSessionId); } catch {}
+          }
         }
 
         console.log('[Port] Received TURN_FINALIZED', { 

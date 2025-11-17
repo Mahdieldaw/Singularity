@@ -1405,9 +1405,9 @@ export class WorkflowEngine {
       previousResults
     );
 
-    if (sourceData.length === 0) {
+    if (sourceData.length < 2) {
       throw new Error(
-        "No valid sources for synthesis. All providers returned empty or failed responses."
+        `Synthesis requires at least 2 valid sources, but found ${sourceData.length}.`
       );
     }
 

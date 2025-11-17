@@ -9,6 +9,7 @@ import { useAtomValue } from 'jotai';
 import { providerContextsAtom } from '../state/atoms';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import CodeBlock from './CodeBlock';
 
 interface ProviderState {
   text: string;
@@ -370,7 +371,7 @@ const ProviderResponseBlock = ({
                   {props.children}
                 </span>
               );
-            } }}>
+            }, code: CodeBlock }}>
               {String(displayText || '')}
             </ReactMarkdown>
             {isStreaming && <span className="streaming-dots" />}

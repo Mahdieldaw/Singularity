@@ -3,6 +3,7 @@ import React from "react";
 import { AiTurn, ProviderResponse, AppStep } from "../types";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import CodeBlock from "./CodeBlock";
 import {
   useMemo,
   useState,
@@ -1123,44 +1124,43 @@ const hasSynthesis = !!(
                       onClickCapture={interceptCitationAnchorClick}
                       onMouseDownCapture={interceptCitationMouseDownCapture}
                       onPointerDownCapture={interceptCitationPointerDownCapture}
-                      onMouseUpCapture={interceptCitationMouseUpCapture}
-
-                      onAuxClickCapture={interceptCitationAuxClickCapture}
-                      onWheelCapture={(e: React.WheelEvent<HTMLDivElement>) => {
-                        const el = e.currentTarget;
-                        const dy = e.deltaY ?? 0;
-                        const canDown =
-                          el.scrollTop + el.clientHeight < el.scrollHeight;
-                        const canUp = el.scrollTop > 0;
-                        if ((dy > 0 && canDown) || (dy < 0 && canUp)) {
-                          e.stopPropagation();
-                        }
-                      }}
-                      onWheel={(e: React.WheelEvent<HTMLDivElement>) => {
-                        const el = e.currentTarget;
-                        const dy = e.deltaY ?? 0;
-                        const canDown =
-                          el.scrollTop + el.clientHeight < el.scrollHeight;
-                        const canUp = el.scrollTop > 0;
-                        if ((dy > 0 && canDown) || (dy < 0 && canUp)) {
-                          e.stopPropagation();
-                        }
-                      }}
-                      onTouchStartCapture={(
-                        e: React.TouchEvent<HTMLDivElement>
-                      ) => {
-                        e.stopPropagation();
-                      }}
-                      onTouchMove={(e: React.TouchEvent<HTMLDivElement>) => {
-                        const el = e.currentTarget;
-                        const canDown =
-                          el.scrollTop + el.clientHeight < el.scrollHeight;
-                        const canUp = el.scrollTop > 0;
-                        if (canDown || canUp) {
-                          e.stopPropagation();
-                        }
-                      }}
-                    >
+        onMouseUpCapture={interceptCitationMouseUpCapture}
+        onAuxClickCapture={interceptCitationAuxClickCapture}
+        onWheelCapture={(e: React.WheelEvent<HTMLDivElement>) => {
+          const el = e.currentTarget;
+          const dy = e.deltaY ?? 0;
+          const canDown =
+            el.scrollTop + el.clientHeight < el.scrollHeight;
+          const canUp = el.scrollTop > 0;
+          if ((dy > 0 && canDown) || (dy < 0 && canUp)) {
+            e.stopPropagation();
+          }
+        }}
+        onWheel={(e: React.WheelEvent<HTMLDivElement>) => {
+          const el = e.currentTarget;
+          const dy = e.deltaY ?? 0;
+          const canDown =
+            el.scrollTop + el.clientHeight < el.scrollHeight;
+          const canUp = el.scrollTop > 0;
+          if ((dy > 0 && canDown) || (dy < 0 && canUp)) {
+            e.stopPropagation();
+          }
+        }}
+        onTouchStartCapture={(
+          e: React.TouchEvent<HTMLDivElement>
+        ) => {
+          e.stopPropagation();
+        }}
+        onTouchMove={(e: React.TouchEvent<HTMLDivElement>) => {
+          const el = e.currentTarget;
+          const canDown =
+            el.scrollTop + el.clientHeight < el.scrollHeight;
+          const canUp = el.scrollTop > 0;
+          if (canDown || canUp) {
+            e.stopPropagation();
+          }
+        }}
+      >
                       {(() => {
                         // If synthesis was not requested for this turn, show a clear placeholder
                         if (!wasSynthRequested) {
@@ -1219,9 +1219,9 @@ const hasSynthesis = !!(
                                   {activeSynthPid} · error
                                 </div>
                                 <div className="prose prose-sm max-w-none dark:prose-invert" style={{ lineHeight: 1.7, fontSize: 14 }}>
-                                  <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ a: CitationLink }}>
-                                    {errText}
-                                  </ReactMarkdown>
+                                <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ a: CitationLink, code: CodeBlock }}>
+                                  {errText}
+                                </ReactMarkdown>
                                 </div>
                               </div>
                             );
@@ -1276,7 +1276,7 @@ const hasSynthesis = !!(
                                 className="prose prose-sm max-w-none dark:prose-invert"
                                 style={{ lineHeight: 1.7, fontSize: 16 }}
                               >
-                                <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ a: CitationLink }}>
+                                <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ a: CitationLink, code: CodeBlock }}>
                                   {String(take.text || "")}
                                 </ReactMarkdown>
                               </div>
@@ -1559,14 +1559,7 @@ const hasSynthesis = !!(
         onMouseDownCapture={interceptCitationMouseDownCapture}
         onPointerDownCapture={interceptCitationPointerDownCapture}
         onMouseUpCapture={interceptCitationMouseUpCapture}
-        onMouseUp={(e) => {
-          const text = String(displayedMappingText || "");
-          if (activeMappingPid) {
-            try {
-              showSelectionMenu(e, "mapping", activeMappingPid, text);
-            } catch {}
-          }
-        }}
+        
         onAuxClickCapture={interceptCitationAuxClickCapture}
       >
         {/* Persistently mounted tab containers to avoid unmount/mount churn */}
@@ -1630,7 +1623,7 @@ const hasSynthesis = !!(
                 >
                   <ReactMarkdown
                     remarkPlugins={[remarkGfm]}
-                    components={{ a: CitationLink }}
+                    components={{ a: CitationLink, code: CodeBlock }}
                   >
                     {transformCitations(options)}
                   </ReactMarkdown>
@@ -1698,7 +1691,7 @@ const hasSynthesis = !!(
                       className="prose prose-sm max-w-none dark:prose-invert"
                       style={{ lineHeight: 1.7, fontSize: 14 }}
                     >
-                      <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                      <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ code: CodeBlock }}>
                         {errText}
                       </ReactMarkdown>
                     </div>
@@ -1755,7 +1748,7 @@ const hasSynthesis = !!(
                     onPointerDownCapture={interceptCitationPointerDownCapture}
 
                   >
-                    <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ a: CitationLink }}>
+                    <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ a: CitationLink, code: CodeBlock }}>
                       {transformCitations(displayedMappingText)}
                     </ReactMarkdown>
                   </div>

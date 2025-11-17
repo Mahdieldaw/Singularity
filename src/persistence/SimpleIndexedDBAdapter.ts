@@ -244,6 +244,11 @@ export class SimpleIndexedDBAdapter {
     return this.getAll('sessions');
   }
 
+  async getIncompleteTurns(): Promise<SimpleRecord[]> {
+    const aiTurns = await this.getByIndex('turns', 'byType', 'ai');
+    return (aiTurns || []).filter((t) => t && t.isComplete !== true);
+  }
+
   /**
    * Execute an operation inside a single transaction spanning given stores.
    */

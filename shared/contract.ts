@@ -236,8 +236,9 @@ export interface AiTurn {
   type: "ai";
   sessionId: string | null;
   threadId: string;
-  userTurnId: string;
+  userTurnId:string;
   createdAt: number;
+  isComplete?: boolean;
   batchResponses: Record<string, ProviderResponse>;
   synthesisResponses: Record<string, ProviderResponse[]>;
   mappingResponses: Record<string, ProviderResponse[]>;
