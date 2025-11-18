@@ -153,10 +153,10 @@ Begin.`;
 // Track last seen text per provider/session for delta streaming
 const lastStreamState = new Map();
 
-function makeDelta(sessionId, providerId, fullText = "") {
+function makeDelta(sessionId, providerId, fullText = "", label = "") {
   if (!sessionId) return fullText || "";
 
-  const key = `${sessionId}:${providerId}`;
+  const key = `${sessionId}:${label || ""}:${providerId}`;
   const prev = lastStreamState.get(key) || "";
   let delta = "";
 
@@ -323,7 +323,7 @@ export class WorkflowEngine {
     isFinal = false,
   ) {
     try {
-      const delta = makeDelta(sessionId, providerId, text);
+      const delta = makeDelta(sessionId, providerId, text, label || "");
       if (delta && delta.length > 0) {
         const chunk = isFinal
           ? { text: delta, isFinal: true }
@@ -1053,6 +1053,24 @@ export class WorkflowEngine {
             chunk.text,
             "Prompt",
           );
+        },
+        onProviderComplete: (providerId, data) => {
+          try {
+            this.port.postMessage({
+              type: "WORKFLOW_STEP_UPDATE",
+              sessionId: context.sessionId,
+              stepId: step.stepId,
+              status: "completed",
+              result: {
+                providerId,
+                text: data?.text || "",
+                status: "completed",
+                meta: data?.meta || {},
+              },
+            });
+          } catch (e) {
+            // non-fatal
+          }
         },
         onAllComplete: (results, errors) => {
           // Build batch updates

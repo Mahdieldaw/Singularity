@@ -127,9 +127,9 @@ export default function CodeBlock({ inline, className, children }: Props) {
         margin: "8px 0",
       }}
     >
-      <pre style={{ margin: 0, overflowX: "auto", padding: 12 }}>
-        <code className={className}>{codeText}</code>
-      </pre>
+      <div style={{ margin: 0, overflowX: "auto", padding: 12 }}>
+        <code className={className} style={{ fontSize: 14, display: 'block' }}>{codeText}</code>
+      </div>
       <div
         style={{
           position: "absolute",

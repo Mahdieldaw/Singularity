@@ -12,6 +12,7 @@ import {
   chatInputHeightAtom,
   isFirstTurnAtom,
   isLoadingAtom,
+  refineModelAtom,
 } from "../state/atoms";
 
 const CompactModelTrayConnected = () => {
@@ -29,6 +30,7 @@ const CompactModelTrayConnected = () => {
   const [chatInputHeight] = useAtom(chatInputHeightAtom);
   const [isFirstLoad] = useAtom(isFirstTurnAtom);
   const [isLoading] = useAtom(isLoadingAtom);
+  const [refineModel, setRefineModel] = useAtom(refineModelAtom);
 
   // ✅ FIX: Proper immutable updates (no draft mutation)
   const handleToggleModel = (providerId: string) => {
@@ -85,6 +87,13 @@ const CompactModelTrayConnected = () => {
     setThinkOnChatGPT((prev) => !prev);
   };
 
+  const handleSetRefineModel = (model: string) => {
+    setRefineModel(model);
+    try {
+      localStorage.setItem('htos_refine_model', model);
+    } catch {}
+  };
+
   return (
     <CompactModelTray
       selectedModels={selectedModels}
@@ -108,6 +117,8 @@ const CompactModelTrayConnected = () => {
         } catch {}
       }}
       chatInputHeight={chatInputHeight}
+      refineModel={refineModel}
+      onSetRefineModel={handleSetRefineModel}
     />
   );
 };

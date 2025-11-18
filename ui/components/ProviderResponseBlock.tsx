@@ -9,7 +9,7 @@ import { BotIcon } from "./Icons";
 import { useState, useCallback, useMemo, useEffect } from "react";
 import { ProviderPill } from "./ProviderPill";
 import { useAtomValue } from "jotai";
-import { providerContextsAtom } from "../state/atoms";
+import { providerContextsAtom, selectedModelsAtom } from "../state/atoms";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import CodeBlock from "./CodeBlock";
@@ -77,6 +77,7 @@ const ProviderResponseBlock = ({
   sessionId,
 }: ProviderResponseBlockProps) => {
   const providerContexts = useAtomValue(providerContextsAtom);
+  const selectedModels = useAtomValue(selectedModelsAtom);
 
   // Normalize responses
   const effectiveProviderResponses = providerResponses
@@ -87,6 +88,26 @@ const ProviderResponseBlock = ({
           { text: s.text, status: s.status, meta: undefined },
         ]),
       );
+
+  const selectedProviderIds = useMemo(
+    () =>
+      Object.keys(selectedModels || {}).filter(
+        (id) => (selectedModels as any)[id] && id !== "system",
+      ),
+    [selectedModels],
+  );
+
+  selectedProviderIds.forEach((id) => {
+    if (!effectiveProviderResponses[id]) {
+      (effectiveProviderResponses as any)[id] = {
+        text: "",
+        status: (PRIMARY_STREAMING_PROVIDER_IDS as any).includes(id)
+          ? "streaming"
+          : "pending",
+        meta: undefined,
+      } as any;
+    }
+  });
 
   const effectiveProviderStates = Object.entries(
     effectiveProviderResponses,
@@ -102,10 +123,9 @@ const ProviderResponseBlock = ({
   const allProviderIds = useMemo(
     () =>
       LLM_PROVIDERS_CONFIG.map((p) => p.id).filter(
-        (id) =>
-          Object.keys(effectiveProviderStates).includes(id) && id !== "system",
+        (id) => id !== "system" && Object.prototype.hasOwnProperty.call(effectiveProviderResponses, id),
       ),
-    [effectiveProviderStates],
+    [effectiveProviderResponses],
   );
 
   // Visible slots state (shows 3 providers at a time), favor streaming providers (ChatGPT, Claude, Qwen)

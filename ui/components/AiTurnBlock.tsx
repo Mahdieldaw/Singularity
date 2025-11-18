@@ -262,8 +262,10 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
     (
       explicit: string | undefined,
       map: Record<string, ProviderResponse[]>,
+      preferred?: string | null,
     ): string | undefined => {
       if (explicit) return explicit;
+      if (preferred && map[preferred]) return preferred;
       for (const pid of providerIds) {
         const arr = map[pid];
         if (arr && arr.length > 0) return pid;
@@ -273,13 +275,17 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
     [providerIds],
   );
 
+  const configuredSynth = (aiTurn.meta as any)?.synthesizer || null;
+  const configuredMapper = (aiTurn.meta as any)?.mapper || null;
   const activeSynthPid = computeActiveProvider(
     activeSynthesisClipProviderId,
     synthesisResponses,
+    configuredSynth,
   );
   const activeMappingPid = computeActiveProvider(
     activeMappingClipProviderId,
     mappingResponses,
+    configuredMapper,
   );
 
   const isSynthesisTarget = !!(

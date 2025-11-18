@@ -103,6 +103,8 @@ export function createOptimisticAiTurn(
     meta: {
       isOptimistic: true,
       ...(requestedFeatures ? { requestedFeatures } : {}),
+      ...(synthesisProvider ? { synthesizer: synthesisProvider } : {}),
+      ...(mappingProvider ? { mapper: mappingProvider } : {}),
     },
   };
 }

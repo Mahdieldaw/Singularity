@@ -3,6 +3,7 @@ import { useAtom } from "jotai";
 import { useChat } from "../hooks/useChat";
 import {
   isLoadingAtom,
+  isRefiningAtom,
   isContinuationModeAtom,
   activeProviderCountAtom,
   isVisibleModeAtom,
@@ -13,6 +14,7 @@ import ChatInput from "./ChatInput";
 
 const ChatInputConnected = () => {
   const [isLoading] = useAtom(isLoadingAtom as any) as [boolean, any];
+  const [isRefining] = useAtom(isRefiningAtom as any) as [boolean, any];
   const [isContinuationMode] = useAtom(isContinuationModeAtom as any) as [
     boolean,
     any,
@@ -48,8 +50,8 @@ const ChatInputConnected = () => {
   }, [abort]);
 
   const handleRefine = useCallback(
-    (prompt: string, model?: string) => {
-      void refinePrompt(prompt, model);
+    (prompt: string) => {
+      void refinePrompt(prompt);
     },
     [refinePrompt],
   );
@@ -61,6 +63,7 @@ const ChatInputConnected = () => {
       onRefinePrompt={handleRefine}
       onAbort={handleAbort}
       isLoading={isLoading}
+      isRefining={isRefining}
       isReducedMotion={isReducedMotion}
       activeProviderCount={activeProviderCount}
       isVisibleMode={isVisibleMode}

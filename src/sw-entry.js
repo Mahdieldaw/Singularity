@@ -218,6 +218,7 @@ class FaultTolerantOrchestrator {
       sessionId = `req-${Date.now()}`,
       onPartial = () => {},
       onAllComplete = () => {},
+      onProviderComplete = () => {},
       useThinking = false,
       providerContexts = {},
       providerMeta = {},
@@ -335,6 +336,10 @@ class FaultTolerantOrchestrator {
             console.log(
               `[Fanout] PROVIDER_COMPLETE provider=${providerId} ok=${ok} latencyMs=${latency} textLen=${len}`,
             );
+          } catch (_) {}
+
+          try {
+            onProviderComplete(providerId, result);
           } catch (_) {}
 
           return { providerId, status: "fulfilled", value: result };
