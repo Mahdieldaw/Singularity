@@ -3,6 +3,7 @@
  * - Implements ProviderAdapter interface for Qwen
  */
 import { classifyProviderError } from "../core/request-lifecycle-manager.js";
+import { rateLimiter } from "../core/RateLimiter.js";
 
 // Provider-specific adapter debug flag (off by default)
 const QWEN_ADAPTER_DEBUG = false;
@@ -159,6 +160,7 @@ export class QwenAdapter {
     signal = undefined,
   ) {
     try {
+      await rateLimiter.acquire(this.id);
       const meta = providerContext?.meta || providerContext || {};
       const hasContinuation = Boolean(meta.sessionId || meta.parentMsgId);
       pad(

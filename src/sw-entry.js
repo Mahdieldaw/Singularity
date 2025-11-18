@@ -229,7 +229,6 @@ class FaultTolerantOrchestrator {
       sessionId = `req-${Date.now()}`,
       onPartial = () => {},
       onAllComplete = () => {},
-      onProviderComplete = () => {},
       useThinking = false,
       providerContexts = {},
       providerMeta = {},
@@ -339,7 +338,7 @@ class FaultTolerantOrchestrator {
               onChunkWrapped,
               abortController.signal,
             );
-          });
+          }, providerId);
 
           if (!result.text && aggregatedText) {
             result.text = aggregatedText;
@@ -353,9 +352,7 @@ class FaultTolerantOrchestrator {
             );
           } catch (_) {}
 
-          try {
-            onProviderComplete(providerId, result);
-          } catch (_) {}
+          
 
           return { providerId, status: "fulfilled", value: result };
         } catch (error) {
@@ -416,9 +413,16 @@ class FaultTolerantOrchestrator {
 async function initializeGlobalInfrastructure_NonDNR() {
   console.log("[SW] Initializing global infrastructure...");
   try {
-    CSPController.init();
-    await UserAgentController.init();
-    await OffscreenController.init();
+    await NetRulesManager.init();
+    try {
+      await CSPController.init();
+    } catch (_) {}
+    try {
+      await UserAgentController.init();
+    } catch (_) {}
+    try {
+      await OffscreenController.init();
+    } catch (_) {}
     await BusController.init();
     self.bus = BusController;
     console.log("[SW] Global infrastructure initialization complete.");
@@ -1333,53 +1337,7 @@ globalThis.__HTOS_VALIDATE_SINGLETONS = validateSingletons;
 // ============================================================================
 // MAIN INITIALIZATION SEQUENCE
 // ============================================================================
-(async () => {
-  try {
-    try {
-      await NetRulesManager.init();
-      await ArkoseController.init();
-    } catch (_) {}
-    const INIT_TIMEOUT_MS = 30000; // 30s timeout for global initialization
-    const timeoutPromise = new Promise((_, reject) => {
-      setTimeout(
-        () => reject(new Error("[SW:INIT] Initialization timed out after 30s")),
-        INIT_TIMEOUT_MS,
-      );
-    });
-    const services = await Promise.race([
-      initializeGlobalServices(),
-      timeoutPromise,
-    ]);
-    SWBootstrap.init(services);
-    console.log("[SW] 🚀 Bootstrap complete. System ready.");
 
-    // Log health status
-    const health = await getHealthStatus();
-    console.log("[SW] Health Status:", health);
-
-    // Track init state
-    self.__HTOS_INIT_STATE = {
-      initializedAt: Date.now(),
-      persistenceEnabled: HTOS_PERSISTENCE_ENABLED,
-      persistenceReady: !!services.persistenceLayer,
-      providers: services?.orchestrator ? providerRegistry.listProviders() : [],
-    };
-
-    try {
-      await resumeInflightWorkflows(services);
-    } catch (e) {
-      console.error("[SW] Resume inflight workflows failed:", e);
-    }
-  } catch (e) {
-    if (e instanceof Error && e.message.includes("Initialization timed out")) {
-      console.error(
-        "[SW:INIT] Timeout occurred. Current init state:",
-        self.__HTOS_INIT_STATE,
-      );
-    }
-    console.error("[SW] Bootstrap failed:", e);
-  }
-})();
 
 async function resumeInflightWorkflows(services) {
   const { sessionManager, compiler, contextResolver, orchestrator } = services;

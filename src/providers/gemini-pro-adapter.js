@@ -3,6 +3,7 @@
  * - Separate provider ID 'gemini-pro' that defaults to Gemini 2.5 Pro model
  */
 import { classifyProviderError } from "../core/request-lifecycle-manager.js";
+import { rateLimiter } from "../core/RateLimiter.js";
 
 // Provider-specific adapter debug flag (off by default)
 const GEMINI_PRO_ADAPTER_DEBUG = false;
@@ -207,6 +208,7 @@ export class GeminiProAdapter {
     signal = undefined,
   ) {
     try {
+      await rateLimiter.acquire(this.id);
       const meta = providerContext?.meta || providerContext || {};
       const hasCursor = Boolean(meta.cursor || providerContext?.cursor);
       pad(

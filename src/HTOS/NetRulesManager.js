@@ -135,6 +135,10 @@ const NetRulesManager = {
    * @returns {String|Array} - Rule key(s) for unregistration
    */
   async register(e) {
+    if (!this._rules) {
+      this._lastRuleId = 1;
+      this._rules = [];
+    }
     const isArray = Array.isArray(e);
 
     // Normalize to array and assign IDs
@@ -308,11 +312,9 @@ const NetRulesManager = {
 // =============================================================================
 
 const CSPController = {
-  init() {
+  async init() {
     this._ruleIds = [];
-    this._updateNetRules();
-    // Note: In a real implementation, this would react to settings changes
-    // this._updateNetRulesWhenCspSettingsChange();
+    await this._updateNetRules();
   },
 
   /**
@@ -337,9 +339,7 @@ const CSPController = {
     // Example CSP rule - in real implementation this would be configurable
     const cspRules = [
       {
-        condition: {
-          urlFilter: null, // Apply to all URLs
-        },
+        condition: {},
         action: removeCspHeaderAction,
       },
     ];

@@ -1,0 +1,1489 @@
+// ============================================================================
+// UNIFIED SERVICE WORKER ENTRY POINT
+// Combines persistence layer, provider management, and message routing
+// ============================================================================
+// === bg: idempotent listener registration ===
+
+// Core Infrastructure Imports
+
+// ...rest of your service worker logic
+
+import {
+NetRulesManager,
+CSPController,
+UserAgentController,
+ArkoseController,
+BusController,
+LifecycleManager,
+HTOSRequestLifecycleManager,
+utils,
+} from "./core/vendor-exports.js";
+import { WorkflowCompiler } from "./core/workflow-compiler.js";
+import { ContextResolver } from "./core/context-resolver.js";
+import { SWBootstrap } from "./HTOS/ServiceWorkerBootstrap.js";
+import { ClaudeAdapter } from "./providers/claude-adapter.js";
+import { GeminiAdapter } from "./providers/gemini-adapter.js";
+import { GeminiProAdapter } from "./providers/gemini-pro-adapter.js";
+import { ChatGPTAdapter } from "./providers/chatgpt-adapter.js";
+import { QwenAdapter } from "./providers/qwen-adapter.js";
+import { ClaudeProviderController } from "./providers/claude.js";
+import { GeminiProviderController } from "./providers/gemini.js";
+import { ChatGPTProviderController } from "./providers/chatgpt.js";
+import { QwenProviderController } from "./providers/qwen.js";
+import { DNRUtils } from "./core/dnr-utils.js";
+import { ConnectionHandler } from "./core/connection-handler.js";
+
+// Persistence Layer Imports
+import { SessionManager } from "./persistence/SessionManager.js";
+import { initializePersistenceLayer } from "./persistence/index.js";
+import { errorHandler } from "./utils/ErrorHandler.js";
+import { persistenceMonitor } from "./debug/PersistenceMonitor.js";
+// Prompt refinement service
+import { PromptRefinerService } from "./services/PromptRefinerService.ts";
+
+// ============================================================================
+// FEATURE FLAGS (Source of Truth)
+// ============================================================================
+// ✅ CHANGED: Enable persistence by default for production use
+globalThis.HTOS_PERSISTENCE_ENABLED = true;
+
+const HTOS_PERSISTENCE_ENABLED = globalThis.HTOS_PERSISTENCE_ENABLED;
+
+// ============================================================================
+// GLOBAL STATE MANAGEMENT
+// ============================================================================
+let sessionManager = null;
+let persistenceLayer = null;
+const __HTOS_SESSIONS = (self.__HTOS_SESSIONS = self.__HTOS_SESSIONS || {});
+let promptRefinerService = null;
+
+// Ensure fetch is correctly bound
+try {
+if (typeof fetch === "function" && typeof globalThis !== "undefined") {
+globalThis.fetch = fetch.bind(globalThis);
+}
+} catch (_) {}
+
+// Initialize BusController globally
+self.BusController = BusController;
+
+// ============================================================================
+// PERSISTENCE LAYER INITIALIZATION
+// ============================================================================
+async function initializePersistence() {
+const operationId = persistenceMonitor.startOperation(
+"INITIALIZE_PERSISTENCE",
+{
+useAdapter: true,
+},
+);
+
+try {
+persistenceLayer = await initializePersistenceLayer();
+// Expose globally for UI bridge and debugging
+self.__HTOS_PERSISTENCE_LAYER = persistenceLayer;
+
+persistenceMonitor.recordConnection("HTOSPersistenceDB", 1, [
+"sessions",
+"threads",
+"turns",
+"provider_responses",
+"provider_contexts",
+"metadata",
+]);
+
+console.log("[SW] ✅ Persistence layer initialized");
+persistenceMonitor.endOperation(operationId, { success: true });
+return persistenceLayer;
+} catch (error) {
+persistenceMonitor.endOperation(operationId, null, error);
+const handledError = await errorHandler.handleError(error, {
+operation: "initializePersistence",
+context: { useAdapter: true },
+});
+console.error(
+"[SW] ❌ Failed to initialize persistence layer:",
+handledError,
+);
+// Do NOT fallback silently; propagate error to fail initialization
+throw handledError;
+}
+}
+
+// ============================================================================
+// SESSION MANAGER INITIALIZATION
+// ============================================================================
+async function initializeSessionManager(persistenceLayer) {
+// ✅ ALWAYS reinitialize if adapter is not ready (indicates stale instance)
+if (sessionManager && sessionManager.adapter?.isReady()) {
+console.log("[SW] Reusing existing SessionManager instance");
+return sessionManager;
+}
+
+// If we have a stale instance, clear it
+if (sessionManager) {
+console.warn("[SW] Clearing stale SessionManager instance");
+sessionManager = null;
+}
+
+try {
+console.log("[SW:INIT:5] Initializing session manager...");
+sessionManager = new SessionManager();
+
+// ✅ CRITICAL: Ensure sessions reference is fresh
+sessionManager.sessions = __HTOS_SESSIONS;
+
+await sessionManager.initialize({ adapter: persistenceLayer?.adapter });
+
+console.log("[SW:INIT:6] ✅ Session manager initialized with persistence");
+
+return sessionManager;
+} catch (error) {
+console.error("[SW] ❌ Failed to initialize session manager:", error);
+throw error;
+}
+}
+
+// ============================================================================
+// PERSISTENT OFFSCREEN DOCUMENT CONTROLLER
+// ============================================================================
+const OffscreenController = {
+_initialized: false,
+async init() {
+if (this._initialized) return;
+console.log(
+"[SW] Initializing persistent offscreen document controller...",
+);
+await this._createOffscreenPageIfMissing();
+if (!self.BusController) {
+self.BusController = BusController;
+await self.BusController.init();
+}
+this._initialized = true;
+},
+async _createOffscreenPageIfMissing() {
+if (!(await chrome.offscreen.hasDocument())) {
+await chrome.offscreen.createDocument({
+url: "offscreen.html",
+reasons: [
+chrome.offscreen.Reason.BLOBS,
+chrome.offscreen.Reason.DOM_PARSER,
+],
+justification:
+"HTOS needs persistent offscreen DOM for complex operations and a stable message bus.",
+});
+}
+},
+};
+
+// ============================================================================
+// PROVIDER ADAPTER REGISTRY
+// ============================================================================
+class ProviderRegistry {
+constructor() {
+this.adapters = new Map();
+this.controllers = new Map();
+}
+register(providerId, controller, adapter) {
+this.controllers.set(providerId, controller);
+this.adapters.set(providerId, adapter);
+}
+getAdapter(providerId) {
+return this.adapters.get(String(providerId).toLowerCase());
+}
+getController(providerId) {
+return this.controllers.get(String(providerId).toLowerCase());
+}
+listProviders() {
+return Array.from(this.adapters.keys());
+}
+isAvailable(providerId) {
+return this.adapters.has(String(providerId).toLowerCase());
+}
+}
+const providerRegistry = new ProviderRegistry();
+self.providerRegistry = providerRegistry;
+
+// ============================================================================
+// FAULT-TOLERANT ORCHESTRATOR WRAPPER
+// ============================================================================
+class FaultTolerantOrchestrator {
+constructor() {
+this.activeRequests = new Map();
+this.lifecycleManager = self.lifecycleManager;
+}
+
+async executeParallelFanout(prompt, providers, options = {}) {
+const {
+sessionId = `req-${Date.now()}`,
+onPartial = () => {},
+onAllComplete = () => {},
+useThinking = false,
+providerContexts = {},
+providerMeta = {},
+} = options;
+
+if (this.lifecycleManager) this.lifecycleManager.keepalive(true);
+
+const results = new Map();
+const errors = new Map();
+const abortControllers = new Map();
+this.activeRequests.set(sessionId, { abortControllers });
+
+const providerPromises = providers.map((providerId) => {
+// This IIFE returns a promise that *always resolves*
+return (async () => {
+const abortController = new AbortController();
+abortControllers.set(providerId, abortController);
+
+const adapter = providerRegistry.getAdapter(providerId);
+if (!adapter) {
+return {
+providerId,
+status: "rejected",
+reason: new Error(`Provider ${providerId} not available`),
+};
+}
+
+let aggregatedText = ""; // Buffer for this provider's partials
+const startTime = Date.now();
+let firstPartialAt = null;
+
+// Uniform dispatch-start log for cross-provider timing comparison
+try {
+const metaKeys = Object.keys(
+providerContexts[providerId]?.meta ||
+providerContexts[providerId] ||
+{},
+);
+const modelOverride =
+(providerMeta?.[providerId] || {}).model ||
+providerContexts[providerId]?.model ||
+providerContexts[providerId]?.meta?.model ||
+"auto";
+console.log(
+`[Fanout] DISPATCH_STARTED provider=${providerId} sessionId=${sessionId} useThinking=${useThinking ? "true" : "false"} model=${modelOverride} contextKeys=${metaKeys.join("|")}`,
+);
+} catch (_) {}
+
+// If we have a provider-specific context, attempt a continuation.
+// Each adapter's sendContinuation will gracefully fall back to sendPrompt
+// when its required identifiers (e.g., conversationId/chatId/cursor) are missing.
+
+const request = {
+originalPrompt: prompt,
+sessionId,
+meta: {
+...(providerContexts[providerId]?.meta || {}),
+...(providerMeta?.[providerId] || {}),
+useThinking,
+},
+};
+
+try {
+// Favor unified ask() if available; fall back to sendPrompt().
+// ask(prompt, providerContext?, sessionId?, onChunk, signal)
+// Prefer passing only the meta shape to adapters for consistency.
+const providerContext =
+providerContexts[providerId]?.meta ||
+providerContexts[providerId] ||
+null;
+const onChunkWrapped = (chunk) => {
+const textChunk = typeof chunk === "string" ? chunk : chunk.text;
+if (textChunk) aggregatedText += textChunk;
+if (!firstPartialAt) {
+firstPartialAt = Date.now();
+try {
+const preview = (textChunk || "").slice(0, 80);
+console.log(
+`[Fanout] FIRST_PARTIAL provider=${providerId} t=${firstPartialAt - startTime}ms preview=${JSON.stringify(preview)}`,
+);
+} catch (_) {}
+}
+onPartial(
+providerId,
+typeof chunk === "string" ? { text: chunk } : chunk,
+);
+};
+
+let result;
+if (typeof adapter.ask === "function") {
+// Pass the canonicalized providerContext (prefer meta shape) to adapters
+result = await adapter.ask(
+request.originalPrompt,
+providerContext,
+sessionId,
+onChunkWrapped,
+abortController.signal,
+);
+} else {
+// When context exists, it's already merged into request.meta above.
+result = await adapter.sendPrompt(
+request,
+onChunkWrapped,
+abortController.signal,
+);
+}
+
+if (!result.text && aggregatedText) {
+result.text = aggregatedText;
+}
+try {
+const latency = result.latencyMs ?? Date.now() - startTime;
+const len = (result.text || "").length;
+const ok = result.ok !== false;
+console.log(
+`[Fanout] PROVIDER_COMPLETE provider=${providerId} ok=${ok} latencyMs=${latency} textLen=${len}`,
+);
+} catch (_) {}
+
+return { providerId, status: "fulfilled", value: result };
+} catch (error) {
+try {
+console.warn(
+`[Fanout] PROVIDER_ERROR provider=${providerId}`,
+error?.message || String(error),
+);
+} catch (_) {}
+if (aggregatedText) {
+return {
+providerId,
+status: "fulfilled",
+value: {
+text: aggregatedText,
+meta: {},
+softError: {
+name: error.name,
+message: error.message,
+},
+},
+};
+}
+return { providerId, status: "rejected", reason: error };
+}
+})(); // End of IIFE
+});
+
+Promise.all(providerPromises).then((settledResults) => {
+settledResults.forEach((item) => {
+if (item.status === "fulfilled") {
+results.set(item.providerId, item.value);
+} else {
+errors.set(item.providerId, item.reason);
+}
+});
+
+onAllComplete(results, errors);
+
+this.activeRequests.delete(sessionId);
+if (this.lifecycleManager) this.lifecycleManager.keepalive(false);
+});
+}
+
+_abortRequest(sessionId) {
+const request = this.activeRequests.get(sessionId);
+if (request) {
+request.abortControllers.forEach((controller) => controller.abort());
+this.activeRequests.delete(sessionId);
+if (this.lifecycleManager) this.lifecycleManager.keepalive(false);
+}
+}
+}
+
+// ============================================================================
+// GLOBAL INFRASTRUCTURE INITIALIZATION
+// ============================================================================
+async function initializeGlobalInfrastructure() {
+console.log("[SW] Initializing global infrastructure...");
+try {
+await NetRulesManager.init();
+CSPController.init();
+await UserAgentController.init();
+await ArkoseController.init();
+await DNRUtils.initialize();
+await OffscreenController.init();
+await BusController.init();
+self.bus = BusController;
+console.log("[SW] Global infrastructure initialization complete.");
+} catch (e) {
+console.error("[SW] Core infrastructure init failed", e);
+}
+}
+
+// ============================================================================
+// PROVIDER INITIALIZATION
+// ============================================================================
+async function initializeProviders() {
+console.log("[SW] Initializing providers...");
+const providerConfigs = [
+{
+name: "claude",
+Controller: ClaudeProviderController,
+Adapter: ClaudeAdapter,
+},
+{
+name: "gemini",
+Controller: GeminiProviderController,
+Adapter: GeminiAdapter,
+},
+{
+name: "gemini-pro",
+Controller: GeminiProviderController,
+Adapter: GeminiProAdapter,
+},
+{
+name: "chatgpt",
+Controller: ChatGPTProviderController,
+Adapter: ChatGPTAdapter,
+},
+{ name: "qwen", Controller: QwenProviderController, Adapter: QwenAdapter },
+];
+const initialized = [];
+for (const config of providerConfigs) {
+try {
+const controller = new config.Controller();
+if (typeof controller.init === "function") await controller.init();
+const adapter = new config.Adapter(controller);
+if (typeof adapter.init === "function") await adapter.init();
+providerRegistry.register(config.name, controller, adapter);
+initialized.push(config.name);
+} catch (e) {
+console.error(`[SW] Failed to initialize ${config.name}:`, e);
+}
+}
+if (initialized.length > 0) {
+console.info(`[SW] ✅ Providers initialized: ${initialized.join(", ")}`);
+}
+return providerRegistry.listProviders();
+}
+
+// ============================================================================
+// ORCHESTRATOR INITIALIZATION
+// ============================================================================
+async function initializeOrchestrator() {
+try {
+self.lifecycleManager = new LifecycleManager();
+self.faultTolerantOrchestrator = new FaultTolerantOrchestrator();
+console.log("[SW] ✓ FaultTolerantOrchestrator initialized");
+} catch (e) {
+console.error("[SW] Orchestrator init failed", e);
+}
+}
+
+// ============================================================================
+// GLOBAL SERVICES (single-shot initialization)
+// ============================================================================
+let globalServicesReady = null;
+
+async function initializeGlobalServices() {
+if (globalServicesReady) return globalServicesReady;
+
+globalServicesReady = (async () => {
+console.log("[SW] 🚀 Initializing global services...");
+
+// 1. Initialize persistence layer FIRST
+const pl = await initializePersistence();
+// Expose persistence layer globally for runtime checks
+persistenceLayer = pl;
+self.__HTOS_PERSISTENCE_LAYER = pl;
+
+// 2. Initialize session manager (depends on persistence)
+const sessionManager = await initializeSessionManager(pl);
+
+// 3. Initialize infrastructure
+await initializeGlobalInfrastructure();
+
+// 4. Initialize providers
+await initializeProviders();
+
+// 5. Initialize orchestrator
+await initializeOrchestrator();
+
+// 6. Create compiler and context resolver
+const compiler = new WorkflowCompiler(sessionManager);
+const contextResolver = new ContextResolver(sessionManager);
+
+// Initialize PromptRefinerService
+promptRefinerService = new PromptRefinerService({ refinerModel: "gemini" });
+console.log("[SW] ✓ PromptRefinerService initialized");
+
+console.log("[SW] ✅ Global services ready");
+return {
+orchestrator: self.faultTolerantOrchestrator,
+sessionManager: sessionManager,
+compiler,
+contextResolver,
+persistenceLayer: pl, // Expose persistence layer to other modules
+promptRefinerService,
+};
+})();
+
+return globalServicesReady;
+}
+
+// ============================================================================
+// UNIFIED MESSAGE HANDLER
+// Handles history operations and persistence-backed actions
+// ============================================================================
+async function handleUnifiedMessage(message, sender, sendResponse) {
+try {
+const sm = sessionManager || (await initializeSessionManager());
+if (!sm) {
+sendResponse({ success: false, error: "Service not ready" });
+return true;
+}
+
+switch (message.type) {
+// ========================================================================
+// HISTORY OPERATIONS
+// ========================================================================
+case "GET_FULL_HISTORY": {
+// Always use persistence layer for history
+let sessions = [];
+try {
+// 1. Attempt to load from the new, normalized persistence layer first.
+const allSessions = await sm.adapter.getAllSessions();
+if (allSessions && allSessions.length > 0) {
+sessions = allSessions
+.map((r) => ({
+id: r.id,
+sessionId: r.id,
+title: r.title || "New Chat",
+startTime: r.createdAt,
+lastActivity: r.updatedAt || r.lastActivity,
+messageCount: r.turnCount || 0,
+firstMessage: "",
+}))
+.sort((a, b) => (b.lastActivity || 0) - (a.lastActivity || 0));
+} else {
+// 2. FALLBACK: If new layer is empty, read from the old monolith storage.
+console.warn(
+"[SW] No sessions in new persistence layer, attempting fallback to legacy chrome.storage...",
+);
+const legacyData = await chrome.storage.local.get([
+"htos_sessions",
+]);
+const legacySessions = legacyData?.htos_sessions || {};
+sessions = Object.values(legacySessions)
+.map((s) => ({
+id: s.sessionId,
+sessionId: s.sessionId,
+title: s.title || "Legacy Chat",
+startTime: s.createdAt || 0,
+lastActivity: s.lastActivity || 0,
+messageCount: s.turns?.length || 0,
+}))
+.sort((a, b) => b.lastActivity - a.lastActivity);
+}
+} catch (e) {
+console.error(
+"[SW] Failed to build full history from persistence:",
+e,
+);
+sessions = [];
+}
+sendResponse({ success: true, data: { sessions } });
+return true;
+}
+
+case "GET_HISTORY_SESSION": {
+try {
+const sessionId = message.sessionId || message.payload?.sessionId;
+if (!sessionId) {
+console.error(
+"[SW] GET_HISTORY_SESSION missing sessionId in message:",
+message,
+);
+sendResponse({ success: false, error: "Missing sessionId" });
+return true;
+}
+
+// New persistence-first logic: return raw records for UI assembly
+const adapterIsReady = sm.getPersistenceStatus?.().adapterReady;
+if (!adapterIsReady) {
+console.warn(
+"[SW] Persistence adapter not ready; returning empty record sets for GET_HISTORY_SESSION",
+);
+}
+
+let sessionRecord = null;
+let turns = [];
+let providerResponses = [];
+
+if (adapterIsReady) {
+sessionRecord = await sm.adapter.get("sessions", sessionId);
+// Prefer indexed turn lookup by sessionId; fallback to full-scan
+turns = await sm.adapter.getTurnsBySessionId(sessionId);
+turns = Array.isArray(turns)
+? turns.sort(
+(a, b) =>
+(a.sequence ?? a.createdAt) - (b.sequence ?? b.createdAt),
+)
+: [];
+
+// Provider responses: prefer single session-scoped indexed lookup; fallback to full-scan
+providerResponses =
+await sm.adapter.getResponsesBySessionId(sessionId);
+}
+
+// Assemble UI-friendly rounds from raw records
+try {
+const sortedTurns = Array.isArray(turns)
+? turns.sort(
+(a, b) =>
+(a.sequence ?? a.createdAt) - (b.sequence ?? b.createdAt),
+)
+: [];
+
+const rounds = [];
+
+// Pre-index provider responses by aiTurnId for efficient merging
+const responsesByAi = new Map();
+for (const r of providerResponses || []) {
+if (!r || !r.aiTurnId) continue;
+if (!responsesByAi.has(r.aiTurnId))
+responsesByAi.set(r.aiTurnId, []);
+responsesByAi.get(r.aiTurnId).push(r);
+}
+
+for (let i = 0; i < sortedTurns.length; i++) {
+const user = sortedTurns[i];
+if (!user || !(user.type === "user" || user.role === "user"))
+continue;
+
+// Collect all AI turns associated with this user turn (including historical reruns)
+const allAiForUser = sortedTurns.filter(
+(t) =>
+(t.type === "ai" || t.role === "assistant") &&
+t.userTurnId === user.id,
+);
+if (!allAiForUser || allAiForUser.length === 0) continue;
+
+// Determine the primary AI turn (the one that is on-timeline)
+let primaryAi = null;
+// Prefer immediate next assistant
+const nextTurn = sortedTurns[i + 1];
+if (
+nextTurn &&
+(nextTurn.type === "ai" || nextTurn.role === "assistant") &&
+nextTurn.userTurnId === user.id &&
+!(nextTurn?.meta && nextTurn.meta.isHistoricalRerun) &&
+nextTurn.sequence !== -1
+) {
+primaryAi = nextTurn;
+} else {
+// Otherwise, choose the first AI without isHistoricalRerun flag (sequence != -1)
+primaryAi =
+allAiForUser.find(
+(t) =>
+!(t?.meta && t.meta.isHistoricalRerun) &&
+t.sequence !== -1,
+) || allAiForUser[0];
+}
+
+const createdAt = user.createdAt || user.updatedAt || Date.now();
+const completedAt = Math.max(
+...allAiForUser.map(
+(ai) => ai.updatedAt || ai.createdAt || createdAt,
+),
+createdAt,
+);
+
+// Aggregate provider responses across all AI turns for this user
+const providers = {};
+const synthesisResponses = {};
+const mappingResponses = {};
+
+for (const ai of allAiForUser) {
+const responses = (responsesByAi.get(ai.id) || []).sort(
+(a, b) => (a.responseIndex ?? 0) - (b.responseIndex ?? 0),
+);
+for (const r of responses) {
+const pid = r.providerId;
+const baseResp = {
+providerId: pid,
+text: r.text || "",
+status: r.status || "completed",
+meta: r.meta || {},
+createdAt: r.createdAt || createdAt,
+updatedAt: r.updatedAt || completedAt,
+};
+if (r.responseType === "batch") {
+// Only take batch responses from the primary AI turn
+if (ai.id === primaryAi.id) {
+providers[pid] = baseResp;
+}
+} else if (r.responseType === "synthesis") {
+(synthesisResponses[pid] =
+synthesisResponses[pid] || []).push(baseResp);
+} else if (r.responseType === "mapping") {
+(mappingResponses[pid] = mappingResponses[pid] || []).push(
+baseResp,
+);
+}
+}
+}
+
+rounds.push({
+userTurnId: user.id,
+aiTurnId: primaryAi.id,
+user: {
+id: user.id,
+text: user.text || user.content || "",
+createdAt,
+},
+providers,
+synthesisResponses,
+mappingResponses,
+createdAt,
+completedAt,
+});
+}
+
+// Respond with FullSessionPayload format expected by UI
+sendResponse({
+success: true,
+data: {
+id: (sessionRecord && sessionRecord.id) || sessionId,
+sessionId,
+title: (sessionRecord && sessionRecord.title) || "New Chat",
+createdAt: (sessionRecord && sessionRecord.createdAt) || 0,
+lastActivity:
+(sessionRecord &&
+(sessionRecord.updatedAt || sessionRecord.lastActivity)) ||
+0,
+turns: rounds,
+providerContexts: {},
+},
+});
+} catch (assembleError) {
+console.error("[SW] Failed to assemble rounds:", assembleError);
+sendResponse({
+success: true,
+data: {
+id: sessionId,
+sessionId,
+title: "New Chat",
+createdAt: 0,
+lastActivity: 0,
+turns: [],
+providerContexts: {},
+},
+});
+}
+} catch (e) {
+console.error("[SW] GET_HISTORY_SESSION error:", e);
+sendResponse({ success: false, error: "Failed to load session" });
+}
+return true;
+}
+
+case "GET_SYSTEM_STATUS": {
+const layer = self.__HTOS_PERSISTENCE_LAYER || persistenceLayer;
+const ps = sm.getPersistenceStatus?.() || {};
+sendResponse({
+success: true,
+data: {
+availableProviders: providerRegistry.listProviders(),
+persistenceEnabled: !!ps.persistenceEnabled,
+sessionManagerType: sm?.constructor?.name || "unknown",
+persistenceLayerAvailable: !!layer,
+adapterReady: !!ps.adapterReady,
+activeMode: "indexeddb",
+},
+});
+return true;
+}
+
+// ========================================================================
+// PROMPT REFINEMENT
+// ========================================================================
+case "REFINE_PROMPT": {
+try {
+const draftPrompt =
+message.draftPrompt || message.payload?.draftPrompt || "";
+const incomingContext = message.payload?.context || {};
+const sessionId =
+message.sessionId ||
+message.payload?.sessionId ||
+incomingContext.sessionId;
+const desiredModel = incomingContext.model;
+
+if (!String(draftPrompt).trim()) {
+sendResponse({ success: false, error: "Missing draftPrompt" });
+return true;
+}
+
+// Build full turn context for refiner
+let turnContext = null;
+const providedContext = {
+userPrompt: incomingContext.userPrompt || "",
+synthesisText: incomingContext.synthesisText || "",
+mappingText: incomingContext.mappingText || "",
+batchText: incomingContext.batchText || "",
+};
+
+const hasProvided = Object.values(providedContext).some(
+(v) => String(v || "").trim().length > 0,
+);
+
+if (hasProvided) {
+turnContext = providedContext;
+}
+
+if (sessionId) {
+try {
+const session = await sm.adapter.get("sessions", sessionId);
+if (session?.lastTurnId) {
+const lastTurn = await sm.adapter.get(
+"turns",
+session.lastTurnId,
+);
+if (lastTurn?.type === "ai") {
+const responses = await sm.adapter.getResponsesByTurnId(
+lastTurn.id,
+);
+
+// Find user prompt from last turn
+const userTurn = await sm.adapter.get(
+"turns",
+lastTurn.userTurnId,
+);
+const lastUserPrompt =
+userTurn?.content || userTurn?.text || "";
+
+// Find synthesis and mapping responses
+const synthesisResponse = Array.isArray(responses)
+? responses.find((r) => r.responseType === "synthesis")
+: null;
+const mappingResponse = Array.isArray(responses)
+? responses.find((r) => r.responseType === "mapping")
+: null;
+const batchResponses = Array.isArray(responses)
+? responses.filter((r) => r.responseType === "batch")
+: [];
+const batchText = batchResponses
+.map(
+(r) =>
+`**${(r.providerId || "unknown").toUpperCase()}**:\n${r.text}`,
+)
+.join("\n\n");
+
+const fetchedContext = {
+userPrompt: lastUserPrompt,
+synthesisText: synthesisResponse?.text || "",
+mappingText: mappingResponse?.text || "",
+batchText: batchText || "",
+};
+
+turnContext = {
+userPrompt:
+turnContext?.userPrompt && turnContext.userPrompt.trim()
+? turnContext.userPrompt
+: fetchedContext.userPrompt,
+synthesisText:
+turnContext?.synthesisText &&
+turnContext.synthesisText.trim()
+? turnContext.synthesisText
+: fetchedContext.synthesisText,
+mappingText:
+turnContext?.mappingText && turnContext.mappingText.trim()
+? turnContext.mappingText
+: fetchedContext.mappingText,
+batchText:
+turnContext?.batchText && turnContext.batchText.trim()
+? turnContext.batchText
+: fetchedContext.batchText,
+};
+}
+}
+} catch (e) {
+console.error(
+"[SW] Refiner: Error fetching last turn context:",
+e,
+);
+}
+}
+
+promptRefinerService = new PromptRefinerService({
+refinerModel: desiredModel,
+});
+
+const result = await promptRefinerService.refinePrompt(
+draftPrompt,
+turnContext,
+);
+
+if (!result) {
+sendResponse({
+success: false,
+error: "Refiner returned no result",
+});
+return true;
+}
+
+sendResponse({
+success: true,
+data: {
+refinedPrompt: result.refinedPrompt,
+explanation: result.explanation,
+originalPrompt: draftPrompt,
+},
+});
+} catch (e) {
+console.error("[SW] REFINE_PROMPT failed:", e);
+sendResponse({ success: false, error: e?.message || String(e) });
+}
+return true;
+}
+
+// GET_HEALTH_STATUS is handled in the message listener for immediate response
+
+// ========================================================================
+// PERSISTENCE OPERATIONS (Enhanced functionality)
+// ========================================================================
+case "GET_SESSION": {
+const operationId = persistenceMonitor.startOperation("GET_SESSION", {
+sessionId: message.sessionId || message.payload?.sessionId,
+});
+
+try {
+const sessionId = message.sessionId || message.payload?.sessionId;
+const session = await sm.getOrCreateSession(sessionId);
+persistenceMonitor.endOperation(operationId, {
+sessionFound: !!session,
+});
+sendResponse({ success: true, session });
+} catch (error) {
+persistenceMonitor.endOperation(operationId, null, error);
+const handledError = await errorHandler.handleError(error, {
+operation: "getSession",
+sessionId: message.sessionId || message.payload?.sessionId,
+retry: () =>
+sm.getOrCreateSession(
+message.sessionId || message.payload?.sessionId,
+),
+});
+sendResponse({ success: false, error: handledError.message });
+}
+return true;
+}
+
+case "SAVE_TURN": {
+const sessionId = message.sessionId || message.payload?.sessionId;
+await sm.addTurn(sessionId, message.turn);
+sendResponse({ success: true });
+return true;
+}
+
+case "UPDATE_PROVIDER_CONTEXT": {
+const sessionId = message.sessionId || message.payload?.sessionId;
+await sm.updateProviderContext(
+sessionId,
+message.providerId || message.payload?.providerId,
+message.context || message.payload?.context,
+);
+sendResponse({ success: true });
+return true;
+}
+
+case "CREATE_THREAD": {
+const sessionId = message.sessionId || message.payload?.sessionId;
+const thread = await sm.createThread(
+sessionId,
+message.title || message.payload?.title,
+message.sourceAiTurnId || message.payload?.sourceAiTurnId,
+);
+sendResponse({ success: true, thread });
+return true;
+}
+
+case "SWITCH_THREAD": {
+const sessionId = message.sessionId || message.payload?.sessionId;
+await sm.switchThread(
+sessionId,
+message.threadId || message.payload?.threadId,
+);
+sendResponse({ success: true });
+return true;
+}
+
+case "DELETE_SESSION": {
+const sessionId = message.sessionId || message.payload?.sessionId;
+try {
+const removed = await sm.deleteSession(sessionId);
+// Return explicit removed boolean so UI can react optimistically
+sendResponse({ success: true, removed });
+} catch (e) {
+console.error("[SW] DELETE_SESSION failed:", e);
+sendResponse({ success: false, error: e?.message || String(e) });
+}
+return true;
+}
+
+case "DELETE_SESSIONS": {
+try {
+const ids = (
+message.sessionIds ||
+message.payload?.sessionIds ||
+[]
+).filter(Boolean);
+if (!Array.isArray(ids) || ids.length === 0) {
+sendResponse({ success: false, error: "No sessionIds provided" });
+return true;
+}
+
+const results = await Promise.all(
+ids.map(async (id) => {
+try {
+const removed = await sm.deleteSession(id);
+return { id, removed };
+} catch (err) {
+console.error("[SW] DELETE_SESSIONS item failed:", id, err);
+return { id, removed: false };
+}
+}),
+);
+
+const removedIds = results.filter((r) => r.removed).map((r) => r.id);
+sendResponse({
+success: true,
+removed: removedIds.length,
+ids: removedIds,
+});
+} catch (e) {
+console.error("[SW] DELETE_SESSIONS failed:", e);
+sendResponse({ success: false, error: e?.message || String(e) });
+}
+return true;
+}
+
+case "RENAME_SESSION": {
+try {
+const sessionId = message.sessionId || message.payload?.sessionId;
+const newTitleRaw = message.title || message.payload?.title;
+if (!sessionId) {
+sendResponse({ success: false, error: "Missing sessionId" });
+return true;
+}
+const newTitle = String(newTitleRaw ?? "").trim();
+if (!newTitle) {
+sendResponse({ success: false, error: "Title cannot be empty" });
+return true;
+}
+
+// Persistence-first rename
+const record = await sm.adapter.get("sessions", sessionId);
+if (!record) {
+sendResponse({
+success: false,
+error: `Session ${sessionId} not found`,
+});
+return true;
+}
+record.title = newTitle;
+record.updatedAt = Date.now();
+await sm.adapter.put("sessions", record);
+
+// Update lightweight cache if present
+try {
+if (sm.sessions && sm.sessions[sessionId]) {
+sm.sessions[sessionId].title = newTitle;
+sm.sessions[sessionId].updatedAt = record.updatedAt;
+}
+} catch (_) {}
+
+sendResponse({
+success: true,
+updated: true,
+sessionId,
+title: newTitle,
+});
+} catch (e) {
+console.error("[SW] RENAME_SESSION failed:", e);
+sendResponse({ success: false, error: e?.message || String(e) });
+}
+return true;
+}
+
+case "GET_PERSISTENCE_STATUS": {
+const layer = self.__HTOS_PERSISTENCE_LAYER || persistenceLayer;
+const status = {
+persistenceEnabled: HTOS_PERSISTENCE_ENABLED,
+sessionManagerType: sm?.constructor?.name || "unknown",
+persistenceLayerAvailable: !!layer,
+adapterStatus: sm?.getPersistenceStatus
+? sm.getPersistenceStatus()
+: null,
+};
+sendResponse({ success: true, status });
+return true;
+}
+
+default:
+// Unknown message type - don't handle it
+return false;
+}
+} catch (error) {
+console.error("[SW] Message handler error:", error);
+sendResponse({ success: false, error: error.message });
+return true;
+}
+}
+
+// ============================================================================
+// MESSAGE LISTENER REGISTRATION
+// ============================================================================
+chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+// Ignore bus messages
+if (request?.$bus) return false;
+
+// Best-effort: record activity for lifecycle manager on any incoming non-bus message.
+try {
+if (
+self.lifecycleManager &&
+typeof self.lifecycleManager.recordActivity === "function"
+) {
+self.lifecycleManager.recordActivity();
+}
+} catch (e) {
+// Swallow errors here; this is best-effort and should not interrupt message handling
+}
+
+// Lightweight activity ping - handled locally to quickly mark service worker as active
+if (request?.type === "htos.activity") {
+try {
+if (
+self.lifecycleManager &&
+typeof self.lifecycleManager.recordActivity === "function"
+) {
+self.lifecycleManager.recordActivity();
+}
+} catch (e) {}
+sendResponse({ success: true });
+return true;
+}
+
+// Immediate health status response (no async init await)
+if (request?.type === "GET_HEALTH_STATUS") {
+try {
+const status = getHealthStatus();
+sendResponse({ success: true, status });
+} catch (e) {
+sendResponse({ success: false, error: e?.message || String(e) });
+}
+return true; // Explicitly keep channel open for async-style patterns
+}
+
+// Handle all other messages through unified handler
+if (request?.type) {
+handleUnifiedMessage(request, sender, sendResponse);
+return true; // Always return true to keep channel open for async responses
+}
+
+return false;
+});
+
+// ============================================================================
+// PORT CONNECTIONS -> ConnectionHandler per port
+// ============================================================================
+chrome.runtime.onConnect.addListener(async (port) => {
+if (port.name !== "htos-popup") return;
+
+// Record activity on port connections so lifecycle manager can start a heartbeat
+try {
+if (
+self.lifecycleManager &&
+typeof self.lifecycleManager.recordActivity === "function"
+) {
+self.lifecycleManager.recordActivity();
+}
+} catch (e) {}
+
+console.log("[SW] New connection received, initializing handler...");
+
+try {
+const services = await initializeGlobalServices();
+const handler = new ConnectionHandler(port, services);
+await handler.init();
+console.log("[SW] Connection handler ready");
+} catch (error) {
+console.error("[SW] Failed to initialize connection handler:", error);
+try {
+port.postMessage({ type: "INITIALIZATION_FAILED", error: error.message });
+} catch (_) {}
+}
+});
+
+// ============================================================================
+// EXTENSION ACTION HANDLER
+// ============================================================================
+chrome.action?.onClicked.addListener(async () => {
+try {
+const url = chrome.runtime.getURL("ui/index.html");
+const [existingTab] = await chrome.tabs.query({ url });
+if (existingTab?.id) {
+await chrome.tabs.update(existingTab.id, { active: true });
+if (existingTab.windowId)
+await chrome.windows.update(existingTab.windowId, { focused: true });
+} else {
+await chrome.tabs.create({ url });
+}
+} catch (e) {
+console.error("[SW] Failed to open UI tab:", e);
+}
+});
+
+// ============================================================================
+// INSTALL/UPDATE HANDLERS
+// ============================================================================
+chrome.runtime.onInstalled.addListener(async (details) => {
+console.log("[SW] Extension installed/updated:", details.reason);
+
+// Session migration disabled
+});
+
+// ============================================================================
+// PERIODIC MAINTENANCE (started post-init)
+// ============================================================================
+
+// ============================================================================
+// LIFECYCLE HANDLERS
+// ============================================================================
+chrome.runtime.onStartup.addListener(() => {
+console.log("[SW] Browser startup detected");
+});
+
+chrome.runtime.onSuspend.addListener(() => {
+console.log("[SW] Service worker suspending");
+});
+
+chrome.runtime.onSuspendCanceled.addListener(() => {
+console.log("[SW] Service worker suspend canceled");
+});
+
+// ============================================================================
+// HEALTH CHECK & DEBUGGING
+// ============================================================================
+function getHealthStatus() {
+const sm = sessionManager;
+const layer = self.__HTOS_PERSISTENCE_LAYER || persistenceLayer;
+let providers = [];
+try {
+providers = providerRegistry.listProviders();
+} catch (_) {}
+const ps = sm?.getPersistenceStatus?.() || {};
+
+return {
+timestamp: Date.now(),
+serviceWorker: "active",
+sessionManager: sm
+? sm.isInitialized
+? "initialized"
+: "initializing"
+: "missing",
+persistenceLayer: layer ? "active" : "disabled",
+featureFlags: {
+persistenceEnabled: HTOS_PERSISTENCE_ENABLED,
+},
+providers,
+details: {
+sessionManagerType: sm?.constructor?.name || "unknown",
+persistenceEnabled: !!ps.persistenceEnabled,
+adapterReady: !!ps.adapterReady,
+persistenceLayerAvailable: !!layer,
+initState: self.__HTOS_INIT_STATE || null,
+},
+};
+}
+
+// Export for testing and debugging
+globalThis.__HTOS_SW = {
+getHealthStatus,
+getSessionManager: () => sessionManager,
+getPersistenceLayer: () => persistenceLayer,
+getProviderRegistry: () => providerRegistry,
+reinitialize: initializeGlobalServices,
+runTests: async () => {
+try {
+const { PersistenceIntegrationTest } = await import(
+"./test-persistence-integration.js"
+);
+const tester = new PersistenceIntegrationTest();
+return await tester.runAllTests();
+} catch (error) {
+console.error("Failed to run persistence tests:", error);
+throw error;
+}
+},
+};
+
+// ============================================================================
+// MAIN INITIALIZATION SEQUENCE
+// ============================================================================
+(async () => {
+try {
+const INIT_TIMEOUT_MS = 30000; // 30s timeout for global initialization
+const timeoutPromise = new Promise((_, reject) => {
+setTimeout(
+() => reject(new Error("[SW:INIT] Initialization timed out after 30s")),
+INIT_TIMEOUT_MS,
+);
+});
+const services = await Promise.race([
+initializeGlobalServices(),
+timeoutPromise,
+]);
+SWBootstrap.init(services);
+console.log("[SW] 🚀 Bootstrap complete. System ready.");
+
+// Log health status
+const health = await getHealthStatus();
+console.log("[SW] Health Status:", health);
+
+// Track init state
+self.__HTOS_INIT_STATE = {
+initializedAt: Date.now(),
+persistenceEnabled: HTOS_PERSISTENCE_ENABLED,
+persistenceReady: !!services.persistenceLayer,
+providers: services?.orchestrator ? providerRegistry.listProviders() : [],
+};
+
+try {
+await resumeInflightWorkflows(services);
+} catch (e) {
+console.error("[SW] Resume inflight workflows failed:", e);
+}
+} catch (e) {
+if (e instanceof Error && e.message.includes("Initialization timed out")) {
+console.error(
+"[SW:INIT] Timeout occurred. Current init state:",
+self.__HTOS_INIT_STATE,
+);
+}
+console.error("[SW] Bootstrap failed:", e);
+}
+})();
+
+async function resumeInflightWorkflows(services) {
+const { sessionManager, compiler, contextResolver, orchestrator } = services;
+if (!sessionManager?.adapter?.isReady || !sessionManager.adapter.isReady()) {
+console.warn("[SW] Adapter not ready; skipping inflight resume");
+return;
+}
+
+let records = [];
+try {
+records = await sessionManager.adapter.getAll("metadata");
+} catch (e) {
+console.warn("[SW] Failed to read metadata for resume:", e);
+return;
+}
+
+const inflight = (records || []).filter(
+(r) => r && r.type === "inflight_workflow",
+);
+if (inflight.length === 0) return;
+
+console.log(`[SW] Resuming ${inflight.length} inflight workflows`);
+
+for (const rec of inflight) {
+try {
+const sessionId = rec.sessionId;
+const userMessage = rec.userMessage || "";
+const providers = Array.isArray(rec.providers) ? rec.providers : [];
+const providerMeta = rec.providerMeta || {};
+const runId = rec.runId;
+
+// Idempotency: if the AI turn already persisted with same runId and isComplete, skip and delete inflight
+try {
+if (rec.entityId) {
+const existingTurn = await sessionManager.adapter.get(
+"turns",
+rec.entityId,
+);
+if (
+existingTurn &&
+existingTurn.isComplete &&
+existingTurn.meta &&
+existingTurn.meta.runId === runId
+) {
+if (rec.key) {
+try {
+await sessionManager.adapter.delete("metadata", rec.key);
+} catch (_) {}
+}
+continue;
+}
+}
+} catch (_) {}
+
+const primitive = {
+type: "extend",
+sessionId,
+userMessage,
+providers,
+includeMapping: false,
+includeSynthesis: providers.length > 1,
+useThinking: false,
+providerMeta,
+clientUserTurnId: `user-${Date.now()}`,
+};
+
+const resolved = await contextResolver.resolve(primitive);
+const workflowRequest = compiler.compile(primitive, resolved);
+
+try {
+const prior = rec.entityId
+? await sessionManager.adapter.getResponsesByTurnId(rec.entityId)
+: [];
+const resumeMap = {};
+(prior || []).forEach((resp) => {
+const pid = resp && resp.providerId ? String(resp.providerId) : "";
+const txt = resp && typeof resp.text === "string" ? resp.text : "";
+const ts =
+resp && (resp.updatedAt || resp.createdAt)
+? resp.updatedAt || resp.createdAt
+: 0;
+if (!pid || !txt) return;
+const prev = resumeMap[pid];
+if (!prev || (prev._ts || 0) < ts) {
+resumeMap[pid] = { _txt: txt, _ts: ts };
+}
+});
+const normalized = {};
+Object.entries(resumeMap).forEach(([pid, obj]) => {
+if (obj && obj._txt) normalized[pid] = obj._txt;
+});
+workflowRequest.context = workflowRequest.context || {};
+workflowRequest.context.resumeFromTextByProvider = normalized;
+} catch (_) {}
+
+const nullPort = { postMessage: () => {} };
+const engine = new (
+await import("./core/workflow-engine.js")
+).WorkflowEngine(orchestrator, sessionManager, nullPort);
+await engine.execute(workflowRequest, resolved);
+
+try {
+const sessionRecord = await sessionManager.adapter.get(
+"sessions",
+sessionId,
+);
+if (sessionRecord) {
+sessionRecord.hasUnreadUpdates = true;
+sessionRecord.updatedAt = Date.now();
+await sessionManager.adapter.put("sessions", sessionRecord);
+}
+} catch (_) {}
+
+if (rec.key) {
+try {
+await sessionManager.adapter.delete("metadata", rec.key);
+} catch (_) {}
+}
+} catch (e) {
+console.warn("[SW] Inflight resume for record failed:", e);
+}
+}
+}

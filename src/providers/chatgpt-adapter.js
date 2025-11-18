@@ -5,6 +5,7 @@
  * Build-phase safe: emitted to dist/adapters/*
  */
 import { classifyProviderError } from "../core/request-lifecycle-manager.js";
+import { rateLimiter } from "../core/RateLimiter.js";
 
 // Provider-specific adapter debug flag (off by default)
 const CHATGPT_ADAPTER_DEBUG = false;
@@ -38,6 +39,7 @@ export class ChatGPTAdapter {
     signal = undefined,
   ) {
     try {
+      await rateLimiter.acquire(this.id);
       const meta = providerContext?.meta || providerContext || {};
       const hasContinuation = Boolean(
         meta.conversationId || meta.parentMessageId || meta.messageId,

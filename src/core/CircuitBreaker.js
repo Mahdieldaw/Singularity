@@ -4,9 +4,15 @@ export class CircuitBreaker {
     this.failures = 0;
     this.lastFailure = 0;
     this.failureThreshold = options.failureThreshold || 5;
-    this.resetTimeout = options.resetTimeout || 60000;
+    this.resetTimeout = options.resetTimeout || 300000;
+    this.providerTimeouts = {
+      claude: 600000,
+      chatgpt: 120000,
+      gemini: 120000,
+      default: 120000,
+    };
   }
-  async execute(action) {
+  async execute(action, providerId = "default") {
     if (this.state === "OPEN") {
       if (Date.now() - this.lastFailure > this.resetTimeout) {
         this.state = "HALF_OPEN";
@@ -14,12 +20,18 @@ export class CircuitBreaker {
         throw new Error("CircuitBreaker OPEN");
       }
     }
+    const timeout = this.providerTimeouts[providerId] || this.providerTimeouts.default;
+    const timeoutPromise = new Promise((_, reject) =>
+      setTimeout(() => reject(new Error("Provider timeout")), timeout),
+    );
     try {
-      const result = await action();
+      const result = await Promise.race([action(), timeoutPromise]);
       this.recordSuccess();
       return result;
     } catch (err) {
-      this.recordFailure();
+      if (err.message !== "Provider timeout" || this.state !== "CLOSED") {
+        this.recordFailure();
+      }
       throw err;
     }
   }

@@ -5,6 +5,7 @@
  * Build-phase safe: emitted to dist/adapters/*
  */
 import { classifyProviderError } from "../core/request-lifecycle-manager.js";
+import { rateLimiter } from "../core/RateLimiter.js";
 
 // Provider-specific adapter debug flag (off by default)
 const GEMINI_ADAPTER_DEBUG = false;
@@ -231,6 +232,7 @@ export class GeminiAdapter {
     signal = undefined,
   ) {
     try {
+      await rateLimiter.acquire(this.id);
       const meta = providerContext?.meta || providerContext || {};
       const hasCursor = Boolean(meta.cursor || providerContext?.cursor);
       pad(

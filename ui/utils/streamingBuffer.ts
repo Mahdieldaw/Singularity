@@ -21,12 +21,9 @@ export class StreamingBuffer {
   > = new Map();
 
   private flushTimer: number | null = null;
-  private deferredTimeout: number | null = null;
   private onFlushCallback: (updates: BatchUpdate[]) => void;
   private readonly MAX_CHUNKS_PER_PROVIDER = 500;
   private chunkCounts: Map<string, number> = new Map();
-  private readonly FLUSH_MIN_INTERVAL_MS = 100;
-  private lastFlushAt: number = 0;
 
   constructor(onFlush: (updates: BatchUpdate[]) => void) {
     this.onFlushCallback = onFlush;
@@ -64,16 +61,7 @@ export class StreamingBuffer {
   }
 
   private scheduleBatchFlush() {
-    if (this.flushTimer !== null || this.deferredTimeout !== null) return;
-    const sinceLast = Date.now() - this.lastFlushAt;
-    if (sinceLast < this.FLUSH_MIN_INTERVAL_MS) {
-      const remaining = this.FLUSH_MIN_INTERVAL_MS - sinceLast;
-      this.deferredTimeout = window.setTimeout(() => {
-        this.deferredTimeout = null;
-        this.flushImmediate();
-      }, remaining);
-      return;
-    }
+    if (this.flushTimer !== null) return;
     this.flushTimer = window.requestAnimationFrame(() => {
       window.requestAnimationFrame(() => {
         this.flushAll();
@@ -107,7 +95,6 @@ export class StreamingBuffer {
     if (updates.length > 0) {
       updates.sort((a, b) => a.createdAt - b.createdAt);
       this.onFlushCallback(updates);
-      this.lastFlushAt = Date.now();
     }
   }
 
@@ -116,10 +103,6 @@ export class StreamingBuffer {
       cancelAnimationFrame(this.flushTimer);
       this.flushTimer = null;
     }
-    if (this.deferredTimeout !== null) {
-      clearTimeout(this.deferredTimeout);
-      this.deferredTimeout = null;
-    }
     this.flushAll();
   }
 
@@ -127,10 +110,6 @@ export class StreamingBuffer {
     if (this.flushTimer !== null) {
       cancelAnimationFrame(this.flushTimer);
       this.flushTimer = null;
-    }
-    if (this.deferredTimeout !== null) {
-      clearTimeout(this.deferredTimeout);
-      this.deferredTimeout = null;
     }
     this.pendingDeltas.clear();
     this.chunkCounts.clear();
