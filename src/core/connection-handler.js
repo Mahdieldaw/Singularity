@@ -1,7 +1,6 @@
 // src/core/connection-handler.js
 
 import { WorkflowEngine } from "./workflow-engine.js";
-import { sessionRegistry } from "./session-registry.js";
 // Note: ContextResolver is now available via services; we don't import it directly here
 
 /**
@@ -235,7 +234,6 @@ export class ConnectionHandler {
       }
 
       this.activeSessionId = executeRequest.sessionId;
-      sessionRegistry.register(this.activeSessionId);
 
       // ========================================================================
       // Compile
@@ -322,7 +320,6 @@ export class ConnectionHandler {
     } finally {
       this.lifecycleManager?.deactivateWorkflowMode();
       if (this.activeSessionId) {
-        sessionRegistry.unregister(this.activeSessionId);
         this.activeSessionId = null;
       }
     }
@@ -419,7 +416,6 @@ export class ConnectionHandler {
     this.isInitialized = false;
 
     if (this.activeSessionId) {
-      sessionRegistry.unregister(this.activeSessionId);
       this.activeSessionId = null;
     }
   }

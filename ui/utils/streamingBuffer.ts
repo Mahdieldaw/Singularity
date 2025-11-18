@@ -63,10 +63,8 @@ export class StreamingBuffer {
   private scheduleBatchFlush() {
     if (this.flushTimer !== null) return;
     this.flushTimer = window.requestAnimationFrame(() => {
-      window.requestAnimationFrame(() => {
-        this.flushAll();
-        this.flushTimer = null;
-      });
+      this.flushAll();
+      this.flushTimer = null;
     });
   }
 

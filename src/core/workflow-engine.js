@@ -1039,26 +1039,38 @@ console.warn("[WorkflowEngine] Deferred persistence failed:", e);
 async executePromptStep(step, context) {
 const { prompt, providers, useThinking, providerContexts } = step.payload;
 
-return new Promise((resolve, reject) => {
-this.orchestrator.executeParallelFanout(prompt, providers, {
-sessionId: context.sessionId,
-useThinking,
-providerContexts,
-providerMeta: step?.payload?.providerMeta,
-onPartial: (providerId, chunk) => {
-this._dispatchPartialDelta(
-context.sessionId,
-step.stepId,
-providerId,
-chunk.text,
-"Prompt",
-);
-},
-onAllComplete: (results, errors) => {
-// Build batch updates
-const batchUpdates = {};
-results.forEach((res, pid) => {
-batchUpdates[pid] = res;
+  return new Promise((resolve, reject) => {
+    this.orchestrator.executeParallelFanout(prompt, providers, {
+      sessionId: context.sessionId,
+      useThinking,
+      providerContexts,
+      providerMeta: step?.payload?.providerMeta,
+      onPartial: (providerId, chunk) => {
+        this._dispatchPartialDelta(
+          context.sessionId,
+          step.stepId,
+          providerId,
+          chunk.text,
+          "Prompt",
+        );
+      },
+      onError: (error) => {
+        try {
+          this.port.postMessage({
+            type: "WORKFLOW_STEP_UPDATE",
+            sessionId: context.sessionId,
+            stepId: step.stepId,
+            status: "partial_failure",
+            error: error?.message || String(error),
+          });
+        } catch (_) {}
+        reject(error);
+      },
+      onAllComplete: (results, errors) => {
+        // Build batch updates
+        const batchUpdates = {};
+        results.forEach((res, pid) => {
+          batchUpdates[pid] = res;
 });
 
 // Emit a single aggregated log summarizing cached contexts produced by providers in this batch

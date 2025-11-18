@@ -26,11 +26,8 @@ export function useEligibility() {
         const t = messages[i];
         if (t.type === "user") break;
         if (t.type === "ai") {
-          const ai = t as AiTurn;
-          if (!ai.isSynthesisAnswer && !ai.isMappingAnswer) {
-            aiIndex = i;
-            break;
-          }
+          aiIndex = i;
+          break;
         }
       }
       const ai = aiIndex !== -1 ? (messages[aiIndex] as AiTurn) : undefined;
