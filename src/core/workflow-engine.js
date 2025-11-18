@@ -156,7 +156,8 @@ const lastStreamState = new Map();
 function makeDelta(sessionId, providerId, fullText = "", label = "") {
   if (!sessionId) return fullText || "";
 
-  const key = `${sessionId}:${label || ""}:${providerId}`;
+  const normalizedLabel = (label || "").trim() || "default";
+  const key = `${sessionId}:${normalizedLabel}:${providerId}`;
   const prev = lastStreamState.get(key) || "";
   let delta = "";
 
@@ -735,7 +736,6 @@ export class WorkflowEngine {
       // Emit canonical turn to allow UI to replace optimistic placeholders
       this._emitTurnFinalized(context, steps, stepResults);
 
-      // ✅ Clean up delta cache
       clearDeltaCache(context.sessionId);
     } catch (error) {
       console.error(
@@ -748,6 +748,10 @@ export class WorkflowEngine {
         workflowId: request.workflowId,
         error: "A critical error occurred.",
       });
+    } finally {
+      try {
+        clearDeltaCache(context.sessionId);
+      } catch (_) {}
     }
   }
 
@@ -1040,7 +1044,7 @@ export class WorkflowEngine {
     const { prompt, providers, useThinking, providerContexts } = step.payload;
     try {
       const mod = await import("./RateLimiter.js");
-      for (const pid of providers) await mod.rateLimiter.acquire(pid);
+      await Promise.all(providers.map((pid) => mod.rateLimiter.acquire(pid)));
     } catch (_) {}
 
     return new Promise((resolve, reject) => {
@@ -1058,23 +1062,18 @@ export class WorkflowEngine {
             "Prompt",
           );
         },
-        onProviderComplete: (providerId, data) => {
+        
+        onError: (error) => {
           try {
             this.port.postMessage({
               type: "WORKFLOW_STEP_UPDATE",
               sessionId: context.sessionId,
               stepId: step.stepId,
-              status: "completed",
-              result: {
-                providerId,
-                text: data?.text || "",
-                status: "completed",
-                meta: data?.meta || {},
-              },
+              status: "partial_failure",
+              error: error?.message || String(error),
             });
-          } catch (e) {
-            // non-fatal
-          }
+          } catch (_) {}
+          reject(error);
         },
         onAllComplete: (results, errors) => {
           // Build batch updates
@@ -1480,14 +1479,11 @@ export class WorkflowEngine {
           );
         }
       }
-      // Enforce presence of mapping output when mapping steps are declared
+      // Prefer mapping result when declared, but continue gracefully if absent
       if (!mappingResult || !String(mappingResult.text || "").trim()) {
-        console.error(
-          `[WorkflowEngine] No valid mapping result found. mappingResult:`,
+        console.warn(
+          `[WorkflowEngine] No valid mapping result found; proceeding without Map input`,
           mappingResult,
-        );
-        throw new Error(
-          "Synthesis requires a completed Map result; none found.",
         );
       }
     } else {
@@ -1542,6 +1538,18 @@ export class WorkflowEngine {
               "Synthesis",
             );
           },
+          onError: (error) => {
+            try {
+              this.port.postMessage({
+                type: "WORKFLOW_STEP_UPDATE",
+                sessionId: context.sessionId,
+                stepId: step.stepId,
+                status: "failed",
+                error: error?.message || String(error),
+              });
+            } catch (_) {}
+            reject(error);
+          },
           onAllComplete: (results) => {
             const finalResult = results.get(payload.synthesisProvider);
 
@@ -1558,11 +1566,26 @@ export class WorkflowEngine {
             }
 
             if (!finalResult || !finalResult.text) {
-              reject(
-                new Error(
-                  `Synthesis provider ${payload.synthesisProvider} returned empty response`,
-                ),
-              );
+              try {
+                this.port.postMessage({
+                  type: "WORKFLOW_STEP_UPDATE",
+                  sessionId: context.sessionId,
+                  stepId: step.stepId,
+                  status: "completed",
+                  result: {
+                    providerId: payload.synthesisProvider,
+                    text: "",
+                    status: "no_output",
+                    meta: finalResult?.meta || {},
+                  },
+                });
+              } catch (_) {}
+              resolve({
+                providerId: payload.synthesisProvider,
+                text: "",
+                status: "no_output",
+                meta: finalResult?.meta || {},
+              });
               return;
             }
 
@@ -1716,11 +1739,26 @@ export class WorkflowEngine {
             }
 
             if (!finalResult || !finalResult.text) {
-              reject(
-                new Error(
-                  `Mapping provider ${payload.mappingProvider} returned empty response`,
-                ),
-              );
+              try {
+                this.port.postMessage({
+                  type: "WORKFLOW_STEP_UPDATE",
+                  sessionId: context.sessionId,
+                  stepId: step.stepId,
+                  status: "completed",
+                  result: {
+                    providerId: payload.mappingProvider,
+                    text: "",
+                    status: "no_output",
+                    meta: finalResult?.meta || {},
+                  },
+                });
+              } catch (_) {}
+              resolve({
+                providerId: payload.mappingProvider,
+                text: "",
+                status: "no_output",
+                meta: finalResult?.meta || {},
+              });
               return;
             }
 

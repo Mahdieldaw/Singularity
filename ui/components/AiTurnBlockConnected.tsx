@@ -12,6 +12,11 @@ import {
   activeClipsAtom,
   activeAiTurnIdAtom,
   activeRecomputeStateAtom,
+  aiTurnSynthesisExpandedFamily,
+  aiTurnMappingExpandedFamily,
+  aiTurnSynthExpandedFamily,
+  aiTurnMapExpandedFamily,
+  aiTurnMappingTabFamily,
 } from "../state/atoms";
 import { useClipActions } from "../hooks/useClipActions";
 import { useEligibility } from "../hooks/useEligibility";
@@ -35,6 +40,21 @@ export default function AiTurnBlockConnected({
   const { handleClipClick } = useClipActions();
   const { eligibilityMaps } = useEligibility();
   const [activeRecomputeState] = useAtom(activeRecomputeStateAtom);
+  const [isSynthesisExpanded, setIsSynthesisExpanded] = useAtom(
+    aiTurnSynthesisExpandedFamily(aiTurn.id),
+  );
+  const [isMappingExpanded, setIsMappingExpanded] = useAtom(
+    aiTurnMappingExpandedFamily(aiTurn.id),
+  );
+  const [synthExpanded, setSynthExpanded] = useAtom(
+    aiTurnSynthExpandedFamily(aiTurn.id),
+  );
+  const [mapExpanded, setMapExpanded] = useAtom(
+    aiTurnMapExpandedFamily(aiTurn.id),
+  );
+  const [mappingTab, setMappingTab] = useAtom(
+    aiTurnMappingTabFamily(aiTurn.id),
+  );
 
   const isLive = !!activeAiTurnId && activeAiTurnId === aiTurn.id;
 
@@ -52,6 +72,31 @@ export default function AiTurnBlockConnected({
       onToggleSourceOutputs={useCallback(
         () => setShowSourceOutputs((prev) => !prev),
         [setShowSourceOutputs],
+      )}
+      isSynthesisExpanded={isSynthesisExpanded}
+      onToggleSynthesisExpanded={useCallback(
+        () => setIsSynthesisExpanded((prev) => !prev),
+        [setIsSynthesisExpanded],
+      )}
+      isMappingExpanded={isMappingExpanded}
+      onToggleMappingExpanded={useCallback(
+        () => setIsMappingExpanded((prev) => !prev),
+        [setIsMappingExpanded],
+      )}
+      synthExpanded={synthExpanded}
+      onSetSynthExpanded={useCallback(
+        (v: boolean) => setSynthExpanded(v),
+        [setSynthExpanded],
+      )}
+      mapExpanded={mapExpanded}
+      onSetMapExpanded={useCallback(
+        (v: boolean) => setMapExpanded(v),
+        [setMapExpanded],
+      )}
+      mappingTab={mappingTab}
+      onSetMappingTab={useCallback(
+        (t: "map" | "options") => setMappingTab(t),
+        [setMappingTab],
       )}
       activeSynthesisClipProviderId={turnClips.synthesis}
       activeMappingClipProviderId={turnClips.mapping}

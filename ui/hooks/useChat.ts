@@ -23,6 +23,7 @@ import {
   isRefinerOpenAtom,
   isRefiningAtom, // Import new atom
   refineModelAtom, // Import new atom
+  pendingWorkflowByRoundAtom,
 } from "../state/atoms";
 // Optimistic AI turn creation is now handled upon TURN_CREATED from backend
 import type {
@@ -67,6 +68,7 @@ export function useChat() {
   const setRefinerData = useSetAtom(refinerDataAtom);
   const setIsRefinerOpen = useSetAtom(isRefinerOpenAtom);
   const setIsRefining = useSetAtom(isRefiningAtom); // Set new atom
+  const setPendingWorkflowByRound = useSetAtom(pendingWorkflowByRoundAtom);
 
   const sendMessage = useCallback(
     async (prompt: string, mode: "new" | "continuation") => {
@@ -104,9 +106,9 @@ export function useChat() {
       // No pending cache: rely on Jotai atom serialization across updaters
 
       try {
-        const shouldUseSynthesis = !!(
-          synthesisProvider && activeProviders.length > 1
-        );
+      const shouldUseSynthesis = !!(
+        synthesisProvider && activeProviders.length > 1
+      );
 
         const fallbackMapping = (() => {
           try {
@@ -189,7 +191,17 @@ export function useChat() {
               }),
               providerMeta: {},
               clientUserTurnId: userTurnId,
-            };
+          };
+
+        setPendingWorkflowByRound((draft: Record<string, any>) => {
+          draft[userTurnId] = {
+            providers: activeProviders,
+            includeSynthesis: shouldUseSynthesis,
+            includeMapping: shouldUseMapping,
+            synthesizer: shouldUseSynthesis ? (synthesisProvider as ProviderKey) : null,
+            mapper: shouldUseMapping ? (effectiveMappingProvider as ProviderKey) : null,
+          };
+        });
 
         // AI turn will be created upon TURN_CREATED from backend
         // Port is already ensured above for extend; for initialize, executeWorkflow ensures port

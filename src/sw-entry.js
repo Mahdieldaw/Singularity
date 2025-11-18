@@ -56,6 +56,9 @@ const HTOS_PERSISTENCE_ENABLED = globalThis.HTOS_PERSISTENCE_ENABLED;
 // ============================================================================
 let sessionManager = null;
 let persistenceLayer = null;
+let persistenceLayerSingleton = null;
+let sessionManagerSingleton = null;
+let adapterSingleton = null;
 const __HTOS_SESSIONS = (self.__HTOS_SESSIONS = self.__HTOS_SESSIONS || {});
 let promptRefinerService = null;
 
@@ -81,9 +84,18 @@ async function initializePersistence() {
   );
 
   try {
-    persistenceLayer = await initializePersistenceLayer();
-    // Expose globally for UI bridge and debugging
-    self.__HTOS_PERSISTENCE_LAYER = persistenceLayer;
+    if (persistenceLayerSingleton) {
+      persistenceLayer = persistenceLayerSingleton;
+      self.__HTOS_PERSISTENCE_LAYER = persistenceLayerSingleton;
+      persistenceMonitor.endOperation(operationId, { success: true });
+      return persistenceLayerSingleton;
+    }
+
+    const pl = await initializePersistenceLayer();
+    persistenceLayerSingleton = pl;
+    adapterSingleton = pl.adapter;
+    persistenceLayer = pl;
+    self.__HTOS_PERSISTENCE_LAYER = pl;
 
     persistenceMonitor.recordConnection("HTOSPersistenceDB", 1, [
       "sessions",
@@ -96,7 +108,7 @@ async function initializePersistence() {
 
     console.log("[SW] ✅ Persistence layer initialized");
     persistenceMonitor.endOperation(operationId, { success: true });
-    return persistenceLayer;
+    return pl;
   } catch (error) {
     persistenceMonitor.endOperation(operationId, null, error);
     const handledError = await errorHandler.handleError(error, {
@@ -116,31 +128,27 @@ async function initializePersistence() {
 // SESSION MANAGER INITIALIZATION
 // ============================================================================
 async function initializeSessionManager(persistenceLayer) {
-  // ✅ ALWAYS reinitialize if adapter is not ready (indicates stale instance)
-  if (sessionManager && sessionManager.adapter?.isReady()) {
+  if (sessionManagerSingleton && sessionManagerSingleton.adapter?.isReady()) {
     console.log("[SW] Reusing existing SessionManager instance");
-    return sessionManager;
+    sessionManager = sessionManagerSingleton;
+    return sessionManagerSingleton;
   }
 
-  // If we have a stale instance, clear it
-  if (sessionManager) {
-    console.warn("[SW] Clearing stale SessionManager instance");
-    sessionManager = null;
+  if (sessionManagerSingleton && !sessionManagerSingleton.adapter?.isReady()) {
+    sessionManagerSingleton = null;
   }
 
   try {
     console.log("[SW:INIT:5] Initializing session manager...");
-    sessionManager = new SessionManager();
-
-    // ✅ CRITICAL: Ensure sessions reference is fresh
-    sessionManager.sessions = __HTOS_SESSIONS;
-
-    await sessionManager.initialize({ adapter: persistenceLayer?.adapter });
-
+    const sm = new SessionManager();
+    sm.sessions = __HTOS_SESSIONS;
+    await sm.initialize({ adapter: (persistenceLayer?.adapter || adapterSingleton) });
+    sessionManagerSingleton = sm;
+    sessionManager = sm;
     console.log("[SW:INIT:6] ✅ Session manager initialized with persistence");
-
-    return sessionManager;
+    return sm;
   } catch (error) {
+    sessionManagerSingleton = null;
     console.error("[SW] ❌ Failed to initialize session manager:", error);
     throw error;
   }
@@ -405,14 +413,11 @@ class FaultTolerantOrchestrator {
 // ============================================================================
 // GLOBAL INFRASTRUCTURE INITIALIZATION
 // ============================================================================
-async function initializeGlobalInfrastructure() {
+async function initializeGlobalInfrastructure_NonDNR() {
   console.log("[SW] Initializing global infrastructure...");
   try {
-    await NetRulesManager.init();
     CSPController.init();
     await UserAgentController.init();
-    await ArkoseController.init();
-    await DNRUtils.initialize();
     await OffscreenController.init();
     await BusController.init();
     self.bus = BusController;
@@ -503,7 +508,7 @@ async function initializeGlobalServices() {
     const sessionManager = await initializeSessionManager(pl);
 
     // 3. Initialize infrastructure
-    await initializeGlobalInfrastructure();
+    await initializeGlobalInfrastructure_NonDNR();
 
     // 4. Initialize providers
     await initializeProviders();
@@ -539,7 +544,8 @@ async function initializeGlobalServices() {
 // ============================================================================
 async function handleUnifiedMessage(message, sender, sendResponse) {
   try {
-    const sm = sessionManager || (await initializeSessionManager());
+    const services = await initializeGlobalServices();
+    const sm = services.sessionManager;
     if (!sm) {
       sendResponse({ success: false, error: "Service not ready" });
       return true;
@@ -1308,11 +1314,31 @@ globalThis.__HTOS_SW = {
   },
 };
 
+function validateSingletons() {
+  const checks = {
+    persistenceLayer: !!persistenceLayerSingleton,
+    adapter:
+      !!adapterSingleton &&
+      typeof adapterSingleton.isReady === "function" &&
+      adapterSingleton.isReady(),
+    sessionManager: !!sessionManagerSingleton,
+    sessionManagerAdapter:
+      sessionManagerSingleton?.adapter ===
+      (adapterSingleton || persistenceLayerSingleton?.adapter),
+  };
+  return Object.values(checks).every(Boolean);
+}
+globalThis.__HTOS_VALIDATE_SINGLETONS = validateSingletons;
+
 // ============================================================================
 // MAIN INITIALIZATION SEQUENCE
 // ============================================================================
 (async () => {
   try {
+    try {
+      await NetRulesManager.init();
+      await ArkoseController.init();
+    } catch (_) {}
     const INIT_TIMEOUT_MS = 30000; // 30s timeout for global initialization
     const timeoutPromise = new Promise((_, reject) => {
       setTimeout(

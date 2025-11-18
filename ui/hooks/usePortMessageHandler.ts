@@ -14,6 +14,7 @@ import {
   mappingProviderAtom,
   synthesisProviderAtom,
   lastActivityAtAtom,
+  pendingWorkflowByRoundAtom,
 } from "../state/atoms";
 import { activeRecomputeStateAtom } from "../state/atoms";
 import { StreamingBuffer } from "../utils/streamingBuffer";
@@ -72,6 +73,8 @@ export function usePortMessageHandler() {
   const mappingProvider = useAtomValue(mappingProviderAtom);
   const synthesisProvider = useAtomValue(synthesisProviderAtom);
   const setLastActivityAt = useSetAtom(lastActivityAtAtom);
+  const pendingWorkflowByRound = useAtomValue(pendingWorkflowByRoundAtom);
+  const setPendingWorkflowByRound = useSetAtom(pendingWorkflowByRoundAtom);
   // Note: We rely on Jotai's per-atom update serialization; no manual pending cache
 
   const streamingBufferRef = useRef<StreamingBuffer | null>(null);
@@ -121,10 +124,10 @@ export function usePortMessageHandler() {
             }
           }
 
-          // Compute active providers at the time of creation
-          const activeProviders = LLM_PROVIDERS_CONFIG.filter(
+          const pending = pendingWorkflowByRound[userTurnId] || null;
+          const activeProviders = (pending?.providers || LLM_PROVIDERS_CONFIG.filter(
             (p) => selectedModels[p.id],
-          ).map((p) => p.id as ProviderKey);
+          ).map((p) => p.id as ProviderKey)) as ProviderKey[];
 
           // Single atomic update to turnsMap ensures we read the latest user turn
           setTurnsMap((draft: Map<string, TurnMessage>) => {
@@ -154,18 +157,22 @@ export function usePortMessageHandler() {
               aiTurnId,
               ensuredUser,
               activeProviders,
-              !!synthesisProvider,
-              !!mappingEnabled && !!mappingProvider,
-              synthesisProvider || undefined,
-              mappingProvider || undefined,
+              !!(pending ? pending.includeSynthesis : synthesisProvider),
+              !!(pending ? pending.includeMapping : mappingEnabled && mappingProvider),
+              (pending ? pending.synthesizer : synthesisProvider) || undefined,
+              (pending ? pending.mapper : mappingProvider) || undefined,
               Date.now(),
               ensuredUser.id,
               {
-                synthesis: !!synthesisProvider,
-                mapping: !!mappingEnabled && !!mappingProvider,
+                synthesis: !!(pending ? pending.includeSynthesis : synthesisProvider),
+                mapping: !!(pending ? pending.includeMapping : mappingEnabled && mappingProvider),
               },
             );
             draft.set(aiTurnId, aiTurn);
+          });
+
+          setPendingWorkflowByRound((draft: Record<string, any>) => {
+            delete draft[userTurnId];
           });
 
           // Ensure ordering in ID list (user first, then AI)

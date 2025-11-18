@@ -21,6 +21,7 @@ interface ChatInputProps {
   mappingTooltip?: string;
   mappingActive?: boolean; // disable input and toggles while active
   onHeightChange?: (height: number) => void; // Callback for height changes
+  isHistoryPanelOpen?: boolean;
 }
 
 const ChatInput = ({
@@ -39,6 +40,7 @@ const ChatInput = ({
   mappingTooltip,
   mappingActive = false,
   onHeightChange,
+  isHistoryPanelOpen = false,
 }: ChatInputProps) => {
   const CHAT_INPUT_STORAGE_KEY = "htos_chat_input_value";
   const [prompt, setPrompt] = useAtom(chatInputValueAtom);
@@ -89,7 +91,8 @@ const ChatInput = ({
         width: "100%",
         padding: "8px 12px",
         boxSizing: "border-box",
-        zIndex: 2001,
+        zIndex: isHistoryPanelOpen ? 900 : 2001,
+        pointerEvents: isHistoryPanelOpen ? "none" : "auto",
         display: "flex",
         justifyContent: "center",
       }}

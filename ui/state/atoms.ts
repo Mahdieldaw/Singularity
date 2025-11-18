@@ -100,6 +100,28 @@ export const showSourceOutputsFamily = atomFamily(
 );
 export const showScrollToBottomAtom = atom<boolean>(false);
 
+// AI turn UI state (per-turn)
+export const aiTurnSynthesisExpandedFamily = atomFamily(
+  (turnId: string) => atom(true),
+  (a, b) => a === b,
+);
+export const aiTurnMappingExpandedFamily = atomFamily(
+  (turnId: string) => atom(true),
+  (a, b) => a === b,
+);
+export const aiTurnSynthExpandedFamily = atomFamily(
+  (turnId: string) => atom(false),
+  (a, b) => a === b,
+);
+export const aiTurnMapExpandedFamily = atomFamily(
+  (turnId: string) => atom(false),
+  (a, b) => a === b,
+);
+export const aiTurnMappingTabFamily = atomFamily(
+  (turnId: string) => atom<"map" | "options">("map"),
+  (a, b) => a === b,
+);
+
 // -----------------------------
 // Model & feature configuration (persisted)
 // -----------------------------
@@ -185,6 +207,19 @@ export const alertTextAtom = atom<string | null>(null);
 export const chatInputHeightAtom = atom<number>(80);
 // Track last meaningful workflow activity to allow UI watchdogs
 export const lastActivityAtAtom = atom<number>(0);
+
+export const pendingWorkflowByRoundAtom = atomWithImmer<
+  Record<
+    string,
+    {
+      providers: string[];
+      includeSynthesis: boolean;
+      includeMapping: boolean;
+      synthesizer: string | null;
+      mapper: string | null;
+    }
+  >
+>({});
 
 // -----------------------------
 // Derived atoms (examples)

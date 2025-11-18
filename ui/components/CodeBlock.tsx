@@ -70,7 +70,7 @@ function languageToExt(lang: string): string {
 }
 
 export default function CodeBlock({ inline, className, children }: Props) {
-  const isInline = !!inline;
+  const isInline = inline === true;
   const codeText = useMemo(() => String(children || ""), [children]);
   const match = useMemo(
     () => /language-([a-zA-Z0-9+#]+)/.exec(String(className || "")),

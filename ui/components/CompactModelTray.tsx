@@ -22,6 +22,7 @@ interface CompactModelTrayProps {
   chatInputHeight?: number;
   refineModel: string;
   onSetRefineModel: (model: string) => void;
+  isHistoryPanelOpen?: boolean;
 }
 
 const CompactModelTray = ({ 
@@ -44,6 +45,7 @@ const CompactModelTray = ({
   chatInputHeight = 80,
   refineModel,
   onSetRefineModel,
+  isHistoryPanelOpen = false,
 }: CompactModelTrayProps) => {
   const [isExpanded, setIsExpanded] = useState(false);
   const [showModelsDropdown, setShowModelsDropdown] = useState(false);
@@ -58,7 +60,7 @@ const CompactModelTray = ({
   const canRefine = activeCount >= 2;
   const mapProviderId = mappingProvider || '';
   const unifyProviderId = synthesisProvider || '';
-  const isMapEnabled = mappingEnabled && !!mapProviderId;
+  const isMapEnabled = !!mappingEnabled;
   const isUnifyEnabled = !!unifyProviderId;
 
   useEffect(() => {
@@ -188,7 +190,8 @@ const CompactModelTray = ({
         transform: 'translateX(-50%)',
         width: 'min(800px, calc(100% - 32px))',
         maxHeight: 'calc(100vh - 120px)',
-        zIndex: 2000,
+        zIndex: isHistoryPanelOpen ? 900 : 2000,
+        pointerEvents: isHistoryPanelOpen ? 'none' : 'auto',
         transition: 'bottom 0.2s ease-out',
       }}
     >
@@ -846,7 +849,7 @@ const CompactModelTray = ({
                   <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                     <input
                       type="checkbox"
-                      checked={isMapEnabled}
+                      checked={!!mappingEnabled}
                       onChange={(e) => {
                         if (isLoading) return;
                         const checked = e.target.checked;
@@ -855,6 +858,16 @@ const CompactModelTray = ({
                         if (!checked) {
                           onSetMappingProvider?.(null);
                           try { localStorage.removeItem('htos_mapping_provider'); } catch (_) {}
+                        } else {
+                          if (!mapProviderId) {
+                            const selectedIds = LLM_PROVIDERS_CONFIG.map(p => p.id).filter(id => selectedModels[id]);
+                            const avoid = unifyProviderId || '';
+                            const fallback = selectedIds.find(id => id && id !== avoid) || null;
+                            onSetMappingProvider?.(fallback);
+                            try {
+                              if (fallback) localStorage.setItem('htos_mapping_provider', fallback);
+                            } catch {}
+                          }
                         }
                       }}
                       disabled={!canRefine || isLoading}
@@ -898,7 +911,7 @@ const CompactModelTray = ({
                         }
                       } catch (_) {}
                     }}
-                    disabled={!isMapEnabled || !canRefine || isLoading}
+                    disabled={!mappingEnabled || !canRefine || isLoading}
                     style={{
                       background: 'rgba(255, 255, 255, 0.1)',
                       border: '1px solid rgba(255, 255, 255, 0.2)',
@@ -906,7 +919,7 @@ const CompactModelTray = ({
                       color: '#e2e8f0',
                       fontSize: '12px',
                       padding: '2px 6px',
-                      opacity: isMapEnabled && canRefine ? 1 : 0.5,
+                      opacity: mappingEnabled && canRefine ? 1 : 0.5,
                     }}
                   >
                     <option value="">Select...</option>

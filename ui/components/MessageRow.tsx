@@ -3,6 +3,7 @@ import { atom, useAtomValue } from "jotai";
 import { turnsMapAtom } from "../state/atoms";
 import UserTurnBlockConnected from "./UserTurnBlockConnected";
 import AiTurnBlockConnected from "./AiTurnBlockConnected";
+import ErrorBoundary from "./ErrorBoundary";
 
 function MessageRow({ turnId }: { turnId: string }) {
   const turnAtom = useMemo(
@@ -23,7 +24,9 @@ function MessageRow({ turnId }: { turnId: string }) {
     (message as any).type === "user" ? (
       <UserTurnBlockConnected userTurn={message as any} />
     ) : (
-      <AiTurnBlockConnected aiTurn={message as any} />
+      <ErrorBoundary>
+        <AiTurnBlockConnected aiTurn={message as any} />
+      </ErrorBoundary>
     );
 
   // Wrap each row with an anchor for scroll/highlight targeting

@@ -59,6 +59,7 @@ const ClipsCarousel: React.FC<ClipsCarouselProps> = ({
 
         return (
           <button
+            type="button"
             key={String(p.id)}
             onClick={() => !isDisabled && onClipClick(String(p.id))}
             disabled={isDisabled}

@@ -9,6 +9,7 @@ import {
   isVisibleModeAtom,
   isReducedMotionAtom,
   chatInputHeightAtom, // ← ADD THIS
+  isHistoryPanelOpenAtom,
 } from "../state/atoms";
 import ChatInput from "./ChatInput";
 
@@ -29,6 +30,7 @@ const ChatInputConnected = () => {
     any,
   ];
   const [, setChatInputHeight] = useAtom(chatInputHeightAtom); // ← ADD THIS
+  const [isHistoryOpen] = useAtom(isHistoryPanelOpenAtom);
   const { sendMessage, abort, refinePrompt } = useChat();
 
   const handleSend = useCallback(
@@ -69,6 +71,7 @@ const ChatInputConnected = () => {
       isVisibleMode={isVisibleMode}
       isContinuationMode={isContinuationMode}
       onHeightChange={setChatInputHeight} // ← ADD THIS
+      isHistoryPanelOpen={!!isHistoryOpen}
     />
   );
 };

@@ -13,6 +13,7 @@ import {
   isFirstTurnAtom,
   isLoadingAtom,
   refineModelAtom,
+  isHistoryPanelOpenAtom,
 } from "../state/atoms";
 
 const CompactModelTrayConnected = () => {
@@ -31,6 +32,7 @@ const CompactModelTrayConnected = () => {
   const [isFirstLoad] = useAtom(isFirstTurnAtom);
   const [isLoading] = useAtom(isLoadingAtom);
   const [refineModel, setRefineModel] = useAtom(refineModelAtom);
+  const [isHistoryOpen] = useAtom(isHistoryPanelOpenAtom);
 
   // ✅ FIX: Proper immutable updates (no draft mutation)
   const handleToggleModel = (providerId: string) => {
@@ -119,6 +121,7 @@ const CompactModelTrayConnected = () => {
       chatInputHeight={chatInputHeight}
       refineModel={refineModel}
       onSetRefineModel={handleSetRefineModel}
+      isHistoryPanelOpen={!!isHistoryOpen}
     />
   );
 };
