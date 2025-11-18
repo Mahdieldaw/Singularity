@@ -1,6 +1,6 @@
 import { atom } from "jotai";
 import { atomWithImmer } from "jotai-immer";
-import { atomWithStorage } from "jotai/utils";
+import { atomWithStorage, atomFamily } from "jotai/utils";
 
 // Import UI types and constants
 import type {
@@ -68,9 +68,7 @@ export const currentSessionIdAtom = atomWithStorage<string | null>(
   "htos_last_session_id",
   null,
 );
-export const pendingUserTurnsAtom = atomWithImmer<Map<string, UserTurn>>(
-  new Map(),
-);
+// Deprecated legacy pending user turns removed; TURN_CREATED event handles optimistic UI
 
 // -----------------------------
 // UI phase & loading
@@ -92,7 +90,10 @@ export const isContinuationModeAtom = atom((get) => {
 export const isHistoryPanelOpenAtom = atom<boolean>(false);
 export const isSettingsOpenAtom = atom<boolean>(false);
 export const showWelcomeAtom = atom((get) => get(turnIdsAtom).length === 0);
-export const expandedUserTurnsAtom = atomWithImmer<Record<string, boolean>>({});
+export const turnExpandedStateFamily = atomFamily(
+  (turnId: string) => atom(false),
+  (a, b) => a === b,
+);
 export const showSourceOutputsAtom = atom<boolean>(false);
 export const showScrollToBottomAtom = atom<boolean>(false);
 

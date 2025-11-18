@@ -21,7 +21,12 @@ export class StreamingBuffer {
   > = new Map();
 
   private flushTimer: number | null = null;
+  private deferredTimeout: number | null = null;
   private onFlushCallback: (updates: BatchUpdate[]) => void;
+  private readonly MAX_CHUNKS_PER_PROVIDER = 500;
+  private chunkCounts: Map<string, number> = new Map();
+  private readonly FLUSH_MIN_INTERVAL_MS = 100;
+  private lastFlushAt: number = 0;
 
   constructor(onFlush: (updates: BatchUpdate[]) => void) {
     this.onFlushCallback = onFlush;
@@ -40,6 +45,7 @@ export class StreamingBuffer {
         status,
         responseType,
       });
+      this.chunkCounts.set(key, 0);
     }
 
     const entry = this.pendingDeltas.get(key)!;
@@ -47,16 +53,27 @@ export class StreamingBuffer {
     entry.status = status;
     entry.responseType = responseType;
 
+    const count = (this.chunkCounts.get(key) || 0) + 1;
+    this.chunkCounts.set(key, count);
+    if (count >= this.MAX_CHUNKS_PER_PROVIDER) {
+      this.flushImmediate();
+      return;
+    }
+
     this.scheduleBatchFlush();
   }
 
   private scheduleBatchFlush() {
-    // Cancel any pending flush
-    if (this.flushTimer !== null) {
-      cancelAnimationFrame(this.flushTimer);
+    if (this.flushTimer !== null || this.deferredTimeout !== null) return;
+    const sinceLast = Date.now() - this.lastFlushAt;
+    if (sinceLast < this.FLUSH_MIN_INTERVAL_MS) {
+      const remaining = this.FLUSH_MIN_INTERVAL_MS - sinceLast;
+      this.deferredTimeout = window.setTimeout(() => {
+        this.deferredTimeout = null;
+        this.flushImmediate();
+      }, remaining);
+      return;
     }
-
-    // ⭐ DOUBLE-RAF PATTERN: First RAF schedules, second RAF executes after layout
     this.flushTimer = window.requestAnimationFrame(() => {
       window.requestAnimationFrame(() => {
         this.flushAll();
@@ -85,10 +102,12 @@ export class StreamingBuffer {
     });
 
     this.pendingDeltas.clear();
+    this.chunkCounts.clear();
 
     if (updates.length > 0) {
       updates.sort((a, b) => a.createdAt - b.createdAt);
       this.onFlushCallback(updates);
+      this.lastFlushAt = Date.now();
     }
   }
 
@@ -96,6 +115,10 @@ export class StreamingBuffer {
     if (this.flushTimer !== null) {
       cancelAnimationFrame(this.flushTimer);
       this.flushTimer = null;
+    }
+    if (this.deferredTimeout !== null) {
+      clearTimeout(this.deferredTimeout);
+      this.deferredTimeout = null;
     }
     this.flushAll();
   }
@@ -105,6 +128,28 @@ export class StreamingBuffer {
       cancelAnimationFrame(this.flushTimer);
       this.flushTimer = null;
     }
+    if (this.deferredTimeout !== null) {
+      clearTimeout(this.deferredTimeout);
+      this.deferredTimeout = null;
+    }
     this.pendingDeltas.clear();
+    this.chunkCounts.clear();
+  }
+
+  getMemoryStats() {
+    let totalChunks = 0;
+    let totalBytes = 0;
+    this.pendingDeltas.forEach((entry) => {
+      totalChunks += entry.deltas.length;
+      entry.deltas.forEach((d) => {
+        totalBytes += (d.text?.length || 0) * 2;
+      });
+    });
+    return {
+      providers: this.pendingDeltas.size,
+      totalChunks,
+      totalBytes,
+      estimatedMB: Number((totalBytes / 1024 / 1024).toFixed(2)),
+    };
   }
 }

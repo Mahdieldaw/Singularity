@@ -1038,6 +1038,10 @@ export class WorkflowEngine {
    */
   async executePromptStep(step, context) {
     const { prompt, providers, useThinking, providerContexts } = step.payload;
+    try {
+      const mod = await import("./RateLimiter.js");
+      for (const pid of providers) await mod.rateLimiter.acquire(pid);
+    } catch (_) {}
 
     return new Promise((resolve, reject) => {
       this.orchestrator.executeParallelFanout(prompt, providers, {

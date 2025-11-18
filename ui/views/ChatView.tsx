@@ -192,7 +192,7 @@ export default function ChatView() {
           followOutput={(isAtBottom: boolean) =>
             isAtBottom ? "smooth" : false
           }
-          increaseViewportBy={{ top: 800, bottom: 600 }}
+          increaseViewportBy={{ top: 300, bottom: 200 }}
           components={{
             Scroller: ScrollerComponent as unknown as React.ComponentType<any>,
           }}

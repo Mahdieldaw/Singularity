@@ -292,12 +292,6 @@ class ExtensionAPI {
       `[API] setSessionId called for ${sessionId}, but this is now handled automatically.`,
     );
   }
-
-  updateProviderContext(providerId: string, context: any): void {
-    console.warn(
-      "`updateProviderContext` is deprecated. Context is managed by the backend.",
-    );
-  }
 }
 
 const api = new ExtensionAPI();

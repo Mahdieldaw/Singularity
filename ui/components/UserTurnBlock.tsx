@@ -55,9 +55,7 @@ const CopyButton = ({
 interface UserTurnBlockProps {
   userTurn: UserTurn;
   isExpanded: boolean;
-  onToggle: (turnId: string) => void;
-  // Note: All props related to the action bar have been removed.
-  // The UserTurnBlock is now a pure display component for the prompt.
+  onToggle: () => void;
 }
 
 const UserTurnBlock = ({
@@ -118,7 +116,7 @@ const UserTurnBlock = ({
             cursor: "pointer",
             marginBottom: isExpanded ? "8px" : "0px",
           }}
-          onClick={() => onToggle(userTurn.id)}
+        onClick={onToggle}
         >
           <span style={{ fontSize: "12px", fontWeight: 600, color: "#e2e8f0" }}>
             Your Prompt

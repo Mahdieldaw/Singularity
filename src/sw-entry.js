@@ -32,6 +32,8 @@ import { ChatGPTProviderController } from "./providers/chatgpt.js";
 import { QwenProviderController } from "./providers/qwen.js";
 import { DNRUtils } from "./core/dnr-utils.js";
 import { ConnectionHandler } from "./core/connection-handler.js";
+import { CircuitBreaker } from "./core/CircuitBreaker.js";
+import { sessionRegistry } from "./core/session-registry.js";
 
 // Persistence Layer Imports
 import { SessionManager } from "./persistence/SessionManager.js";
@@ -211,6 +213,7 @@ class FaultTolerantOrchestrator {
   constructor() {
     this.activeRequests = new Map();
     this.lifecycleManager = self.lifecycleManager;
+    this.circuitBreakers = new Map();
   }
 
   async executeParallelFanout(prompt, providers, options = {}) {
@@ -236,6 +239,10 @@ class FaultTolerantOrchestrator {
       return (async () => {
         const abortController = new AbortController();
         abortControllers.set(providerId, abortController);
+        try {
+          const s = sessionRegistry.get(sessionId) || sessionRegistry.register(sessionId);
+          s.addAbortController(`${sessionId}:${providerId}`, abortController);
+        } catch (_) {}
 
         const adapter = providerRegistry.getAdapter(providerId);
         if (!adapter) {
@@ -282,9 +289,6 @@ class FaultTolerantOrchestrator {
         };
 
         try {
-          // Favor unified ask() if available; fall back to sendPrompt().
-          // ask(prompt, providerContext?, sessionId?, onChunk, signal)
-          // Prefer passing only the meta shape to adapters for consistency.
           const providerContext =
             providerContexts[providerId]?.meta ||
             providerContexts[providerId] ||
@@ -308,23 +312,26 @@ class FaultTolerantOrchestrator {
           };
 
           let result;
-          if (typeof adapter.ask === "function") {
-            // Pass the canonicalized providerContext (prefer meta shape) to adapters
-            result = await adapter.ask(
-              request.originalPrompt,
-              providerContext,
-              sessionId,
-              onChunkWrapped,
-              abortController.signal,
-            );
-          } else {
-            // When context exists, it's already merged into request.meta above.
-            result = await adapter.sendPrompt(
+          if (!this.circuitBreakers.has(providerId)) {
+            this.circuitBreakers.set(providerId, new CircuitBreaker());
+          }
+          const breaker = this.circuitBreakers.get(providerId);
+          result = await breaker.execute(async () => {
+            if (typeof adapter.ask === "function") {
+              return await adapter.ask(
+                request.originalPrompt,
+                providerContext,
+                sessionId,
+                onChunkWrapped,
+                abortController.signal,
+              );
+            }
+            return await adapter.sendPrompt(
               request,
               onChunkWrapped,
               abortController.signal,
             );
-          }
+          });
 
           if (!result.text && aggregatedText) {
             result.text = aggregatedText;
@@ -974,12 +981,7 @@ async function handleUnifiedMessage(message, sender, sendResponse) {
         return true;
       }
 
-      case "SAVE_TURN": {
-        const sessionId = message.sessionId || message.payload?.sessionId;
-        await sm.addTurn(sessionId, message.turn);
-        sendResponse({ success: true });
-        return true;
-      }
+      
 
       case "UPDATE_PROVIDER_CONTEXT": {
         const sessionId = message.sessionId || message.payload?.sessionId;
@@ -992,26 +994,9 @@ async function handleUnifiedMessage(message, sender, sendResponse) {
         return true;
       }
 
-      case "CREATE_THREAD": {
-        const sessionId = message.sessionId || message.payload?.sessionId;
-        const thread = await sm.createThread(
-          sessionId,
-          message.title || message.payload?.title,
-          message.sourceAiTurnId || message.payload?.sourceAiTurnId,
-        );
-        sendResponse({ success: true, thread });
-        return true;
-      }
+      
 
-      case "SWITCH_THREAD": {
-        const sessionId = message.sessionId || message.payload?.sessionId;
-        await sm.switchThread(
-          sessionId,
-          message.threadId || message.payload?.threadId,
-        );
-        sendResponse({ success: true });
-        return true;
-      }
+      
 
       case "DELETE_SESSION": {
         const sessionId = message.sessionId || message.payload?.sessionId;
