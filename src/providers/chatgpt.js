@@ -172,7 +172,7 @@ export class ChatGPTProviderController {
     return await this.api.ask(
       payload.prompt,
       payload.options || {},
-      payload.onChunk || (() => {})
+      payload.onChunk || (() => {}),
     );
   }
 
@@ -300,7 +300,9 @@ export class ChatGPTSessionApi {
    * Ask ChatGPT with mandatory Arkose preflight and PoW.
    */
   async ask(prompt, options = {}, onChunk = () => {}) {
-    const dbg = (...args) => { if (this._debug) console.debug(...args); };
+    const dbg = (...args) => {
+      if (this._debug) console.debug(...args);
+    };
     // For log safety only: prepare a display-limited version without altering the actual prompt
     const safeDisplayPrompt =
       typeof prompt === "string"
@@ -345,8 +347,8 @@ export class ChatGPTSessionApi {
             const timeoutPromise = new Promise((_, reject) =>
               setTimeout(
                 () => reject(new Error("poll_timeout")),
-                __chatgpt_poll_timeout_ms
-              )
+                __chatgpt_poll_timeout_ms,
+              ),
             );
             __chatgpt_offscreen_ready = await Promise.race([
               pollPromise,
@@ -357,13 +359,14 @@ export class ChatGPTSessionApi {
               this._offscreenEverReady = true;
               break;
             }
-            } catch (innerError) {
-            if (this._debug) console.warn(
-              `[ChatGPT Debug] Poll attempt failed, retries left: ${
-                retries - 1
-              }`,
-              innerError
-            );
+          } catch (innerError) {
+            if (this._debug)
+              console.warn(
+                `[ChatGPT Debug] Poll attempt failed, retries left: ${
+                  retries - 1
+                }`,
+                innerError,
+              );
             retries--;
             if (retries > 0) {
               await new Promise((resolve) => setTimeout(resolve, 1000)); // Wait 1s between retries
@@ -372,34 +375,38 @@ export class ChatGPTSessionApi {
         }
       } catch (e) {
         if (String(e).includes("poll_timeout")) {
-          if (this._debug) console.warn("[ChatGPT Debug] poll startup.oiReady timed out", {
-            ts: Date.now(),
-            dur: Date.now() - __chatgpt_offscreen_poll_start,
-          });
+          if (this._debug)
+            console.warn("[ChatGPT Debug] poll startup.oiReady timed out", {
+              ts: Date.now(),
+              dur: Date.now() - __chatgpt_offscreen_poll_start,
+            });
         } else {
-          if (this._debug) console.error("[ChatGPT Debug] poll startup.oiReady error", e, {
-            ts: Date.now(),
-            dur: Date.now() - __chatgpt_offscreen_poll_start,
-          });
+          if (this._debug)
+            console.error("[ChatGPT Debug] poll startup.oiReady error", e, {
+              ts: Date.now(),
+              dur: Date.now() - __chatgpt_offscreen_poll_start,
+            });
         }
         __chatgpt_offscreen_ready = false;
       }
     } else {
-      if (this._debug) console.warn("[ChatGPT Debug] No bus.poll method available");
+      if (this._debug)
+        console.warn("[ChatGPT Debug] No bus.poll method available");
       __chatgpt_offscreen_ready = false;
     }
 
-    if (this._debug) console.log("[ChatGPT Debug] poll startup.oiReady result", {
-      result: __chatgpt_offscreen_ready,
-      ts: Date.now(),
-      dur: Date.now() - __chatgpt_offscreen_poll_start,
-    });
+    if (this._debug)
+      console.log("[ChatGPT Debug] poll startup.oiReady result", {
+        result: __chatgpt_offscreen_ready,
+        ts: Date.now(),
+        dur: Date.now() - __chatgpt_offscreen_poll_start,
+      });
 
     // Fail fast if offscreen isn't ready to avoid cascading errors later
     if (!__chatgpt_offscreen_ready) {
       this._throw(
         "offscreen_not_ready",
-        "The Arkose solver (offscreen iframe) did not respond in time."
+        "The Arkose solver (offscreen iframe) did not respond in time.",
       );
     }
 
@@ -409,13 +416,13 @@ export class ChatGPTSessionApi {
         await __bg_bus.poll("startup.oiReady");
       } else {
         this._sesWarn(
-          "[ChatGPT Session] No bus.poll available in background context"
+          "[ChatGPT Session] No bus.poll available in background context",
         );
       }
     } catch (error) {
       this._sesWarn(
         "[ChatGPT Session] Offscreen (oi) readiness check failed:",
-        error
+        error,
       );
     }
 
@@ -426,7 +433,7 @@ export class ChatGPTSessionApi {
     this._sesLog(
       `[ChatGPT Session] Access token status: ${
         hasToken ? "present" : "missing"
-      }`
+      }`,
     );
 
     // 1) Generate lightweight proof for requirements call
@@ -465,7 +472,7 @@ export class ChatGPTSessionApi {
       }
       throw new ChatGPTProviderError(
         "aeHeaderInjectionFailed",
-        `Failed to inject AE headers: ${e.message || e}`
+        `Failed to inject AE headers: ${e.message || e}`,
       );
     }
 
@@ -483,7 +490,7 @@ export class ChatGPTSessionApi {
       const errJson = await this._safeJson(res);
       console.error(
         `[ChatGPT Session] Request failed with status ${res.status}:`,
-        errJson
+        errJson,
       );
       if (res.status === 429) this._throw("tooManyRequests", errJson);
       if (res.status === 403) this._throw("forbidden", errJson);
@@ -535,7 +542,7 @@ export class ChatGPTSessionApi {
           }
         }
         this._sesLog(
-          `[ChatGPT Session] SSE stream completed. Total chunks: ${chunkCount}, final text length: ${aggText.length}`
+          `[ChatGPT Session] SSE stream completed. Total chunks: ${chunkCount}, final text length: ${aggText.length}`,
         );
       } catch (e) {
         console.error("[ChatGPT Session] SSE stream error:", e);
@@ -553,7 +560,7 @@ export class ChatGPTSessionApi {
     // If server responds JSON (WSS bootstrap), we don't support WSS here.
     this._throw(
       "failedToReadResponse",
-      "Unexpected response type; WSS not supported in this path"
+      "Unexpected response type; WSS not supported in this path",
     );
   }
 
@@ -669,7 +676,7 @@ export class ChatGPTSessionApi {
       console.error(
         "[ChatGPT Session] Network fetch failed for",
         this._url(path),
-        fetchErr
+        fetchErr,
       );
       // Re-throw so upstream error handling can classify it
       throw fetchErr;
@@ -690,7 +697,7 @@ export class ChatGPTSessionApi {
         console.error(
           "[ChatGPT Session] Network fetch retry failed for",
           this._url(path),
-          fetchErr
+          fetchErr,
         );
         throw fetchErr;
       }
@@ -735,13 +742,13 @@ export class ChatGPTSessionApi {
   async _busSendWithTimeout(
     action,
     payload,
-    { timeoutMs = 12000, retries = 1 } = {}
+    { timeoutMs = 12000, retries = 1 } = {},
   ) {
     const attempt = async () => {
       try {
         const truncatedPayload = JSON.stringify(payload).slice(0, 200) + "...";
         this._sesLog(
-          `[ChatGPT Session] Bus call: ${action} payload=${truncatedPayload}`
+          `[ChatGPT Session] Bus call: ${action} payload=${truncatedPayload}`,
         );
         const bus = this._getHtosBus();
         if (!bus || typeof bus.send !== "function") {
@@ -749,7 +756,7 @@ export class ChatGPTSessionApi {
         }
         const sendPromise = bus.send(action, payload);
         const timeoutPromise = new Promise((_, reject) =>
-          setTimeout(() => reject(new Error("timeout")), timeoutMs)
+          setTimeout(() => reject(new Error("timeout")), timeoutMs),
         );
         const res = await Promise.race([sendPromise, timeoutPromise]);
         return res;
@@ -757,7 +764,7 @@ export class ChatGPTSessionApi {
         this._sesLog(`[ChatGPT Session] Bus response: ${action} result=error`);
         console.warn(
           `[ChatGPTSessionApi] BusController.send failed: ${action}`,
-          e
+          e,
         );
         throw e;
       }
@@ -773,7 +780,7 @@ export class ChatGPTSessionApi {
           this._sesLog(
             `[ChatGPTSessionApi] Retrying BusController.send ${action} (attempt ${
               i + 2
-            })`
+            })`,
           );
         }
       }
@@ -782,7 +789,7 @@ export class ChatGPTSessionApi {
     // If we get here, all attempts failed
     if (String(lastErr).toLowerCase().includes("timeout")) {
       console.error(
-        `[ChatGPT Session] Bus call ${action} timed out after ${timeoutMs}ms with ${retries} retries`
+        `[ChatGPT Session] Bus call ${action} timed out after ${timeoutMs}ms with ${retries} retries`,
       );
       throw this._createError("arkose_timeout", {
         action,
@@ -793,7 +800,7 @@ export class ChatGPTSessionApi {
     }
     console.error(
       `[ChatGPT Session] Bus call ${action} failed after ${retries} retries:`,
-      lastErr
+      lastErr,
     );
     throw lastErr;
   }
@@ -809,15 +816,16 @@ export class ChatGPTSessionApi {
         scripts,
         dpl,
       };
-      if (this._debug) console.log("[ChatGPT Debug] about to call ai.generateProofToken", {
-        ts: Date.now(),
-        payload: { seed, difficulty, scripts: scripts?.length || 0, dpl },
-      });
+      if (this._debug)
+        console.log("[ChatGPT Debug] about to call ai.generateProofToken", {
+          ts: Date.now(),
+          payload: { seed, difficulty, scripts: scripts?.length || 0, dpl },
+        });
       // Use bus send with timeout helper to avoid hanging the session
       const __chatgpt_gen_res = await this._busSendWithTimeout(
         "ai.generateProofToken",
         __chatgpt_gen_payload,
-        { timeoutMs: 15000, retries: 2 }
+        { timeoutMs: 15000, retries: 2 },
       ).catch((e) => {
         // Always surface errors; debug gating should not suppress failures
         console.error("[ChatGPT] ai.generateProofToken error", e, {
@@ -826,11 +834,12 @@ export class ChatGPTSessionApi {
         });
         throw e;
       });
-      if (this._debug) console.log("[ChatGPT Debug] ai.generateProofToken response", {
-        res: __chatgpt_gen_res,
-        ts: Date.now(),
-        dur: Date.now() - __chatgpt_gen_start,
-      });
+      if (this._debug)
+        console.log("[ChatGPT Debug] ai.generateProofToken response", {
+          res: __chatgpt_gen_res,
+          ts: Date.now(),
+          dur: Date.now() - __chatgpt_gen_start,
+        });
       // Validate the response – it must be a non-empty string. Structured
       // error objects or null/undefined should be treated as failures.
       if (!__chatgpt_gen_res || typeof __chatgpt_gen_res !== "string") {
@@ -877,7 +886,7 @@ export class ChatGPTSessionApi {
     if (!url) {
       throw new ChatGPTProviderError(
         "requirementsConfigMissing",
-        "Requirements URL not configured in AE_CONFIG"
+        "Requirements URL not configured in AE_CONFIG",
       );
     }
     // Only include the proof param if we actually have one
@@ -894,7 +903,7 @@ export class ChatGPTSessionApi {
       if (!res.ok) {
         throw new ChatGPTProviderError(
           "requirementsFetchFailed",
-          `Requirements fetch failed with status ${res.status}: ${res.statusText}`
+          `Requirements fetch failed with status ${res.status}: ${res.statusText}`,
         );
       }
       return await res.json();
@@ -905,7 +914,7 @@ export class ChatGPTSessionApi {
       }
       throw new ChatGPTProviderError(
         "requirementsFetchFailed",
-        `Failed to fetch requirements: ${e.message || e}`
+        `Failed to fetch requirements: ${e.message || e}`,
       );
     }
   }
@@ -931,21 +940,22 @@ export class ChatGPTSessionApi {
         accessToken: this._accessToken, // Pass the access token.
       };
 
-      if (this._debug) console.log("[ChatGPT Debug] about to call ai.retrieveArkoseToken", {
-        ts: Date.now(),
-        payload: {
-          dx: "<redacted-for-logs>",
-          config: "omitted",
-          accessToken: "omitted",
-        },
-      });
+      if (this._debug)
+        console.log("[ChatGPT Debug] about to call ai.retrieveArkoseToken", {
+          ts: Date.now(),
+          payload: {
+            dx: "<redacted-for-logs>",
+            config: "omitted",
+            accessToken: "omitted",
+          },
+        });
       const __chatgpt_ret_start = Date.now();
 
       // Use the corrected payload in the bus call
       const __chatgpt_ret_res = await this._busSendWithTimeout(
         "ai.retrieveArkoseToken",
         payload,
-        { timeoutMs: 15000, retries: 2 }
+        { timeoutMs: 15000, retries: 2 },
       ).catch((e) => {
         // Always surface errors; debug gating should not suppress failures
         console.error("[ChatGPT] ai.retrieveArkoseToken error", e, {
@@ -955,11 +965,12 @@ export class ChatGPTSessionApi {
         throw e;
       });
 
-      if (this._debug) console.log("[ChatGPT Debug] ai.retrieveArkoseToken response", {
-        res: __chatgpt_ret_res,
-        ts: Date.now(),
-        dur: Date.now() - __chatgpt_ret_start,
-      });
+      if (this._debug)
+        console.log("[ChatGPT Debug] ai.retrieveArkoseToken response", {
+          res: __chatgpt_ret_res,
+          ts: Date.now(),
+          dur: Date.now() - __chatgpt_ret_start,
+        });
       return __chatgpt_ret_res;
     } catch (e) {
       this._logError("arkose token retrieval failed", e);
@@ -975,7 +986,7 @@ export class ChatGPTSessionApi {
     // Sentinel token header
     const sentinelToken = this._get(
       requirements,
-      AE_CONFIG.requirements.tokenPath
+      AE_CONFIG.requirements.tokenPath,
     );
     if (sentinelToken && AE_CONFIG.requirements.headerName) {
       headers[AE_CONFIG.requirements.headerName] = sentinelToken;
@@ -991,7 +1002,7 @@ export class ChatGPTSessionApi {
       if (!seed || !difficulty) {
         throw new ChatGPTProviderError(
           "powParametersMissing",
-          `PoW required but missing parameters: seed=${!!seed}, difficulty=${!!difficulty}`
+          `PoW required but missing parameters: seed=${!!seed}, difficulty=${!!difficulty}`,
         );
       }
 
@@ -1000,7 +1011,7 @@ export class ChatGPTSessionApi {
         if (!token) {
           throw new ChatGPTProviderError(
             "powGenerationFailed",
-            "PoW token generation returned null/empty result"
+            "PoW token generation returned null/empty result",
           );
         }
         headers[AE_CONFIG.pow.headerName] = token;
@@ -1012,7 +1023,7 @@ export class ChatGPTSessionApi {
           isTimeout ? "powTimeout" : "powGenerationFailed",
           `Failed to generate PoW token${isTimeout ? " (timeout)" : ""}: ${
             e.message || e
-          }`
+          }`,
         );
       }
     }
@@ -1020,7 +1031,7 @@ export class ChatGPTSessionApi {
     // Arkose header - fail fast if required but generation fails
     const arkoseRequired = !!this._get(
       requirements,
-      AE_CONFIG.requirements.arkoseRequiredPath
+      AE_CONFIG.requirements.arkoseRequiredPath,
     );
     if (arkoseRequired) {
       this._sesLog("[ChatGPT Session] Arkose token required, retrieving...");
@@ -1029,7 +1040,7 @@ export class ChatGPTSessionApi {
       if (!dx) {
         throw new ChatGPTProviderError(
           "arkoseParametersMissing",
-          "Arkose required but dx parameter is missing from requirements"
+          "Arkose required but dx parameter is missing from requirements",
         );
       }
 
@@ -1038,7 +1049,7 @@ export class ChatGPTSessionApi {
         if (!arkoseToken) {
           throw new ChatGPTProviderError(
             "arkoseRetrievalFailed",
-            "Arkose token retrieval returned null/empty result"
+            "Arkose token retrieval returned null/empty result",
           );
         }
         headers[AE_CONFIG.headerName] = arkoseToken;
@@ -1050,7 +1061,7 @@ export class ChatGPTSessionApi {
           isTimeout ? "arkoseTimeout" : "arkoseRetrievalFailed",
           `Failed to retrieve Arkose token${isTimeout ? " (timeout)" : ""}: ${
             e.message || e
-          }`
+          }`,
         );
       }
     }
@@ -1060,7 +1071,7 @@ export class ChatGPTSessionApi {
 
   _buildAskBody(
     prompt,
-    { model, chatId, parentMessageId, attachments, think = false }
+    { model, chatId, parentMessageId, attachments, think = false },
   ) {
     const msgId =
       utils?.id?.uuid?.() ||

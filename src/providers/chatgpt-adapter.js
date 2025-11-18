@@ -8,7 +8,9 @@ import { classifyProviderError } from "../core/request-lifecycle-manager.js";
 
 // Provider-specific adapter debug flag (off by default)
 const CHATGPT_ADAPTER_DEBUG = false;
-const pad = (...args) => { if (CHATGPT_ADAPTER_DEBUG) console.log(...args); };
+const pad = (...args) => {
+  if (CHATGPT_ADAPTER_DEBUG) console.log(...args);
+};
 
 export class ChatGPTAdapter {
   constructor(controller) {
@@ -28,24 +30,49 @@ export class ChatGPTAdapter {
    * Unified ask API: prefer continuation when context identifiers exist, else start new.
    * ask(prompt, providerContext?, sessionId?, onChunk?, signal?)
    */
-  async ask(prompt, providerContext = null, sessionId = undefined, onChunk = undefined, signal = undefined) {
+  async ask(
+    prompt,
+    providerContext = null,
+    sessionId = undefined,
+    onChunk = undefined,
+    signal = undefined,
+  ) {
     try {
       const meta = providerContext?.meta || providerContext || {};
-      const hasContinuation = Boolean(meta.conversationId || meta.parentMessageId || meta.messageId);
-      pad(`[ProviderAdapter] ASK_STARTED provider=${this.id} hasContext=${hasContinuation}`);
+      const hasContinuation = Boolean(
+        meta.conversationId || meta.parentMessageId || meta.messageId,
+      );
+      pad(
+        `[ProviderAdapter] ASK_STARTED provider=${this.id} hasContext=${hasContinuation}`,
+      );
       let res;
       if (hasContinuation) {
-        res = await this.sendContinuation(prompt, meta, sessionId, onChunk, signal);
+        res = await this.sendContinuation(
+          prompt,
+          meta,
+          sessionId,
+          onChunk,
+          signal,
+        );
       } else {
-        res = await this.sendPrompt({ originalPrompt: prompt, sessionId, meta }, onChunk, signal);
+        res = await this.sendPrompt(
+          { originalPrompt: prompt, sessionId, meta },
+          onChunk,
+          signal,
+        );
       }
       try {
-        const len = (res?.text || '').length;
-        pad(`[ProviderAdapter] ASK_COMPLETED provider=${this.id} ok=${res?.ok !== false} textLen=${len}`);
+        const len = (res?.text || "").length;
+        pad(
+          `[ProviderAdapter] ASK_COMPLETED provider=${this.id} ok=${res?.ok !== false} textLen=${len}`,
+        );
       } catch (_) {}
       return res;
     } catch (e) {
-      console.warn(`[ProviderAdapter] ASK_FAILED provider=${this.id}:`, e?.message || String(e));
+      console.warn(
+        `[ProviderAdapter] ASK_FAILED provider=${this.id}:`,
+        e?.message || String(e),
+      );
       throw e;
     }
   }
@@ -53,14 +80,21 @@ export class ChatGPTAdapter {
   // Compatibility shim: delegate adapter._getAccessToken to controller
   async _getAccessToken() {
     try {
-      if (this.controller && typeof this.controller._getAccessToken === 'function') {
+      if (
+        this.controller &&
+        typeof this.controller._getAccessToken === "function"
+      ) {
         return await this.controller._getAccessToken();
       }
-      if (this.controller && this.controller.chatgptSession && typeof this.controller.chatgptSession._ensureAccessToken === 'function') {
+      if (
+        this.controller &&
+        this.controller.chatgptSession &&
+        typeof this.controller.chatgptSession._ensureAccessToken === "function"
+      ) {
         const token = await this.controller.chatgptSession._ensureAccessToken();
         return { accessToken: token || null };
       }
-      return { error: 'no-controller' };
+      return { error: "no-controller" };
     } catch (e) {
       return { error: (e && e.message) || String(e) };
     }
@@ -89,7 +123,7 @@ export class ChatGPTAdapter {
     const startTime = Date.now();
     // Confirmation-only log: do not print prompt contents to console to avoid clogging logs or exposing data.
     pad(`[ChatGPT Adapter] sendPrompt started (provider=${this.id})`);
-    
+
     try {
       // If Thinking mode requested, route to thinkAsk backend which streams NDJSON
       const useThinking = Boolean(req?.meta?.useThinking);
@@ -107,7 +141,9 @@ export class ChatGPTAdapter {
             if (chunk?.model) observedModel = chunk.model;
           } catch (_) {}
           if (onChunk) {
-            try { onChunk(chunk); } catch (_) {}
+            try {
+              onChunk(chunk);
+            } catch (_) {}
           }
         };
 
@@ -123,7 +159,7 @@ export class ChatGPTAdapter {
               parentMessageId: req.meta?.parentMessageId || req.meta?.messageId,
               think: true,
             },
-            forwardOnChunk
+            forwardOnChunk,
           );
 
           const response = {
@@ -134,16 +170,21 @@ export class ChatGPTAdapter {
             partial: false,
             latencyMs: Date.now() - startTime,
             meta: {
-              model: result?.model || observedModel || 'auto',
+              model: result?.model || observedModel || "auto",
               conversationId: conversationId || undefined,
               messageId: lastMessageId || undefined,
               parentMessageId: lastMessageId || undefined,
             },
           };
-          pad(`[ChatGPT Adapter] providerComplete (thinking via session): chatgpt status=success, latencyMs=${response.latencyMs}, textLen=${response.text.length}`);
+          pad(
+            `[ChatGPT Adapter] providerComplete (thinking via session): chatgpt status=success, latencyMs=${response.latencyMs}, textLen=${response.text.length}`,
+          );
           return response;
         } catch (e) {
-          console.warn('[ChatGPT Adapter] think-mode via session failed, falling back to non-think ask()', e);
+          console.warn(
+            "[ChatGPT Adapter] think-mode via session failed, falling back to non-think ask()",
+            e,
+          );
           // fall through to normal non-thinking flow below
         }
       }
@@ -175,9 +216,9 @@ export class ChatGPTAdapter {
           chatId: req.meta?.conversationId,
           parentMessageId: req.meta?.parentMessageId || req.meta?.messageId,
         },
-        forwardOnChunk
+        forwardOnChunk,
       );
-      
+
       const response = {
         providerId: this.id,
         ok: true,
@@ -190,14 +231,15 @@ export class ChatGPTAdapter {
           // Expose continuation identifiers so SessionManager can persist them
           conversationId: conversationId || undefined,
           messageId: lastMessageId || undefined,
-          parentMessageId: lastMessageId || undefined
+          parentMessageId: lastMessageId || undefined,
         },
       };
-      
+
       // Log only the final completion to reduce log volume
-      pad(`[ChatGPT Adapter] providerComplete: chatgpt status=success, latencyMs=${response.latencyMs}, textLen=${response.text.length}`);
+      pad(
+        `[ChatGPT Adapter] providerComplete: chatgpt status=success, latencyMs=${response.latencyMs}, textLen=${response.text.length}`,
+      );
       return response;
-      
     } catch (error) {
       // Unwrap special thrown thinking-result
       if (error && error.__chatgpt_adapter_thinking_result) {
@@ -208,9 +250,9 @@ export class ChatGPTAdapter {
         error: error.toString(),
         stack: error.stack,
         details: error.details,
-        latencyMs: Date.now() - startTime
+        latencyMs: Date.now() - startTime,
       });
-      
+
       pad(`[ChatGPT Session] providerComplete: chatgpt status=failure`);
       const classification = classifyProviderError("openai-session", error);
       const errorCode = classification.type || "unknown";
@@ -235,9 +277,9 @@ export class ChatGPTAdapter {
     const conversationIdIn = meta.conversationId;
     const parentMessageIdIn = meta.parentMessageId || meta.messageId;
 
-    pad('[ChatGPT Session] Starting continuation with context:', {
+    pad("[ChatGPT Session] Starting continuation with context:", {
       hasConversationId: !!conversationIdIn,
-      hasParentId: !!parentMessageIdIn
+      hasParentId: !!parentMessageIdIn,
     });
 
     // If Thinking mode requested for continuation, route to thinkAsk
@@ -248,11 +290,13 @@ export class ChatGPTAdapter {
 
     // If no conversation context, fall back to new prompt via sendPrompt
     if (!conversationIdIn) {
-      pad('[ChatGPT Session] No conversation context found, falling back to sendPrompt');
+      pad(
+        "[ChatGPT Session] No conversation context found, falling back to sendPrompt",
+      );
       return this.sendPrompt(
         { originalPrompt: prompt, sessionId, meta },
         onChunk,
-        signal
+        signal,
       );
     }
 
@@ -271,7 +315,9 @@ export class ChatGPTAdapter {
           if (chunk?.model) observedModel = chunk.model;
         } catch (_) {}
         if (onChunk) {
-          try { onChunk(chunk); } catch (_) {}
+          try {
+            onChunk(chunk);
+          } catch (_) {}
         }
       };
 
@@ -282,9 +328,9 @@ export class ChatGPTAdapter {
           signal,
           chatId: conversationIdIn,
           parentMessageId: parentMessageIdIn,
-          model: observedModel || undefined
+          model: observedModel || undefined,
         },
-        forwardOnChunk
+        forwardOnChunk,
       );
 
       const response = {
@@ -298,13 +344,14 @@ export class ChatGPTAdapter {
           model: result?.model || observedModel || "auto",
           conversationId: conversationId || conversationIdIn,
           messageId: lastMessageId || undefined,
-          parentMessageId: lastMessageId || parentMessageIdIn || undefined
+          parentMessageId: lastMessageId || parentMessageIdIn || undefined,
         },
       };
 
-      pad(`[ChatGPT Session] Continuation completed in ${response.latencyMs}ms, response length: ${response.text.length}`);
+      pad(
+        `[ChatGPT Session] Continuation completed in ${response.latencyMs}ms, response length: ${response.text.length}`,
+      );
       return response;
-
     } catch (error) {
       console.error(`[ChatGPT Session] Continuation error:`, error);
       // Align error shape with other adapters
@@ -313,14 +360,14 @@ export class ChatGPTAdapter {
         providerId: this.id,
         ok: false,
         text: null,
-        errorCode: (error && error.type) || 'continuation_error',
+        errorCode: (error && error.type) || "continuation_error",
         latencyMs: duration,
         meta: {
           error: error?.toString?.() || String(error),
           details: error?.details,
           conversationId: conversationIdIn,
-          parentMessageId: parentMessageIdIn
-        }
+          parentMessageId: parentMessageIdIn,
+        },
       };
     }
   }

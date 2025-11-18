@@ -33,12 +33,7 @@
   },
   "web_accessible_resources": [
     {
-      "resources": [
-        "main-world-injector.js",
-        "oi.html",
-        "oi.js",
-        "src/oi.js"
-      ],
+      "resources": ["main-world-injector.js", "oi.html", "oi.js", "src/oi.js"],
       "matches": ["<all_urls>"]
     }
   ],

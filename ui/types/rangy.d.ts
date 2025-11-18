@@ -1,1 +1,1 @@
-declare module 'rangy';
+declare module "rangy";

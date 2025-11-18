@@ -31,7 +31,6 @@ export class ConnectionHandler {
    * Map new primitive requests into legacy ExecuteWorkflowRequest
    * so the existing compiler/engine can process them without signature changes.
    */
-  
 
   /**
    * Async initialization - waits for backend readiness
@@ -43,7 +42,7 @@ export class ConnectionHandler {
     this.workflowEngine = new WorkflowEngine(
       this.services.orchestrator,
       this.services.sessionManager,
-      this.port
+      this.port,
     );
 
     // Create message handler bound to this instance
@@ -100,7 +99,7 @@ export class ConnectionHandler {
 
           default:
             console.warn(
-              `[ConnectionHandler] Unknown message type: ${message.type}`
+              `[ConnectionHandler] Unknown message type: ${message.type}`,
             );
         }
       } catch (error) {
@@ -119,10 +118,13 @@ export class ConnectionHandler {
 
     // Record activity
     try {
-      if (this.lifecycleManager && typeof this.lifecycleManager.recordActivity === 'function') {
+      if (
+        this.lifecycleManager &&
+        typeof this.lifecycleManager.recordActivity === "function"
+      ) {
         this.lifecycleManager.recordActivity();
       }
-    } catch (e) { }
+    } catch (e) {}
 
     try {
       this.lifecycleManager?.activateWorkflowMode();
@@ -130,84 +132,113 @@ export class ConnectionHandler {
       // ========================================================================
       // PHASE 5: Primitives-only execution path (fail-fast on legacy)
       // ========================================================================
-      const isPrimitive = executeRequest && typeof executeRequest.type === 'string' && ['initialize', 'extend', 'recompute'].includes(executeRequest.type);
+      const isPrimitive =
+        executeRequest &&
+        typeof executeRequest.type === "string" &&
+        ["initialize", "extend", "recompute"].includes(executeRequest.type);
       if (!isPrimitive) {
-        const errMsg = '[ConnectionHandler] Non-primitive request rejected. Use {type:"initialize"|"extend"|"recompute"} primitives only.';
+        const errMsg =
+          '[ConnectionHandler] Non-primitive request rejected. Use {type:"initialize"|"extend"|"recompute"} primitives only.';
         console.error(errMsg, { received: executeRequest });
         try {
           this.port.postMessage({
-            type: 'WORKFLOW_STEP_UPDATE',
-            sessionId: executeRequest?.sessionId || 'unknown',
-            stepId: 'validate-primitive',
-            status: 'failed',
-            error: 'Legacy ExecuteWorkflowRequest is no longer supported. Please migrate to primitives.',
+            type: "WORKFLOW_STEP_UPDATE",
+            sessionId: executeRequest?.sessionId || "unknown",
+            stepId: "validate-primitive",
+            status: "failed",
+            error:
+              "Legacy ExecuteWorkflowRequest is no longer supported. Please migrate to primitives.",
             // Attach recompute metadata when applicable
-            isRecompute: executeRequest?.type === 'recompute',
-            sourceTurnId: executeRequest?.sourceTurnId
+            isRecompute: executeRequest?.type === "recompute",
+            sourceTurnId: executeRequest?.sourceTurnId,
           });
           this.port.postMessage({
-            type: 'WORKFLOW_COMPLETE',
-            sessionId: executeRequest?.sessionId || 'unknown',
-            error: 'Legacy ExecuteWorkflowRequest is no longer supported.'
+            type: "WORKFLOW_COMPLETE",
+            sessionId: executeRequest?.sessionId || "unknown",
+            error: "Legacy ExecuteWorkflowRequest is no longer supported.",
           });
         } catch (_) {}
         return;
       }
 
       // Phase 5 path: Resolve → Map → Compile → Execute
-      console.log(`[ConnectionHandler] Processing ${executeRequest.type} primitive`);
+      console.log(
+        `[ConnectionHandler] Processing ${executeRequest.type} primitive`,
+      );
 
       // Step 1: Resolve context
       try {
-        resolvedContext = await this.services.contextResolver.resolve(executeRequest);
-        console.log(`[ConnectionHandler] Context resolved: ${resolvedContext.type}`);
+        resolvedContext =
+          await this.services.contextResolver.resolve(executeRequest);
+        console.log(
+          `[ConnectionHandler] Context resolved: ${resolvedContext.type}`,
+        );
       } catch (e) {
-        console.error('[ConnectionHandler] Context resolution failed:', e);
+        console.error("[ConnectionHandler] Context resolution failed:", e);
         throw e;
       }
 
-     // Step 2: No mapping needed - compiler accepts primitives + resolvedContext
-console.log('[ConnectionHandler] Passing primitive directly to compiler');
+      // Step 2: No mapping needed - compiler accepts primitives + resolvedContext
+      console.log("[ConnectionHandler] Passing primitive directly to compiler");
 
       // ========================================================================
       // Validation
       // ========================================================================
       const histUserTurnId = executeRequest?.historicalContext?.userTurnId;
       // Prefer primitive's clientUserTurnId; fall back to legacy userTurnId
-      const userTurnId = executeRequest?.clientUserTurnId || executeRequest?.userTurnId || histUserTurnId;
-      const hasBatch = Array.isArray(executeRequest?.providers) && executeRequest.providers.length > 0;
-      const hasSynthesis = !!(executeRequest?.synthesis?.enabled && executeRequest.synthesis.providers?.length > 0);
-      const hasMapping = !!(executeRequest?.mapping?.enabled && executeRequest.mapping.providers?.length > 0);
+      const userTurnId =
+        executeRequest?.clientUserTurnId ||
+        executeRequest?.userTurnId ||
+        histUserTurnId;
+      const hasBatch =
+        Array.isArray(executeRequest?.providers) &&
+        executeRequest.providers.length > 0;
+      const hasSynthesis = !!(
+        executeRequest?.synthesis?.enabled &&
+        executeRequest.synthesis.providers?.length > 0
+      );
+      const hasMapping = !!(
+        executeRequest?.mapping?.enabled &&
+        executeRequest.mapping.providers?.length > 0
+      );
 
       if (!hasBatch && (hasSynthesis || hasMapping) && !userTurnId) {
-        console.error('[ConnectionHandler] Missing userTurnId in historical-only request');
+        console.error(
+          "[ConnectionHandler] Missing userTurnId in historical-only request",
+        );
         this.port.postMessage({
-          type: 'WORKFLOW_STEP_UPDATE',
-          sessionId: executeRequest?.sessionId || 'unknown',
-          stepId: 'validate-user-turn',
-          status: 'failed',
-          error: 'Missing userTurnId for historical run',
+          type: "WORKFLOW_STEP_UPDATE",
+          sessionId: executeRequest?.sessionId || "unknown",
+          stepId: "validate-user-turn",
+          status: "failed",
+          error: "Missing userTurnId for historical run",
           // Attach recompute metadata when applicable
-          isRecompute: executeRequest?.type === 'recompute',
-          sourceTurnId: executeRequest?.sourceTurnId
+          isRecompute: executeRequest?.type === "recompute",
+          sourceTurnId: executeRequest?.sourceTurnId,
         });
         this.port.postMessage({
-          type: 'WORKFLOW_COMPLETE',
-          sessionId: executeRequest?.sessionId || 'unknown'
+          type: "WORKFLOW_COMPLETE",
+          sessionId: executeRequest?.sessionId || "unknown",
         });
         return;
       }
 
       // Generate session ID if needed
-      if (!executeRequest?.sessionId || executeRequest.sessionId === '') {
+      if (!executeRequest?.sessionId || executeRequest.sessionId === "") {
         executeRequest.sessionId = `session-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-        console.log('[ConnectionHandler] Generated session ID:', executeRequest.sessionId);
+        console.log(
+          "[ConnectionHandler] Generated session ID:",
+          executeRequest.sessionId,
+        );
       }
 
       // ========================================================================
       // Compile
       // ========================================================================
-      const workflowRequest = this.services.compiler.compile(executeRequest, resolvedContext);
+      const workflowRequest = this.services.compiler.compile(
+        executeRequest,
+        resolvedContext,
+      );
       // ========================================================================
       // TURN_CREATED message
       // ========================================================================
@@ -217,33 +248,34 @@ console.log('[ConnectionHandler] Passing primitive directly to compiler');
         workflowRequest.context = {
           ...workflowRequest.context,
           canonicalUserTurnId: userTurnId,
-          canonicalAiTurnId: aiTurnId
+          canonicalAiTurnId: aiTurnId,
         };
 
         try {
           this.port.postMessage({
-            type: 'TURN_CREATED',
-            sessionId: workflowRequest.context.sessionId || executeRequest.sessionId,
+            type: "TURN_CREATED",
+            sessionId:
+              workflowRequest.context.sessionId || executeRequest.sessionId,
             userTurnId,
-            aiTurnId
+            aiTurnId,
           });
         } catch (_) {}
 
         try {
           const key = `inflight:${workflowRequest.context.sessionId}:${aiTurnId}`;
           const runId = crypto.randomUUID();
-          await this.services.sessionManager.adapter.put('metadata', {
+          await this.services.sessionManager.adapter.put("metadata", {
             key,
             sessionId: workflowRequest.context.sessionId,
             entityId: aiTurnId,
-            type: 'inflight_workflow',
+            type: "inflight_workflow",
             requestType: executeRequest.type,
             userMessage: executeRequest.userMessage,
             providers: executeRequest.providers || [],
             providerMeta: executeRequest.providerMeta || {},
             runId,
             createdAt: Date.now(),
-            updatedAt: Date.now()
+            updatedAt: Date.now(),
           });
         } catch (_) {}
       }
@@ -259,29 +291,28 @@ console.log('[ConnectionHandler] Passing primitive directly to compiler');
 
       try {
         const key = `inflight:${workflowRequest.context.sessionId}:${workflowRequest.context.canonicalAiTurnId}`;
-        await this.services.sessionManager.adapter.delete('metadata', key);
+        await this.services.sessionManager.adapter.delete("metadata", key);
       } catch (_) {}
-
     } catch (error) {
-      console.error('[ConnectionHandler] Workflow failed:', error);
+      console.error("[ConnectionHandler] Workflow failed:", error);
       try {
         this.port.postMessage({
-          type: 'WORKFLOW_STEP_UPDATE',
-          sessionId: executeRequest?.sessionId || 'unknown',
-          stepId: 'handler-error',
-          status: 'failed',
+          type: "WORKFLOW_STEP_UPDATE",
+          sessionId: executeRequest?.sessionId || "unknown",
+          stepId: "handler-error",
+          status: "failed",
           error: error.message || String(error),
           // Attach recompute metadata when applicable
-          isRecompute: executeRequest?.type === 'recompute',
-          sourceTurnId: executeRequest?.sourceTurnId
+          isRecompute: executeRequest?.type === "recompute",
+          sourceTurnId: executeRequest?.sourceTurnId,
         });
         this.port.postMessage({
-          type: 'WORKFLOW_COMPLETE',
-          sessionId: executeRequest?.sessionId || 'unknown',
-          error: error.message || String(error)
+          type: "WORKFLOW_COMPLETE",
+          sessionId: executeRequest?.sessionId || "unknown",
+          error: error.message || String(error),
         });
       } catch (e) {
-        console.error('[ConnectionHandler] Failed to send error message:', e);
+        console.error("[ConnectionHandler] Failed to send error message:", e);
       }
     } finally {
       this.lifecycleManager?.deactivateWorkflowMode();

@@ -6,26 +6,20 @@ interface CompactModelTrayProps {
   selectedModels: Record<string, boolean>;
   onToggleModel: (providerId: string) => void;
   isLoading?: boolean;
-  // Think-mode (global) toggle for ChatGPT
   thinkOnChatGPT?: boolean;
   onToggleThinkChatGPT?: () => void;
-  // Synthesis provider selection
   synthesisProvider?: string | null;
   onSetSynthesisProvider?: (providerId: string | null) => void;
-  // Mapping controls
   mappingEnabled?: boolean;
   onToggleMapping?: (enabled: boolean) => void;
   mappingProvider?: string | null;
   onSetMappingProvider?: (providerId: string | null) => void;
-  // Power user mode
   powerUserMode?: boolean;
   synthesisProviders?: string[];
   onToggleSynthesisProvider?: (providerId: string) => void;
-  // New props for compact mode
   isFirstLoad?: boolean;
-  onAcknowledgeFirstLoad?: () => void; // New callback for parent to clear isFirstLoad
-  chatInputHeight?: number; // New prop for dynamic positioning
-  // Refine props
+  onAcknowledgeFirstLoad?: () => void;
+  chatInputHeight?: number;
   refineModel: string;
   onSetRefineModel: (model: string) => void;
 }
@@ -47,7 +41,7 @@ const CompactModelTray = ({
   onToggleSynthesisProvider,
   isFirstLoad = false,
   onAcknowledgeFirstLoad,
-  chatInputHeight = 80, // Default height
+  chatInputHeight = 80,
   refineModel,
   onSetRefineModel,
 }: CompactModelTrayProps) => {
@@ -55,10 +49,9 @@ const CompactModelTray = ({
   const [showModelsDropdown, setShowModelsDropdown] = useState(false);
   const [showMapDropdown, setShowMapDropdown] = useState(false);
   const [showUnifyDropdown, setShowUnifyDropdown] = useState(false);
-  const [showRefineDropdown, setShowRefineDropdown] = useState(false); // New state for refine dropdown
+  const [showRefineDropdown, setShowRefineDropdown] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // Calculate active models count and names
   const activeCount = Object.values(selectedModels).filter(Boolean).length;
   const selectedProviderIds = Object.keys(selectedModels).filter(
     (id) => selectedModels[id],
@@ -71,12 +64,10 @@ const CompactModelTray = ({
   const unifyProviderId = synthesisProvider || "";
   const isMapEnabled = mappingEnabled && !!mapProviderId;
   const isUnifyEnabled = !!unifyProviderId;
-  const hasRefine = isMapEnabled || isUnifyEnabled;
 
-  // Prefer user's last-used providers across turns/sessions when props are empty/null
+  // Restore from localStorage on mount
   useEffect(() => {
     try {
-      // Restore selected (batch) models if the parent provided none
       const activeCount = Object.values(selectedModels || {}).filter(
         Boolean,
       ).length;
@@ -96,7 +87,6 @@ const CompactModelTray = ({
             continue;
           }
           if (parsed && typeof parsed === "object") {
-            // Apply saved map by toggling differences
             LLM_PROVIDERS_CONFIG.forEach((p) => {
               const shouldBeSelected = !!parsed[p.id];
               const currentlySelected = !!selectedModels[p.id];
@@ -109,7 +99,6 @@ const CompactModelTray = ({
         }
       }
 
-      // Don't override if parent already provided mapping/synthesis values
       if (!mappingProvider && typeof onSetMappingProvider === "function") {
         const keys = [
           "htos_mapping_provider",
@@ -142,32 +131,20 @@ const CompactModelTray = ({
           }
         }
       }
-    } catch (err) {
-      // best-effort only
-      console.warn(
-        "[CompactModelTray] failed to restore last-used providers/selection",
-        err,
-      );
-    }
-    // run only once on mount
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
-  // Restore refine model from local storage
-  useEffect(() => {
-    try {
+      // Restore refine model
       const savedRefineModel = localStorage.getItem("htos_refine_model");
       if (savedRefineModel) {
         onSetRefineModel(savedRefineModel);
       }
     } catch (err) {
-      console.warn("[CompactModelTray] failed to restore refine model", err);
+      console.warn(
+        "[CompactModelTray] failed to restore last-used providers/selection",
+        err,
+      );
     }
-    // run only once on mount
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Generate compact labels
   const getWitnessLabel = () => {
     if (activeCount === 0) return "[No Models]";
     if (activeCount === LLM_PROVIDERS_CONFIG.length) return "[All Models]";
@@ -175,18 +152,16 @@ const CompactModelTray = ({
     return `[${activeCount} Models]`;
   };
 
-  // Helper: find provider name from full config (even if not in witness selection)
   const getProviderName = (id: string | null | undefined) => {
     if (!id) return "";
     const match = LLM_PROVIDERS_CONFIG.find((p) => p.id === id);
     return match?.name || id;
   };
 
-  // Simplified labels: only show 'inactive' when fewer than two witness models are selected
   const getMapLabel = () => {
     if (!isMapEnabled) return "[Map]";
     const name = getProviderName(mapProviderId);
-    const inactive = activeCount < 2; // refine requires 2+
+    const inactive = activeCount < 2;
     const hint = inactive ? " • inactive" : "";
     return `[Map: ${name || "None"}${hint}]`;
   };
@@ -204,7 +179,6 @@ const CompactModelTray = ({
     return `[Refine: ${name || "Auto"}]`;
   };
 
-  // Handle outside clicks for closing expanded and dropdowns
   useEffect(() => {
     const shouldListen =
       isExpanded ||
@@ -237,7 +211,6 @@ const CompactModelTray = ({
     showRefineDropdown,
   ]);
 
-  // Acknowledge first load if needed (but don't render special UI)
   useEffect(() => {
     if (isFirstLoad) {
       onAcknowledgeFirstLoad?.();
@@ -249,12 +222,12 @@ const CompactModelTray = ({
       ref={containerRef}
       style={{
         position: "fixed",
-        bottom: `${chatInputHeight + 24}px`, // FIX: slightly larger offset so tray lifts above expanded input
+        bottom: `${chatInputHeight + 24}px`,
         left: "50%",
         transform: "translateX(-50%)",
         width: "min(800px, calc(100% - 32px))",
-        maxHeight: "calc(100vh - 120px)", // Prevent overlap
-        zIndex: 2000, // ensure tray appears above chat input and overlays
+        maxHeight: "calc(100vh - 120px)",
+        zIndex: 2000,
         transition: "bottom 0.2s ease-out",
       }}
     >
@@ -269,13 +242,13 @@ const CompactModelTray = ({
             padding: "8px 16px",
             display: "flex",
             alignItems: "center",
-            gap: "16px", // Spaced out slightly
+            gap: "16px",
             fontSize: "13px",
             color: "#e2e8f0",
             position: "relative",
           }}
         >
-          {/* Models Label with Dropdown Arrow */}
+          {/* Models Dropdown */}
           <div
             style={{
               display: "flex",
@@ -287,9 +260,9 @@ const CompactModelTray = ({
               const opening = !showModelsDropdown;
               setShowModelsDropdown(opening);
               if (opening) {
-                // ensure only one dropdown is open at a time
                 setShowMapDropdown(false);
                 setShowUnifyDropdown(false);
+                setShowRefineDropdown(false);
               }
             }}
           >
@@ -310,8 +283,6 @@ const CompactModelTray = ({
                 minWidth: "200px",
                 zIndex: 1000,
               }}
-              role="menu"
-              aria-label="Model selection"
             >
               {LLM_PROVIDERS_CONFIG.map((provider) => {
                 const isSelected = selectedModels[provider.id];
@@ -329,14 +300,6 @@ const CompactModelTray = ({
                         ? "rgba(99, 102, 241, 0.3)"
                         : "transparent",
                       transition: "all 0.2s ease",
-                    }}
-                    onMouseEnter={(e) => {
-                      if (isSelected)
-                        e.currentTarget.style.boxShadow =
-                          "0 0 8px rgba(99, 102, 241, 0.5)";
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.boxShadow = "none";
                     }}
                   >
                     <input
@@ -366,7 +329,7 @@ const CompactModelTray = ({
 
           <span style={{ color: "#64748b" }}>•</span>
 
-          {/* Map Label with Dropdown Arrow */}
+          {/* Map Dropdown */}
           <div
             style={{
               display: "flex",
@@ -383,6 +346,7 @@ const CompactModelTray = ({
                     if (opening) {
                       setShowModelsDropdown(false);
                       setShowUnifyDropdown(false);
+                      setShowRefineDropdown(false);
                     }
                   }
                 : undefined
@@ -396,8 +360,8 @@ const CompactModelTray = ({
               style={{
                 position: "absolute",
                 bottom: "100%",
-                right: "65%", // move further left so dropdown aligns better with the Map label
-                background: "rgba(3, 7, 18, 0.72)", // darker backdrop for readability
+                right: "65%",
+                background: "rgba(3, 7, 18, 0.72)",
                 color: "#e2e8f0",
                 border: "1px solid rgba(255, 255, 255, 0.06)",
                 borderRadius: "8px",
@@ -406,8 +370,6 @@ const CompactModelTray = ({
                 zIndex: 1000,
                 boxShadow: "0 8px 24px rgba(2,6,23,0.6)",
               }}
-              role="menu"
-              aria-label="Map provider selection"
             >
               {LLM_PROVIDERS_CONFIG.map((provider) => {
                 const isSelected = mapProviderId === provider.id;
@@ -416,23 +378,30 @@ const CompactModelTray = ({
                     key={provider.id}
                     onClick={() => {
                       if (isLoading) return;
-
                       const clickedId = provider.id;
-                      // If selecting the same as Unify, auto-switch Unify to a fallback (do not block selection)
-                      if (unifyProviderId && unifyProviderId === clickedId) {
+
+                      // Determine new Map state (toggle)
+                      const newMapProvider =
+                        mapProviderId === clickedId ? null : clickedId;
+
+                      // If activating Map, check for Unify conflict
+                      if (
+                        newMapProvider &&
+                        unifyProviderId === newMapProvider
+                      ) {
                         const selectedIds = LLM_PROVIDERS_CONFIG.map(
                           (p) => p.id,
                         ).filter((id) => selectedModels[id]);
                         const prefer =
-                          clickedId === "gemini"
+                          newMapProvider === "gemini"
                             ? ["qwen"]
-                            : clickedId === "qwen"
+                            : newMapProvider === "qwen"
                               ? ["gemini"]
                               : ["qwen", "gemini"];
                         let fallback: string | null = null;
                         for (const cand of prefer) {
                           if (
-                            cand !== clickedId &&
+                            cand !== newMapProvider &&
                             selectedIds.includes(cand)
                           ) {
                             fallback = cand;
@@ -440,11 +409,10 @@ const CompactModelTray = ({
                           }
                         }
                         if (!fallback) {
-                          const anyOther =
-                            selectedIds.find((id) => id !== clickedId) || null;
-                          fallback = anyOther;
+                          fallback =
+                            selectedIds.find((id) => id !== newMapProvider) ||
+                            null;
                         }
-                        // Apply fallback for Unify first to maintain constraint
                         onSetSynthesisProvider?.(fallback);
                         try {
                           if (fallback)
@@ -452,34 +420,33 @@ const CompactModelTray = ({
                               "htos_synthesis_provider",
                               fallback,
                             );
+                          else
+                            localStorage.removeItem("htos_synthesis_provider");
                         } catch {}
                       }
 
-                      if (mapProviderId === clickedId) {
-                        // Toggle off Map when clicking the already selected provider
-                        onSetMappingProvider?.(null);
-                        onToggleMapping?.(false);
-                        try {
-                          localStorage.removeItem("htos_mapping_provider");
-                          localStorage.setItem(
-                            "htos_mapping_enabled",
-                            JSON.stringify(false),
-                          );
-                        } catch (_) {}
-                      } else {
-                        onSetMappingProvider?.(clickedId);
-                        onToggleMapping?.(true);
-                        try {
+                      // Apply new Map state
+                      onSetMappingProvider?.(newMapProvider);
+                      onToggleMapping?.(!!newMapProvider);
+                      try {
+                        if (newMapProvider) {
                           localStorage.setItem(
                             "htos_mapping_provider",
-                            clickedId,
+                            newMapProvider,
                           );
                           localStorage.setItem(
                             "htos_mapping_enabled",
                             JSON.stringify(true),
                           );
-                        } catch (_) {}
-                      }
+                        } else {
+                          localStorage.removeItem("htos_mapping_provider");
+                          localStorage.setItem(
+                            "htos_mapping_enabled",
+                            JSON.stringify(false),
+                          );
+                        }
+                      } catch {}
+
                       setShowMapDropdown(false);
                     }}
                     disabled={isLoading}
@@ -496,16 +463,7 @@ const CompactModelTray = ({
                       borderRadius: "4px",
                       cursor: "pointer",
                       transition: "all 0.12s ease",
-                      fontSize: "12px", // increased to match model selector
-                    }}
-                    onMouseEnter={(e) => {
-                      e.currentTarget.style.background =
-                        "rgba(255,255,255,0.02)";
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.background = isSelected
-                        ? "rgba(34, 197, 94, 0.12)"
-                        : "transparent";
+                      fontSize: "12px",
                     }}
                   >
                     {provider.name}
@@ -518,7 +476,7 @@ const CompactModelTray = ({
 
           <span style={{ color: "#64748b" }}>•</span>
 
-          {/* Unify Label with Dropdown Arrow */}
+          {/* Unify Dropdown */}
           <div
             style={{
               display: "flex",
@@ -535,6 +493,7 @@ const CompactModelTray = ({
                     if (opening) {
                       setShowModelsDropdown(false);
                       setShowMapDropdown(false);
+                      setShowRefineDropdown(false);
                     }
                   }
                 : undefined
@@ -548,7 +507,7 @@ const CompactModelTray = ({
               style={{
                 position: "absolute",
                 bottom: "100%",
-                right: "55%", // move left so unify dropdown centers better under the Unify label
+                right: "45%",
                 background: "rgba(3, 7, 18, 0.72)",
                 color: "#e2e8f0",
                 border: "1px solid rgba(255, 255, 255, 0.06)",
@@ -558,230 +517,114 @@ const CompactModelTray = ({
                 zIndex: 1000,
                 boxShadow: "0 8px 24px rgba(2,6,23,0.6)",
               }}
-              role="menu"
-              aria-label="Unify provider selection"
             >
-              {powerUserMode
-                ? // Multi-select for power user
-                  LLM_PROVIDERS_CONFIG.map((provider) => {
-                    const isSelected = synthesisProviders.includes(provider.id);
-                    return (
-                      <label
-                        key={provider.id}
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: "8px",
-                          padding: "6px 8px",
-                          cursor: "pointer",
-                          borderRadius: "4px",
-                          background: isSelected
-                            ? "rgba(251, 191, 36, 0.12)"
-                            : "transparent",
-                          transition: "all 0.12s ease",
-                        }}
-                        onMouseEnter={(e) => {
-                          if (isSelected)
-                            e.currentTarget.style.boxShadow =
-                              "0 0 8px rgba(251, 191, 36, 0.5)";
-                        }}
-                        onMouseLeave={(e) => {
-                          e.currentTarget.style.boxShadow = "none";
-                        }}
-                      >
-                        <input
-                          type="checkbox"
-                          checked={isSelected}
-                          onChange={() => {
-                            if (isLoading) return;
+              {LLM_PROVIDERS_CONFIG.map((provider) => {
+                const isSelected = unifyProviderId === provider.id;
+                return (
+                  <button
+                    key={provider.id}
+                    onClick={() => {
+                      if (isLoading) return;
+                      const clickedId = provider.id;
 
-                            const clickedId = provider.id;
-                            // If selecting same as Map, auto-switch Map to fallback
-                            if (mapProviderId === clickedId && !isSelected) {
-                              const selectedIds = LLM_PROVIDERS_CONFIG.map(
-                                (p) => p.id,
-                              ).filter((id) => selectedModels[id]);
-                              const prefer =
-                                clickedId === "gemini"
-                                  ? ["qwen"]
-                                  : clickedId === "qwen"
-                                    ? ["gemini"]
-                                    : ["qwen", "gemini"];
-                              let fallback: string | null = null;
-                              for (const cand of prefer) {
-                                if (
-                                  cand !== clickedId &&
-                                  selectedIds.includes(cand)
-                                ) {
-                                  fallback = cand;
-                                  break;
-                                }
-                              }
-                              if (!fallback) {
-                                const anyOther =
-                                  selectedIds.find((id) => id !== clickedId) ||
-                                  null;
-                                fallback = anyOther;
-                              }
-                              onSetMappingProvider?.(fallback);
-                              try {
-                                if (fallback) {
-                                  localStorage.setItem(
-                                    "htos_mapping_provider",
-                                    fallback,
-                                  );
-                                } else {
-                                  localStorage.removeItem(
-                                    "htos_mapping_provider",
-                                  );
-                                }
-                              } catch {}
-                            }
+                      // Determine new Unify state (toggle)
+                      const newUnifyProvider =
+                        unifyProviderId === clickedId ? null : clickedId;
 
-                            onToggleSynthesisProvider?.(clickedId);
-                          }}
-                          disabled={isLoading}
-                          style={{
-                            width: "14px",
-                            height: "14px",
-                            accentColor: "#fbbf24",
-                          }}
-                        />
-                        <span
-                          style={{
-                            fontSize: "12px",
-                            color: isSelected ? "#fbbf24" : "#94a3b8",
-                          }}
-                        >
-                          {provider.name}
-                        </span>
-                      </label>
-                    );
-                  })
-                : // Single select
-                  LLM_PROVIDERS_CONFIG.map((provider) => {
-                    const isSelected = unifyProviderId === provider.id;
-                    return (
-                      <button
-                        key={provider.id}
-                        onClick={() => {
-                          if (isLoading) return;
-                          const clickedId = provider.id;
-
-                          // If clicking the same provider, toggle it off. Otherwise, set it.
-                          const newUnifyProvider =
-                            unifyProviderId === clickedId ? null : clickedId;
-
-                          // If selecting a provider that is the same as Map, auto-switch Map to a fallback.
+                      // If activating Unify, check for Map conflict
+                      if (
+                        newUnifyProvider &&
+                        mapProviderId === newUnifyProvider
+                      ) {
+                        const selectedIds = LLM_PROVIDERS_CONFIG.map(
+                          (p) => p.id,
+                        ).filter((id) => selectedModels[id]);
+                        const prefer =
+                          newUnifyProvider === "gemini"
+                            ? ["qwen"]
+                            : newUnifyProvider === "qwen"
+                              ? ["gemini"]
+                              : ["qwen", "gemini"];
+                        let fallback: string | null = null;
+                        for (const cand of prefer) {
                           if (
-                            newUnifyProvider &&
-                            mapProviderId &&
-                            mapProviderId === newUnifyProvider
+                            cand !== newUnifyProvider &&
+                            selectedIds.includes(cand)
                           ) {
-                            const selectedIds = LLM_PROVIDERS_CONFIG.map(
-                              (p) => p.id,
-                            ).filter((id) => selectedModels[id]);
-                            const prefer =
-                              newUnifyProvider === "gemini"
-                                ? ["qwen"]
-                                : newUnifyProvider === "qwen"
-                                  ? ["gemini"]
-                                  : ["qwen", "gemini"];
-                            let fallback: string | null = null;
-                            for (const cand of prefer) {
-                              if (
-                                cand !== newUnifyProvider &&
-                                selectedIds.includes(cand)
-                              ) {
-                                fallback = cand;
-                                break;
-                              }
-                            }
-                            if (!fallback) {
-                              const anyOther =
-                                selectedIds.find(
-                                  (id) => id !== newUnifyProvider,
-                                ) || null;
-                              fallback = anyOther;
-                            }
-                            onSetMappingProvider?.(fallback);
-                            try {
-                              if (fallback) {
-                                localStorage.setItem(
-                                  "htos_mapping_provider",
-                                  fallback,
-                                );
-                                localStorage.setItem(
-                                  "htos_mapping_enabled",
-                                  JSON.stringify(true),
-                                );
-                              } else {
-                                // If no fallback, disable mapping
-                                onToggleMapping?.(false);
-                                localStorage.removeItem(
-                                  "htos_mapping_provider",
-                                );
-                                localStorage.setItem(
-                                  "htos_mapping_enabled",
-                                  JSON.stringify(false),
-                                );
-                              }
-                            } catch {}
+                            fallback = cand;
+                            break;
                           }
+                        }
+                        if (!fallback) {
+                          fallback =
+                            selectedIds.find((id) => id !== newUnifyProvider) ||
+                            null;
+                        }
+                        onSetMappingProvider?.(fallback);
+                        try {
+                          if (fallback) {
+                            localStorage.setItem(
+                              "htos_mapping_provider",
+                              fallback,
+                            );
+                            localStorage.setItem(
+                              "htos_mapping_enabled",
+                              JSON.stringify(true),
+                            );
+                          } else {
+                            onToggleMapping?.(false);
+                            localStorage.removeItem("htos_mapping_provider");
+                            localStorage.setItem(
+                              "htos_mapping_enabled",
+                              JSON.stringify(false),
+                            );
+                          }
+                        } catch {}
+                      }
 
-                          onSetSynthesisProvider?.(newUnifyProvider);
-                          try {
-                            if (newUnifyProvider) {
-                              localStorage.setItem(
-                                "htos_synthesis_provider",
-                                newUnifyProvider,
-                              );
-                            } else {
-                              localStorage.removeItem(
-                                "htos_synthesis_provider",
-                              );
-                            }
-                          } catch {}
+                      // Apply new Unify state
+                      onSetSynthesisProvider?.(newUnifyProvider);
+                      try {
+                        if (newUnifyProvider) {
+                          localStorage.setItem(
+                            "htos_synthesis_provider",
+                            newUnifyProvider,
+                          );
+                        } else {
+                          localStorage.removeItem("htos_synthesis_provider");
+                        }
+                      } catch {}
 
-                          setShowUnifyDropdown(false);
-                        }}
-                        disabled={isLoading}
-                        style={{
-                          display: "block",
-                          width: "100%",
-                          textAlign: "left",
-                          padding: "6px 10px",
-                          background: isSelected
-                            ? "rgba(251, 191, 36, 0.12)"
-                            : "transparent",
-                          color: isSelected ? "#fbbf24" : "#e2e8f0",
-                          border: "none",
-                          borderRadius: "4px",
-                          cursor: "pointer",
-                          transition: "all 0.12s ease",
-                          fontSize: "12px", // increased to match model selector
-                        }}
-                        onMouseEnter={(e) => {
-                          e.currentTarget.style.background =
-                            "rgba(255,255,255,0.02)";
-                        }}
-                        onMouseLeave={(e) => {
-                          e.currentTarget.style.background = isSelected
-                            ? "rgba(251, 191, 36, 0.12)"
-                            : "transparent";
-                        }}
-                      >
-                        {provider.name}
-                        {isSelected && " ✓"}
-                      </button>
-                    );
-                  })}
+                      setShowUnifyDropdown(false);
+                    }}
+                    disabled={isLoading}
+                    style={{
+                      display: "block",
+                      width: "100%",
+                      textAlign: "left",
+                      padding: "6px 10px",
+                      background: isSelected
+                        ? "rgba(251, 191, 36, 0.12)"
+                        : "transparent",
+                      color: isSelected ? "#fbbf24" : "#e2e8f0",
+                      border: "none",
+                      borderRadius: "4px",
+                      cursor: "pointer",
+                      transition: "all 0.12s ease",
+                      fontSize: "12px",
+                    }}
+                  >
+                    {provider.name}
+                    {isSelected && " ✓"}
+                  </button>
+                );
+              })}
             </div>
           )}
 
           <span style={{ color: "#64748b" }}>•</span>
 
-          {/* Refine Label with Dropdown Arrow */}
+          {/* Refine Dropdown */}
           <div
             style={{
               display: "flex",
@@ -807,7 +650,7 @@ const CompactModelTray = ({
               style={{
                 position: "absolute",
                 bottom: "100%",
-                right: "0%", // Align to the right
+                right: "0%",
                 background: "rgba(3, 7, 18, 0.72)",
                 color: "#e2e8f0",
                 border: "1px solid rgba(255, 255, 255, 0.06)",
@@ -817,13 +660,14 @@ const CompactModelTray = ({
                 zIndex: 1000,
                 boxShadow: "0 8px 24px rgba(2,6,23,0.6)",
               }}
-              role="menu"
-              aria-label="Refine provider selection"
             >
               <button
-                key="auto"
                 onClick={() => {
+                  if (isLoading) return;
                   onSetRefineModel("auto");
+                  try {
+                    localStorage.setItem("htos_refine_model", "auto");
+                  } catch {}
                   setShowRefineDropdown(false);
                 }}
                 disabled={isLoading}
@@ -843,15 +687,6 @@ const CompactModelTray = ({
                   transition: "all 0.12s ease",
                   fontSize: "12px",
                 }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.background = "rgba(255,255,255,0.02)";
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.background =
-                    refineModel === "auto"
-                      ? "rgba(99, 102, 241, 0.12)"
-                      : "transparent";
-                }}
               >
                 Auto
                 {refineModel === "auto" && " ✓"}
@@ -862,7 +697,21 @@ const CompactModelTray = ({
                   <button
                     key={provider.id}
                     onClick={() => {
-                      onSetRefineModel(provider.id);
+                      if (isLoading) return;
+                      const clickedId = provider.id;
+
+                      // Simple toggle: if already selected, go to 'auto', otherwise set it
+                      const newRefineModel =
+                        refineModel === clickedId ? "auto" : clickedId;
+
+                      onSetRefineModel(newRefineModel);
+                      try {
+                        localStorage.setItem(
+                          "htos_refine_model",
+                          newRefineModel,
+                        );
+                      } catch {}
+
                       setShowRefineDropdown(false);
                     }}
                     disabled={isLoading}
@@ -881,15 +730,6 @@ const CompactModelTray = ({
                       transition: "all 0.12s ease",
                       fontSize: "12px",
                     }}
-                    onMouseEnter={(e) => {
-                      e.currentTarget.style.background =
-                        "rgba(255,255,255,0.02)";
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.background = isSelected
-                        ? "rgba(99, 102, 241, 0.12)"
-                        : "transparent";
-                    }}
                   >
                     {provider.name}
                     {isSelected && " ✓"}
@@ -902,14 +742,11 @@ const CompactModelTray = ({
           <button
             onClick={() => {
               setIsExpanded(true);
-              // close any open compact dropdowns when opening expanded view
               setShowModelsDropdown(false);
               setShowMapDropdown(false);
               setShowUnifyDropdown(false);
               setShowRefineDropdown(false);
             }}
-            aria-expanded={isExpanded}
-            aria-label="Open full settings"
             style={{
               marginLeft: "auto",
               background: "none",
@@ -920,12 +757,6 @@ const CompactModelTray = ({
               padding: "4px",
               borderRadius: "4px",
               transition: "all 0.2s ease",
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.background = "rgba(255, 255, 255, 0.1)";
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.background = "none";
             }}
           >
             ⚙️
@@ -1474,56 +1305,6 @@ const CompactModelTray = ({
                     Select 2+ models to enable.
                   </div>
                 )}
-              </div>
-
-              {/* Refine Model */}
-              <div>
-                <label
-                  style={{
-                    display: "flex",
-                    flexDirection: "column",
-                    gap: "4px",
-                    cursor: "pointer",
-                  }}
-                >
-                  <div
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "6px",
-                    }}
-                  >
-                    <span style={{ fontSize: "12px", color: "#94a3b8" }}>
-                      Refine Model
-                    </span>
-                  </div>
-                  <select
-                    value={refineModel}
-                    onChange={(e) => {
-                      const model = e.target.value;
-                      onSetRefineModel(model);
-                      try {
-                        localStorage.setItem("htos_refine_model", model);
-                      } catch (_) {}
-                    }}
-                    disabled={isLoading}
-                    style={{
-                      background: "rgba(255, 255, 255, 0.1)",
-                      border: "1px solid rgba(255, 255, 255, 0.2)",
-                      borderRadius: "4px",
-                      color: "#e2e8f0",
-                      fontSize: "12px",
-                      padding: "2px 6px",
-                    }}
-                  >
-                    <option value="auto">Auto</option>
-                    {LLM_PROVIDERS_CONFIG.map((provider) => (
-                      <option key={provider.id} value={provider.id}>
-                        {provider.name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
               </div>
             </div>
           </div>

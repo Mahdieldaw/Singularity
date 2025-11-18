@@ -1,12 +1,12 @@
 /**
  * HTOS NetRulesManager - Complete Implementation
  * Extracted from bg.refactored.non.stripped.js for standalone integration
- * 
+ *
  * This module provides network rule management for Chrome extension using Declarative Net Request API,
  * supporting CSP modification, header manipulation, and tab-specific rules cleanup.
  */
 
-import { DNRUtils } from '../core/dnr-utils.js';
+import { DNRUtils } from "../core/dnr-utils.js";
 
 // =============================================================================
 // UTILITY DEPENDENCIES
@@ -19,13 +19,13 @@ const utils = {
     defined: (e) => undefined !== e,
     undefined: (e) => undefined === e,
     nil: (e) => e == null,
-    boolean: (e) => typeof e == 'boolean',
-    number: (e) => typeof e == 'number',
-    string: (e) => typeof e == 'string',
-    symbol: (e) => typeof e == 'symbol',
-    function: (e) => typeof e == 'function',
+    boolean: (e) => typeof e == "boolean",
+    number: (e) => typeof e == "number",
+    string: (e) => typeof e == "string",
+    symbol: (e) => typeof e == "symbol",
+    function: (e) => typeof e == "function",
     array: (e) => Array.isArray(e),
-    object: (e) => Object.prototype.toString.call(e) === '[object Object]',
+    object: (e) => Object.prototype.toString.call(e) === "[object Object]",
     error: (e) => e instanceof Error,
     empty: (e) =>
       !!utils.is.nil(e) ||
@@ -44,11 +44,13 @@ const utils = {
     alarms: {
       run: (e, t = {}) => {
         // Check if chrome.alarms API is available
-          if (!chrome.alarms || !chrome.alarms.onAlarm) {
-            console.warn('[htos] chrome.alarms API not available, skipping alarm setup');
-            if (t.immediately) e();
-            return null;
-          }
+        if (!chrome.alarms || !chrome.alarms.onAlarm) {
+          console.warn(
+            "[htos] chrome.alarms API not available, skipping alarm setup",
+          );
+          if (t.immediately) e();
+          return null;
+        }
         const a = {
           name: t.name || utils.generateId(),
           once: t.once || !1,
@@ -74,9 +76,9 @@ const utils = {
         );
       },
       off: (e) => {
-if (!chrome.alarms || !chrome.alarms.onAlarm) return;
+        if (!chrome.alarms || !chrome.alarms.onAlarm) return;
         e &&
-          (typeof e == 'string'
+          (typeof e == "string"
             ? chrome.alarms.clear(e)
             : (chrome.alarms.onAlarm.removeListener(e.listener),
               chrome.alarms.clear(e.name)));
@@ -91,8 +93,7 @@ if (!chrome.alarms || !chrome.alarms.onAlarm) return;
   },
 
   // ID generator utility
-  generateId: () =>
-    `htos-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+  generateId: () => `htos-${Date.now()}-${Math.random().toString(36).slice(2)}`,
 };
 
 // =============================================================================
@@ -100,7 +101,7 @@ if (!chrome.alarms || !chrome.alarms.onAlarm) return;
 // =============================================================================
 
 const data = {
-  name: 'htos', // Updated from 'HTOS1'
+  name: "htos", // Updated from 'HTOS1'
 };
 
 // =============================================================================
@@ -135,12 +136,12 @@ const NetRulesManager = {
    */
   async register(e) {
     const isArray = Array.isArray(e);
-    
+
     // Normalize to array and assign IDs
     e = utils.ensureArray(e).map((e) => {
       const ruleId = this._lastRuleId;
       this._lastRuleId += 1;
-      
+
       return {
         id: ruleId,
         priority: 1,
@@ -148,21 +149,21 @@ const NetRulesManager = {
         key: e.key || String(ruleId),
         condition: {
           resourceTypes: [
-            'main_frame',
-            'sub_frame',
-            'stylesheet',
-            'script',
-            'image',
-            'font',
-            'object',
-            'xmlhttprequest',
-            'ping',
-            'csp_report',
-            'media',
-            'websocket',
-            'webtransport',
-            'webbundle',
-            'other',
+            "main_frame",
+            "sub_frame",
+            "stylesheet",
+            "script",
+            "image",
+            "font",
+            "object",
+            "xmlhttprequest",
+            "ping",
+            "csp_report",
+            "media",
+            "websocket",
+            "webtransport",
+            "webbundle",
+            "other",
           ],
           ...e.condition,
         },
@@ -170,12 +171,13 @@ const NetRulesManager = {
     });
 
     // Remove duplicates by key (keep last occurrence)
-    e = e.filter((rule, index) => 
-      index === e.findLastIndex((r) => r.key === rule.key)
+    e = e.filter(
+      (rule, index) => index === e.findLastIndex((r) => r.key === rule.key),
     );
 
     // Find existing rules with same keys to replace
-    const existingKeys = this._rules.length > 0 ? new Set(e.map((rule) => rule.key)) : null;
+    const existingKeys =
+      this._rules.length > 0 ? new Set(e.map((rule) => rule.key)) : null;
     const rulesToRemove = this._rules
       .filter((rule) => existingKeys && existingKeys.has(rule.key))
       .map((rule) => rule.id);
@@ -186,7 +188,7 @@ const NetRulesManager = {
         id: rule.id,
         key: rule.key,
         tabIds: rule.condition.tabIds || null,
-      }))
+      })),
     );
 
     const ruleKeys = e.map((rule) => rule.key);
@@ -245,7 +247,7 @@ const NetRulesManager = {
    */
   async _dropAllSessionRules() {
     const sessionRules = await chrome.declarativeNetRequest.getSessionRules();
-    
+
     if (sessionRules.length !== 0) {
       await chrome.declarativeNetRequest.updateSessionRules({
         removeRuleIds: sessionRules.map((rule) => rule.id),
@@ -258,7 +260,7 @@ const NetRulesManager = {
    */
   _cleanupTabRulesPeriodically() {
     utils.chrome.alarms.run(this._cleanUpTabRules.bind(this), {
-      name: 'netRules.cleanupTabRules',
+      name: "netRules.cleanupTabRules",
       periodInMinutes: 5,
     });
   },
@@ -277,7 +279,8 @@ const NetRulesManager = {
 
       for (const tabId of rule.tabIds) {
         if (!tabId) continue;
-        if (tabId === -1) { // keep rule if applies to all tabs
+        if (tabId === -1) {
+          // keep rule if applies to all tabs
           hasValidTab = true;
           break;
         }
@@ -322,11 +325,11 @@ const CSPController = {
     this._ruleIds = [];
 
     const removeCspHeaderAction = {
-      type: 'modifyHeaders',
+      type: "modifyHeaders",
       responseHeaders: [
         {
-          header: 'content-security-policy',
-          operation: 'remove',
+          header: "content-security-policy",
+          operation: "remove",
         },
       ],
     };
@@ -362,26 +365,28 @@ const UserAgentController = {
    */
   _createUaRules() {
     const createUrlFilter = (agent) => `*://*/*_vua=${agent}*`;
-    
+
     // Example user agents - in real implementation this would come from configuration
     const userAgents = {
-      desktop: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-      mobile: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
+      desktop:
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+      mobile:
+        "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
     };
 
     return Object.keys(userAgents)
-      .filter((key) => key !== 'auto')
+      .filter((key) => key !== "auto")
       .map((key) => ({
         condition: {
           urlFilter: createUrlFilter(key),
-          resourceTypes: ['main_frame', 'sub_frame'],
+          resourceTypes: ["main_frame", "sub_frame"],
         },
         action: {
-          type: 'modifyHeaders',
+          type: "modifyHeaders",
           requestHeaders: [
             {
-              header: 'user-agent',
-              operation: 'set',
+              header: "user-agent",
+              operation: "set",
               value: userAgents[key],
             },
           ],
@@ -394,34 +399,34 @@ const UserAgentController = {
    */
   _createLangRules() {
     const createLangUrlFilter = (lang) => `*://*/*_vlang=${lang}*`;
-    
+
     const formatLanguage = (lang) =>
-      lang.includes('_')
-        ? `${lang.replace('_', '-')},${lang.slice(0, lang.indexOf('_'))};q=0.9`
+      lang.includes("_")
+        ? `${lang.replace("_", "-")},${lang.slice(0, lang.indexOf("_"))};q=0.9`
         : `${lang};q=0.9`;
 
     // Example languages - in real implementation this would come from configuration
     const languages = {
-      en: 'en',
-      es: 'es',
-      fr: 'fr',
-      de: 'de',
-      en_US: 'en_US',
+      en: "en",
+      es: "es",
+      fr: "fr",
+      de: "de",
+      en_US: "en_US",
     };
 
     return Object.keys(languages)
-      .filter((key) => key !== 'auto')
+      .filter((key) => key !== "auto")
       .map((key) => ({
         condition: {
           urlFilter: createLangUrlFilter(key),
-          resourceTypes: ['main_frame', 'sub_frame'],
+          resourceTypes: ["main_frame", "sub_frame"],
         },
         action: {
-          type: 'modifyHeaders',
+          type: "modifyHeaders",
           requestHeaders: [
             {
-              header: 'accept-language',
-              operation: 'set',
+              header: "accept-language",
+              operation: "set",
               value: formatLanguage(languages[key]),
             },
           ],
@@ -438,9 +443,9 @@ const ArkoseController = {
   async init() {
     // Initialize DNRUtils
     await DNRUtils.initialize();
-    
+
     // Example iframe URL - in real implementation this would be configurable
-    this._iframeUrl = 'https://tcr9i.chat.openai.com';
+    this._iframeUrl = "https://tcr9i.chat.openai.com";
     await this._allowArkoseIframe();
   },
 
@@ -455,15 +460,15 @@ const ArkoseController = {
         urlFilter: `${this._iframeUrl}*`,
       },
       action: {
-        type: 'modifyHeaders',
+        type: "modifyHeaders",
         responseHeaders: [
           {
-            header: 'content-security-policy',
-            operation: 'remove',
+            header: "content-security-policy",
+            operation: "remove",
           },
           {
-            header: 'permissions-policy',
-            operation: 'remove',
+            header: "permissions-policy",
+            operation: "remove",
           },
         ],
       },
@@ -480,23 +485,33 @@ const ArkoseController = {
    * @param {number} options.durationMs - Duration in milliseconds (optional)
    * @returns {Promise<number>} Rule ID
    */
-  async injectAEHeaders({ tabId, urlFilter, headerName, headerValue, durationMs }) {
+  async injectAEHeaders({
+    tabId,
+    urlFilter,
+    headerName,
+    headerValue,
+    durationMs,
+  }) {
     try {
       const ruleId = await DNRUtils.registerHeaderRule({
         tabId,
         urlFilter,
-        resourceTypes: [chrome.declarativeNetRequest.ResourceType.XMLHTTPREQUEST],
+        resourceTypes: [
+          chrome.declarativeNetRequest.ResourceType.XMLHTTPREQUEST,
+        ],
         headerName,
         headerValue,
-        operation: 'set',
-        providerId: 'arkose',
-        durationMs
+        operation: "set",
+        providerId: "arkose",
+        durationMs,
       });
-      
-      console.debug(`ArkoseController: Injected AE header ${headerName} for tab ${tabId}`);
+
+      console.debug(
+        `ArkoseController: Injected AE header ${headerName} for tab ${tabId}`,
+      );
       return ruleId;
     } catch (error) {
-      console.error('ArkoseController: Failed to inject AE headers:', error);
+      console.error("ArkoseController: Failed to inject AE headers:", error);
       throw error;
     }
   },
@@ -510,7 +525,10 @@ const ArkoseController = {
       await DNRUtils.removeRule(ruleId);
       console.debug(`ArkoseController: Removed AE header rule ${ruleId}`);
     } catch (error) {
-      console.error('ArkoseController: Failed to remove AE header rule:', error);
+      console.error(
+        "ArkoseController: Failed to remove AE header rule:",
+        error,
+      );
       throw error;
     }
   },
@@ -520,10 +538,13 @@ const ArkoseController = {
    */
   async removeAllAEHeaderRules() {
     try {
-      await DNRUtils.removeProviderRules('arkose');
-      console.debug('ArkoseController: Removed all AE header rules');
+      await DNRUtils.removeProviderRules("arkose");
+      console.debug("ArkoseController: Removed all AE header rules");
     } catch (error) {
-      console.error('ArkoseController: Failed to remove all AE header rules:', error);
+      console.error(
+        "ArkoseController: Failed to remove all AE header rules:",
+        error,
+      );
       throw error;
     }
   },
@@ -534,18 +555,16 @@ const ArkoseController = {
 // =============================================================================
 
 // For ES6 modules
-export { 
-  NetRulesManager, 
-  CSPController, 
-  UserAgentController, 
-  ArkoseController, 
-  utils 
+export {
+  NetRulesManager,
+  CSPController,
+  UserAgentController,
+  ArkoseController,
+  utils,
 };
 
-
-
 // For global browser usage
-if (typeof window !== 'undefined') {
+if (typeof window !== "undefined") {
   window.HTOSNetRulesManager = NetRulesManager;
   window.HTOSCSPController = CSPController;
   window.HTOSUserAgentController = UserAgentController;

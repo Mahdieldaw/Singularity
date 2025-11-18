@@ -1,10 +1,15 @@
-import React, { useMemo, useState } from 'react';
-import { useAtomValue, useSetAtom } from 'jotai';
-import { historySessionsAtom, isHistoryLoadingAtom, isHistoryPanelOpenAtom, currentSessionIdAtom } from '../state/atoms';
-import { useChat } from '../hooks/useChat';
-import HistoryPanel from './HistoryPanel';
-import api from '../services/extension-api';
-import RenameDialog from './RenameDialog';
+import React, { useMemo, useState } from "react";
+import { useAtomValue, useSetAtom } from "jotai";
+import {
+  historySessionsAtom,
+  isHistoryLoadingAtom,
+  isHistoryPanelOpenAtom,
+  currentSessionIdAtom,
+} from "../state/atoms";
+import { useChat } from "../hooks/useChat";
+import HistoryPanel from "./HistoryPanel";
+import api from "../services/extension-api";
+import RenameDialog from "./RenameDialog";
 
 export default function HistoryPanelConnected() {
   const sessions = useAtomValue(historySessionsAtom);
@@ -18,12 +23,12 @@ export default function HistoryPanelConnected() {
   const [isBatchMode, setIsBatchMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [renameSessionId, setRenameSessionId] = useState<string | null>(null);
-  const [renameDefaultTitle, setRenameDefaultTitle] = useState<string>('');
+  const [renameDefaultTitle, setRenameDefaultTitle] = useState<string>("");
   const [isRenaming, setIsRenaming] = useState<boolean>(false);
 
   const handleDeleteChat = async (sessionId: string) => {
     // Track pending deletion
-    setDeletingIds(prev => {
+    setDeletingIds((prev) => {
       const next = new Set(prev);
       next.add(sessionId);
       return next;
@@ -31,7 +36,9 @@ export default function HistoryPanelConnected() {
 
     // Optimistically remove from panel
     const prevSessions = sessions;
-    setHistorySessions((draft: any) => (draft.filter((s: any) => (s.sessionId || s.id) !== sessionId)));
+    setHistorySessions((draft: any) =>
+      draft.filter((s: any) => (s.sessionId || s.id) !== sessionId),
+    );
 
     const ok = await deleteChat(sessionId);
 
@@ -41,23 +48,28 @@ export default function HistoryPanelConnected() {
       const refreshed = (response?.sessions || []).map((s: any) => ({
         id: s.sessionId,
         sessionId: s.sessionId,
-        title: s.title || 'Untitled',
+        title: s.title || "Untitled",
         startTime: s.startTime || Date.now(),
         lastActivity: s.lastActivity || Date.now(),
         messageCount: s.messageCount || 0,
-        firstMessage: s.firstMessage || '',
-        messages: []
+        firstMessage: s.firstMessage || "",
+        messages: [],
       }));
 
       setHistorySessions(refreshed as any);
 
-      const stillExists = refreshed.some((s: any) => (s.sessionId || s.id) === sessionId);
+      const stillExists = refreshed.some(
+        (s: any) => (s.sessionId || s.id) === sessionId,
+      );
       // If the deleted session is gone and was active, clear the chat view immediately
       if (!stillExists && currentSessionId === sessionId) {
         newChat();
       }
     } catch (e) {
-      console.error('[HistoryPanel] Failed to refresh history after deletion:', e);
+      console.error(
+        "[HistoryPanel] Failed to refresh history after deletion:",
+        e,
+      );
       if (!ok) {
         // If the delete call failed and we also failed to refresh, revert UI to previous list
         setHistorySessions(prevSessions as any);
@@ -65,7 +77,7 @@ export default function HistoryPanelConnected() {
     }
 
     // Clear pending state
-    setDeletingIds(prev => {
+    setDeletingIds((prev) => {
       const next = new Set(prev);
       next.delete(sessionId);
       return next;
@@ -80,7 +92,8 @@ export default function HistoryPanelConnected() {
   const handleToggleSelected = (sessionId: string) => {
     setSelectedIds((prev) => {
       const next = new Set(prev);
-      if (next.has(sessionId)) next.delete(sessionId); else next.add(sessionId);
+      if (next.has(sessionId)) next.delete(sessionId);
+      else next.add(sessionId);
       return next;
     });
   };
@@ -95,7 +108,9 @@ export default function HistoryPanelConnected() {
 
     // Optimistically remove selected sessions
     const prevSessions = sessions;
-    setHistorySessions((draft: any) => (draft.filter((s: any) => !ids.includes(s.sessionId || s.id))));
+    setHistorySessions((draft: any) =>
+      draft.filter((s: any) => !ids.includes(s.sessionId || s.id)),
+    );
 
     try {
       const { removed } = await deleteChats(ids);
@@ -104,16 +119,16 @@ export default function HistoryPanelConnected() {
       const refreshed = (response?.sessions || []).map((s: any) => ({
         id: s.sessionId,
         sessionId: s.sessionId,
-        title: s.title || 'Untitled',
+        title: s.title || "Untitled",
         startTime: s.startTime || Date.now(),
         lastActivity: s.lastActivity || Date.now(),
         messageCount: s.messageCount || 0,
-        firstMessage: s.firstMessage || '',
-        messages: []
+        firstMessage: s.firstMessage || "",
+        messages: [],
       }));
       setHistorySessions(refreshed as any);
     } catch (e) {
-      console.error('[HistoryPanel] Batch delete failed:', e);
+      console.error("[HistoryPanel] Batch delete failed:", e);
       // revert UI list on failure
       setHistorySessions(prevSessions as any);
     } finally {
@@ -124,13 +139,13 @@ export default function HistoryPanelConnected() {
 
   const openRenameDialog = (sessionId: string, currentTitle: string) => {
     setRenameSessionId(sessionId);
-    setRenameDefaultTitle(currentTitle || 'Untitled');
+    setRenameDefaultTitle(currentTitle || "Untitled");
   };
 
   const closeRenameDialog = () => {
     if (isRenaming) return; // prevent closing during active rename to avoid accidental state issues
     setRenameSessionId(null);
-    setRenameDefaultTitle('');
+    setRenameDefaultTitle("");
   };
 
   const handleRenameChat = async (newTitle: string) => {
@@ -140,43 +155,46 @@ export default function HistoryPanelConnected() {
 
     // Optimistically update local history list
     const prevSessions = sessions;
-    setHistorySessions((draft: any) => (
+    setHistorySessions((draft: any) =>
       draft.map((s: any) => {
         const id = s.sessionId || s.id;
         if (id === sessionId) {
           return { ...s, title: newTitle };
         }
         return s;
-      })
-    ));
+      }),
+    );
 
     try {
-    const res = await api.renameSession(sessionId, newTitle);
-    
-    // ✅ FIX: Just check if updated is false/undefined, don't access .error
-    if (!res?.updated) {
-      throw new Error('Rename failed');
-    }
+      const res = await api.renameSession(sessionId, newTitle);
+
+      // ✅ FIX: Just check if updated is false/undefined, don't access .error
+      if (!res?.updated) {
+        throw new Error("Rename failed");
+      }
       // Revalidate with backend list to ensure consistency
       try {
         const response = await api.getHistoryList();
         const refreshed = (response?.sessions || []).map((s: any) => ({
           id: s.sessionId,
           sessionId: s.sessionId,
-          title: s.title || 'Untitled',
+          title: s.title || "Untitled",
           startTime: s.startTime || Date.now(),
           lastActivity: s.lastActivity || Date.now(),
           messageCount: s.messageCount || 0,
-          firstMessage: s.firstMessage || '',
-          messages: []
+          firstMessage: s.firstMessage || "",
+          messages: [],
         }));
         setHistorySessions(refreshed as any);
       } catch (e) {
-        console.warn('[HistoryPanel] Failed to refresh after rename, keeping optimistic title:', e);
+        console.warn(
+          "[HistoryPanel] Failed to refresh after rename, keeping optimistic title:",
+          e,
+        );
       }
       closeRenameDialog();
     } catch (e) {
-      console.error('[HistoryPanel] Rename failed:', e);
+      console.error("[HistoryPanel] Rename failed:", e);
       // revert optimistic update
       setHistorySessions(prevSessions as any);
     } finally {
@@ -193,7 +211,9 @@ export default function HistoryPanelConnected() {
         onNewChat={newChat}
         onSelectChat={selectChat}
         onDeleteChat={handleDeleteChat}
-        onRenameChat={(sessionId: string, currentTitle: string) => openRenameDialog(sessionId, currentTitle)}
+        onRenameChat={(sessionId: string, currentTitle: string) =>
+          openRenameDialog(sessionId, currentTitle)
+        }
         deletingIds={deletingIds}
         isBatchMode={isBatchMode}
         selectedIds={selectedIds}

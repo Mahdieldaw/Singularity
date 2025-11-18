@@ -15,9 +15,9 @@ Singularity is a Chrome extension (Manifest V3) that orchestrates multi‑model 
 
 - Three request primitives: initialize (start), extend (continue), recompute (re‑run).
 - Backend pipeline:
-  1) Resolve: fetch required context (e.g., provider continuation state for a session)
-  2) Compile: build a plan of steps (batch prompt → optional mapping → optional synthesis)
-  3) Execute: stream partials, report step updates, persist results, then finalize the turn
+  1. Resolve: fetch required context (e.g., provider continuation state for a session)
+  2. Compile: build a plan of steps (batch prompt → optional mapping → optional synthesis)
+  3. Execute: stream partials, report step updates, persist results, then finalize the turn
 - UI state: map‑based storage for O(1) lookups and an ordered ID list for rendering. A StreamingBuffer batches DOM updates for smooth 60fps during heavy streaming.
 
 ## Why it’s useful

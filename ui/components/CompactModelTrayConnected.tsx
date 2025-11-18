@@ -1,25 +1,29 @@
-import React from 'react';
-import { useAtom } from 'jotai';
-import CompactModelTray from './CompactModelTray';
-import { 
-  selectedModelsAtom, 
-  mappingEnabledAtom, 
-  mappingProviderAtom, 
-  synthesisProviderAtom, 
-  synthesisProvidersAtom, 
-  powerUserModeAtom, 
-  thinkOnChatGPTAtom, 
-  chatInputHeightAtom, 
+import React from "react";
+import { useAtom } from "jotai";
+import CompactModelTray from "./CompactModelTray";
+import {
+  selectedModelsAtom,
+  mappingEnabledAtom,
+  mappingProviderAtom,
+  synthesisProviderAtom,
+  synthesisProvidersAtom,
+  powerUserModeAtom,
+  thinkOnChatGPTAtom,
+  chatInputHeightAtom,
   isFirstTurnAtom,
-  isLoadingAtom 
-} from '../state/atoms';
+  isLoadingAtom,
+} from "../state/atoms";
 
 const CompactModelTrayConnected = () => {
   const [selectedModels, setSelectedModels] = useAtom(selectedModelsAtom);
   const [mappingEnabled, setMappingEnabled] = useAtom(mappingEnabledAtom);
   const [mappingProvider, setMappingProvider] = useAtom(mappingProviderAtom);
-  const [synthesisProvider, setSynthesisProvider] = useAtom(synthesisProviderAtom);
-  const [synthesisProviders, setSynthesisProviders] = useAtom(synthesisProvidersAtom);
+  const [synthesisProvider, setSynthesisProvider] = useAtom(
+    synthesisProviderAtom,
+  );
+  const [synthesisProviders, setSynthesisProviders] = useAtom(
+    synthesisProvidersAtom,
+  );
   const [powerUserMode] = useAtom(powerUserModeAtom);
   const [thinkOnChatGPT, setThinkOnChatGPT] = useAtom(thinkOnChatGPTAtom);
   const [chatInputHeight] = useAtom(chatInputHeightAtom);
@@ -28,9 +32,9 @@ const CompactModelTrayConnected = () => {
 
   // ✅ FIX: Proper immutable updates (no draft mutation)
   const handleToggleModel = (providerId: string) => {
-    setSelectedModels(prev => ({
+    setSelectedModels((prev) => ({
       ...prev,
-      [providerId]: !prev[providerId]
+      [providerId]: !prev[providerId],
     }));
   };
 
@@ -38,7 +42,7 @@ const CompactModelTrayConnected = () => {
     setMappingEnabled(enabled);
     // Persist immediately
     try {
-      localStorage.setItem('htos_mapping_enabled', JSON.stringify(enabled));
+      localStorage.setItem("htos_mapping_enabled", JSON.stringify(enabled));
     } catch {}
   };
 
@@ -47,9 +51,9 @@ const CompactModelTrayConnected = () => {
     // Persist immediately
     try {
       if (providerId) {
-        localStorage.setItem('htos_mapping_provider', providerId);
+        localStorage.setItem("htos_mapping_provider", providerId);
       } else {
-        localStorage.removeItem('htos_mapping_provider');
+        localStorage.removeItem("htos_mapping_provider");
       }
     } catch {}
   };
@@ -59,9 +63,9 @@ const CompactModelTrayConnected = () => {
     // Persist immediately
     try {
       if (providerId) {
-        localStorage.setItem('htos_synthesis_provider', providerId);
+        localStorage.setItem("htos_synthesis_provider", providerId);
       } else {
-        localStorage.removeItem('htos_synthesis_provider');
+        localStorage.removeItem("htos_synthesis_provider");
       }
     } catch {}
   };
@@ -70,7 +74,7 @@ const CompactModelTrayConnected = () => {
   const handleToggleSynthesisProvider = (providerId: string) => {
     setSynthesisProviders((prev) => {
       if (prev.includes(providerId)) {
-        return prev.filter(id => id !== providerId);
+        return prev.filter((id) => id !== providerId);
       } else {
         return [...prev, providerId];
       }
@@ -100,7 +104,7 @@ const CompactModelTrayConnected = () => {
       isFirstLoad={isFirstLoad}
       onAcknowledgeFirstLoad={() => {
         try {
-          localStorage.setItem('htos_has_used', 'true');
+          localStorage.setItem("htos_has_used", "true");
         } catch {}
       }}
       chatInputHeight={chatInputHeight}

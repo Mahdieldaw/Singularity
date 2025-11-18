@@ -1,31 +1,35 @@
 // ui/components/AiTurnBlockConnected.tsx
-import React, { useCallback } from 'react';
-import { useAtom, useSetAtom } from 'jotai';
-import AiTurnBlock from './AiTurnBlock';
-import ProviderResponseBlockConnected from './ProviderResponseBlockConnected';
+import React, { useCallback } from "react";
+import { useAtom, useSetAtom } from "jotai";
+import AiTurnBlock from "./AiTurnBlock";
+import ProviderResponseBlockConnected from "./ProviderResponseBlockConnected";
 
-import { 
-  isLoadingAtom, 
-  currentAppStepAtom, 
-  isReducedMotionAtom, 
-  showSourceOutputsAtom, 
-  activeClipsAtom, 
-  activeAiTurnIdAtom, 
+import {
+  isLoadingAtom,
+  currentAppStepAtom,
+  isReducedMotionAtom,
+  showSourceOutputsAtom,
+  activeClipsAtom,
+  activeAiTurnIdAtom,
   activeRecomputeStateAtom,
-} from '../state/atoms';
-import { useClipActions } from '../hooks/useClipActions';
-import { useEligibility } from '../hooks/useEligibility';
-import type { AiTurn } from '../types';
+} from "../state/atoms";
+import { useClipActions } from "../hooks/useClipActions";
+import { useEligibility } from "../hooks/useEligibility";
+import type { AiTurn } from "../types";
 
 interface AiTurnBlockConnectedProps {
   aiTurn: AiTurn;
 }
 
-export default function AiTurnBlockConnected({ aiTurn }: AiTurnBlockConnectedProps) {
+export default function AiTurnBlockConnected({
+  aiTurn,
+}: AiTurnBlockConnectedProps) {
   const [isLoading] = useAtom(isLoadingAtom);
   const [currentAppStep] = useAtom(currentAppStepAtom);
   const [isReducedMotion] = useAtom(isReducedMotionAtom);
-  const [showSourceOutputs, setShowSourceOutputs] = useAtom(showSourceOutputsAtom);
+  const [showSourceOutputs, setShowSourceOutputs] = useAtom(
+    showSourceOutputsAtom,
+  );
   const [activeClips] = useAtom(activeClipsAtom);
   const [activeAiTurnId] = useAtom(activeAiTurnIdAtom);
   const { handleClipClick } = useClipActions();
@@ -45,12 +49,18 @@ export default function AiTurnBlockConnected({ aiTurn }: AiTurnBlockConnectedPro
       activeRecomputeState={activeRecomputeState}
       currentAppStep={currentAppStep}
       showSourceOutputs={showSourceOutputs}
-      onToggleSourceOutputs={useCallback(() => setShowSourceOutputs(prev => !prev), [setShowSourceOutputs])}
+      onToggleSourceOutputs={useCallback(
+        () => setShowSourceOutputs((prev) => !prev),
+        [setShowSourceOutputs],
+      )}
       activeSynthesisClipProviderId={turnClips.synthesis}
       activeMappingClipProviderId={turnClips.mapping}
-      onClipClick={useCallback((type: 'synthesis' | 'mapping', pid: string) => {
-        void handleClipClick(aiTurn.id, type, pid);
-      }, [handleClipClick, aiTurn.id])}
+      onClipClick={useCallback(
+        (type: "synthesis" | "mapping", pid: string) => {
+          void handleClipClick(aiTurn.id, type, pid);
+        },
+        [handleClipClick, aiTurn.id],
+      )}
     >
       <ProviderResponseBlockConnected aiTurnId={aiTurn.id} />
     </AiTurnBlock>

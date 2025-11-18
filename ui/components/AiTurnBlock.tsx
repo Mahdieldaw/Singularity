@@ -21,13 +21,12 @@ import {
 } from "../utils/turn-helpers";
 
 function parseMappingResponse(response?: string | null) {
- 
   if (!response) return { mapping: "", options: null };
 
   const separator = "===ALL_AVAILABLE_OPTIONS===";
 
   if (response.includes(separator)) {
-   const [mainMapping, optionsSection] = response.split(separator);
+    const [mainMapping, optionsSection] = response.split(separator);
     return {
       mapping: mainMapping.trim(),
       options: optionsSection.trim(),
@@ -64,7 +63,7 @@ const useShorterHeight = (
   hasSynthesis: boolean,
   hasMapping: boolean,
   synthesisVersion: string | number,
-  pause: boolean
+  pause: boolean,
 ) => {
   const synthRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<HTMLDivElement>(null);
@@ -101,7 +100,7 @@ const useShorterHeight = (
 
     // Only update if changed by more than 2px to avoid micro-adjustments
     setShorterHeight((prev) =>
-      prev === null || Math.abs(prev - h) > 2 ? h : prev
+      prev === null || Math.abs(prev - h) > 2 ? h : prev,
     );
     setShorterSection((prev) => (prev !== sec ? sec : prev));
   }, [hasSynthesis, hasMapping, pause]);
@@ -203,8 +202,6 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
   const mapProseRef = useRef<HTMLDivElement>(null);
   const optionsProseRef = useRef<HTMLDivElement>(null);
 
-
-
   // Track which section is manually expanded (if truncated)
   const [synthExpanded, setSynthExpanded] = useState(false);
   const [mapExpanded, setMapExpanded] = useState(false);
@@ -248,7 +245,7 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
               updatedAt: typedResponse.updatedAt || Date.now(),
             } as ProviderResponse;
           }
-        }
+        },
       );
     }
     return sources;
@@ -258,13 +255,13 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
 
   const providerIds = useMemo(
     () => LLM_PROVIDERS_CONFIG.map((p) => String(p.id)),
-    []
+    [],
   );
 
   const computeActiveProvider = useCallback(
     (
       explicit: string | undefined,
-      map: Record<string, ProviderResponse[]>
+      map: Record<string, ProviderResponse[]>,
     ): string | undefined => {
       if (explicit) return explicit;
       for (const pid of providerIds) {
@@ -273,16 +270,16 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
       }
       return undefined;
     },
-    [providerIds]
+    [providerIds],
   );
 
   const activeSynthPid = computeActiveProvider(
     activeSynthesisClipProviderId,
-    synthesisResponses
+    synthesisResponses,
   );
   const activeMappingPid = computeActiveProvider(
     activeMappingClipProviderId,
-    mappingResponses
+    mappingResponses,
   );
 
   const isSynthesisTarget = !!(
@@ -303,47 +300,45 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
       // Swap synthesis parsing to mapping parsing
       if (!take?.text) return { mapping: "", options: null };
       return parseMappingResponse(String(take.text));
- 
-  },
-  []
-);
-
-const getOptions = useCallback((): string | null => {
-  if (!activeMappingPid) return null;
-  const take = getLatestResponse(mappingResponses[activeMappingPid]);
-  const { options } = getMappingAndOptions(take);
-  return options;
-}, [activeMappingPid, mappingResponses, getMappingAndOptions]);
-const displayedMappingTake = useMemo(() => {
-  if (!activeMappingPid) return undefined;
-  return getLatestResponse(mappingResponses[activeMappingPid]);
-}, [activeMappingPid, mappingResponses]);
-
-const displayedMappingText = useMemo(() => {
-  if (!displayedMappingTake?.text) return "";
-  return String(
-    getMappingAndOptions(displayedMappingTake).mapping ?? ""
+    },
+    [],
   );
-}, [displayedMappingTake, getMappingAndOptions]);
-const optionsText = useMemo(() => String(getOptions() || ""), [getOptions]);
- 
-const hasMapping = !!(activeMappingPid && displayedMappingTake?.text);
-const hasSynthesis = !!(
-  activeSynthPid && 
-  getLatestResponse(synthesisResponses[activeSynthPid])?.text
+
+  const getOptions = useCallback((): string | null => {
+    if (!activeMappingPid) return null;
+    const take = getLatestResponse(mappingResponses[activeMappingPid]);
+    const { options } = getMappingAndOptions(take);
+    return options;
+  }, [activeMappingPid, mappingResponses, getMappingAndOptions]);
+  const displayedMappingTake = useMemo(() => {
+    if (!activeMappingPid) return undefined;
+    return getLatestResponse(mappingResponses[activeMappingPid]);
+  }, [activeMappingPid, mappingResponses]);
+
+  const displayedMappingText = useMemo(() => {
+    if (!displayedMappingTake?.text) return "";
+    return String(getMappingAndOptions(displayedMappingTake).mapping ?? "");
+  }, [displayedMappingTake, getMappingAndOptions]);
+  const optionsText = useMemo(() => String(getOptions() || ""), [getOptions]);
+
+  const hasMapping = !!(activeMappingPid && displayedMappingTake?.text);
+  const hasSynthesis = !!(
+    activeSynthPid &&
+    getLatestResponse(synthesisResponses[activeSynthPid])?.text
   );
 
   // Respect requested features intent (backward-compatible default true)
   const requestedSynth = (aiTurn.meta as any)?.requestedFeatures?.synthesis;
   const requestedMap = (aiTurn.meta as any)?.requestedFeatures?.mapping;
-  const wasSynthRequested = requestedSynth === undefined ? true : !!requestedSynth;
+  const wasSynthRequested =
+    requestedSynth === undefined ? true : !!requestedSynth;
   const wasMapRequested = requestedMap === undefined ? true : !!requestedMap;
 
   const { synthRef, mapRef, shorterHeight, shorterSection } = useShorterHeight(
     hasSynthesis,
     hasMapping,
     displayedMappingText,
-    isLive || isLoading
+    isLive || isLoading,
   );
 
   // Determine if sections are truncated
@@ -359,7 +354,7 @@ const hasSynthesis = !!(
 
   const getSectionStyle = (
     section: "synthesis" | "mapping",
-    isExpanded: boolean
+    isExpanded: boolean,
   ): React.CSSProperties => {
     const isTruncated = section === "synthesis" ? synthTruncated : mapTruncated;
     const duringStreaming = isLive || isLoading;
@@ -409,13 +404,19 @@ const hasSynthesis = !!(
     const rx = /↗(\d+)/g;
     // Use a TreeWalker to process only text nodes; skip any content already annotated
     const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
-    const replacements: Array<{ node: Text; parts: (string | HTMLElement)[] }> = [];
+    const replacements: Array<{ node: Text; parts: (string | HTMLElement)[] }> =
+      [];
     let node: Node | null = walker.nextNode();
     while (node) {
       const textNode = node as Text;
       const parentEl = textNode.parentElement;
       // Skip if inside an anchor or already annotated citation element
-      if (parentEl && (parentEl.closest('a[href^="citation:"]') || parentEl.closest('[data-citation-number]') || parentEl.closest('[data-citation]'))) {
+      if (
+        parentEl &&
+        (parentEl.closest('a[href^="citation:"]') ||
+          parentEl.closest("[data-citation-number]") ||
+          parentEl.closest("[data-citation]"))
+      ) {
         node = walker.nextNode();
         continue;
       }
@@ -429,24 +430,24 @@ const hasSynthesis = !!(
         const end = start + match[0].length;
         const num = parseInt(match[1], 10);
         if (start > lastIdx) parts.push(value.slice(lastIdx, start));
-        const span = document.createElement('span');
-        span.setAttribute('data-citation-number', String(num));
-        span.setAttribute('role', 'button');
-        span.setAttribute('tabindex', '0');
-        span.textContent = `↗${isNaN(num) ? '' : num}`;
+        const span = document.createElement("span");
+        span.setAttribute("data-citation-number", String(num));
+        span.setAttribute("role", "button");
+        span.setAttribute("tabindex", "0");
+        span.textContent = `↗${isNaN(num) ? "" : num}`;
         // lightweight visual styling to match badge without breaking text selection
-        span.style.display = 'inline-flex';
-        span.style.alignItems = 'center';
-        span.style.gap = '6px';
-        span.style.padding = '0 4px';
-        span.style.marginLeft = '4px';
-        span.style.marginRight = '4px';
-        span.style.background = '#1f2937';
-        span.style.border = '1px solid #374151';
-        span.style.borderRadius = '6px';
-        span.style.color = '#93c5fd';
-        span.style.fontSize = '12px';
-        span.style.lineHeight = '1.4';
+        span.style.display = "inline-flex";
+        span.style.alignItems = "center";
+        span.style.gap = "6px";
+        span.style.padding = "0 4px";
+        span.style.marginLeft = "4px";
+        span.style.marginRight = "4px";
+        span.style.background = "#1f2937";
+        span.style.border = "1px solid #374151";
+        span.style.borderRadius = "6px";
+        span.style.color = "#93c5fd";
+        span.style.fontSize = "12px";
+        span.style.lineHeight = "1.4";
         parts.push(span);
         lastIdx = end;
       }
@@ -459,7 +460,7 @@ const hasSynthesis = !!(
     replacements.forEach(({ node, parts }) => {
       const frag = document.createDocumentFragment();
       parts.forEach((p) => {
-        if (typeof p === 'string') frag.appendChild(document.createTextNode(p));
+        if (typeof p === "string") frag.appendChild(document.createTextNode(p));
         else frag.appendChild(p);
       });
       try {
@@ -467,17 +468,21 @@ const hasSynthesis = !!(
           node.parentNode.replaceChild(frag, node);
         }
       } catch (err) {
-        console.warn('[AiTurnBlock] annotateCitations replace failed', err);
+        console.warn("[AiTurnBlock] annotateCitations replace failed", err);
       }
     });
   }, []);
 
   // After Markdown renders, annotate citations with span[data-citation-number]
   useEffect(() => {
-    try { annotateCitations(mapProseRef.current!); } catch {}
+    try {
+      annotateCitations(mapProseRef.current!);
+    } catch {}
   }, [annotateCitations, displayedMappingText, activeMappingPid, mappingTab]);
   useEffect(() => {
-    try { annotateCitations(optionsProseRef.current!); } catch {}
+    try {
+      annotateCitations(optionsProseRef.current!);
+    } catch {}
   }, [annotateCitations, optionsText, activeMappingPid, mappingTab]);
 
   const handleCitationClick = useCallback(
@@ -501,9 +506,9 @@ const hasSynthesis = !!(
         // Fallback: use the stable UI provider order, filtered to only those with outputs,
         // so 1→first active provider, 2→second, etc. This matches the user's expectation.
         if (!providerId) {
-          const activeOrdered = LLM_PROVIDERS_CONFIG
-            .map((p) => String(p.id))
-            .filter((pid) => !!(aiTurn.batchResponses || {})[pid]);
+          const activeOrdered = LLM_PROVIDERS_CONFIG.map((p) =>
+            String(p.id),
+          ).filter((pid) => !!(aiTurn.batchResponses || {})[pid]);
           providerId = activeOrdered[modelNumber - 1];
         }
         if (!providerId) return;
@@ -519,257 +524,377 @@ const hasSynthesis = !!(
         console.warn("[AiTurnBlock] Citation click failed", e);
       }
     },
-    [activeMappingPid, mappingResponses, showSourceOutputs, onToggleSourceOutputs, aiTurn.id, aiTurn.batchResponses]
+    [
+      activeMappingPid,
+      mappingResponses,
+      showSourceOutputs,
+      onToggleSourceOutputs,
+      aiTurn.id,
+      aiTurn.batchResponses,
+    ],
   );
 
   // Capture-phase DOM interception for any <a href="citation://N"> clicks that might
   // slip through ReactMarkdown or browser defaults. This mirrors the composer path's
   // DOM-based navigation approach so we always scroll in-place rather than opening a new tab.
-  const interceptCitationAnchorClick = useCallback((e: React.MouseEvent) => {
-    try {
-      const target = e.target as HTMLElement | null;
-      const anchor = target ? (target.closest('a[href^="citation:"]') as HTMLAnchorElement | null) : null;
-      const citeEl = target ? (target.closest('[data-citation-number], [data-citation]') as HTMLElement | null) : null;
-      if (anchor || citeEl) {
-        e.preventDefault();
-        e.stopPropagation();
-        let num = NaN;
-        if (anchor) {
-          const href = anchor.getAttribute('href') || '';
-          const numMatch = href.match(/(\d+)/);
-          num = numMatch ? parseInt(numMatch[1], 10) : NaN;
-        } else if (citeEl) {
-          const raw = citeEl.getAttribute('data-citation-number') || citeEl.getAttribute('data-citation') || '';
-          const numMatch = raw.match(/(\d+)/);
-          num = numMatch ? parseInt(numMatch[1], 10) : NaN;
+  const interceptCitationAnchorClick = useCallback(
+    (e: React.MouseEvent) => {
+      try {
+        const target = e.target as HTMLElement | null;
+        const anchor = target
+          ? (target.closest('a[href^="citation:"]') as HTMLAnchorElement | null)
+          : null;
+        const citeEl = target
+          ? (target.closest(
+              "[data-citation-number], [data-citation]",
+            ) as HTMLElement | null)
+          : null;
+        if (anchor || citeEl) {
+          e.preventDefault();
+          e.stopPropagation();
+          let num = NaN;
+          if (anchor) {
+            const href = anchor.getAttribute("href") || "";
+            const numMatch = href.match(/(\d+)/);
+            num = numMatch ? parseInt(numMatch[1], 10) : NaN;
+          } else if (citeEl) {
+            const raw =
+              citeEl.getAttribute("data-citation-number") ||
+              citeEl.getAttribute("data-citation") ||
+              "";
+            const numMatch = raw.match(/(\d+)/);
+            num = numMatch ? parseInt(numMatch[1], 10) : NaN;
+          }
+          if (!isNaN(num)) {
+            handleCitationClick(num);
+          }
         }
-        if (!isNaN(num)) {
-          handleCitationClick(num);
-        }
+      } catch (err) {
+        console.warn("[AiTurnBlock] interceptCitationAnchorClick error", err);
       }
-    } catch (err) {
-      console.warn('[AiTurnBlock] interceptCitationAnchorClick error', err);
-    }
-  }, [handleCitationClick]);
+    },
+    [handleCitationClick],
+  );
 
   // Also intercept middle/aux clicks and Ctrl/Cmd+Click, which browsers treat as "open in new tab"
-  const interceptCitationMouseDownCapture = useCallback((e: React.MouseEvent) => {
-    try {
-      const target = e.target as HTMLElement | null;
-      const anchor = target ? (target.closest('a[href^="citation:"]') as HTMLAnchorElement | null) : null;
-      const citeEl = target ? (target.closest('[data-citation-number], [data-citation]') as HTMLElement | null) : null;
-      if (!anchor && !citeEl) return;
-      const isAux = (e as any).button && (e as any).button !== 0;
-      const isModifier = (e.ctrlKey || (e as any).metaKey);
-      if (isAux || isModifier) {
-        e.preventDefault();
-        e.stopPropagation();
-        let num = NaN;
-        if (anchor) {
-          const href = anchor.getAttribute('href') || '';
-          const numMatch = href.match(/(\d+)/);
-          num = numMatch ? parseInt(numMatch[1], 10) : NaN;
-        } else if (citeEl) {
-          const raw = citeEl.getAttribute('data-citation-number') || citeEl.getAttribute('data-citation') || '';
-          const numMatch = raw.match(/(\d+)/);
-          num = numMatch ? parseInt(numMatch[1], 10) : NaN;
+  const interceptCitationMouseDownCapture = useCallback(
+    (e: React.MouseEvent) => {
+      try {
+        const target = e.target as HTMLElement | null;
+        const anchor = target
+          ? (target.closest('a[href^="citation:"]') as HTMLAnchorElement | null)
+          : null;
+        const citeEl = target
+          ? (target.closest(
+              "[data-citation-number], [data-citation]",
+            ) as HTMLElement | null)
+          : null;
+        if (!anchor && !citeEl) return;
+        const isAux = (e as any).button && (e as any).button !== 0;
+        const isModifier = e.ctrlKey || (e as any).metaKey;
+        if (isAux || isModifier) {
+          e.preventDefault();
+          e.stopPropagation();
+          let num = NaN;
+          if (anchor) {
+            const href = anchor.getAttribute("href") || "";
+            const numMatch = href.match(/(\d+)/);
+            num = numMatch ? parseInt(numMatch[1], 10) : NaN;
+          } else if (citeEl) {
+            const raw =
+              citeEl.getAttribute("data-citation-number") ||
+              citeEl.getAttribute("data-citation") ||
+              "";
+            const numMatch = raw.match(/(\d+)/);
+            num = numMatch ? parseInt(numMatch[1], 10) : NaN;
+          }
+          if (!isNaN(num)) handleCitationClick(num);
         }
-        if (!isNaN(num)) handleCitationClick(num);
+      } catch (err) {
+        console.warn(
+          "[AiTurnBlock] interceptCitationMouseDownCapture error",
+          err,
+        );
       }
-    } catch (err) {
-      console.warn('[AiTurnBlock] interceptCitationMouseDownCapture error', err);
-    }
-  }, [handleCitationClick]);
+    },
+    [handleCitationClick],
+  );
 
   // Intercept pointer down too (some environments dispatch pointer events before mouse/click)
-  const interceptCitationPointerDownCapture = useCallback((e: React.PointerEvent) => {
-    try {
-      const target = e.target as HTMLElement | null;
-      const anchor = target ? (target.closest('a[href^="citation:"]') as HTMLAnchorElement | null) : null;
-      const citeEl = target ? (target.closest('[data-citation-number], [data-citation]') as HTMLElement | null) : null;
-      if (!anchor && !citeEl) return;
-      const isAux = e.button !== 0;
-      const isModifier = (e.ctrlKey || (e as any).metaKey);
-      if (isAux || isModifier) {
+  const interceptCitationPointerDownCapture = useCallback(
+    (e: React.PointerEvent) => {
+      try {
+        const target = e.target as HTMLElement | null;
+        const anchor = target
+          ? (target.closest('a[href^="citation:"]') as HTMLAnchorElement | null)
+          : null;
+        const citeEl = target
+          ? (target.closest(
+              "[data-citation-number], [data-citation]",
+            ) as HTMLElement | null)
+          : null;
+        if (!anchor && !citeEl) return;
+        const isAux = e.button !== 0;
+        const isModifier = e.ctrlKey || (e as any).metaKey;
+        if (isAux || isModifier) {
+          e.preventDefault();
+          e.stopPropagation();
+          let num = NaN;
+          if (anchor) {
+            const href = anchor.getAttribute("href") || "";
+            const numMatch = href.match(/(\d+)/);
+            num = numMatch ? parseInt(numMatch[1], 10) : NaN;
+          } else if (citeEl) {
+            const raw =
+              citeEl.getAttribute("data-citation-number") ||
+              citeEl.getAttribute("data-citation") ||
+              "";
+            const numMatch = raw.match(/(\d+)/);
+            num = numMatch ? parseInt(numMatch[1], 10) : NaN;
+          }
+          if (!isNaN(num)) handleCitationClick(num);
+        }
+      } catch (err) {
+        console.warn(
+          "[AiTurnBlock] interceptCitationPointerDownCapture error",
+          err,
+        );
+      }
+    },
+    [handleCitationClick],
+  );
+
+  // Intercept mouseup similar to composer badge to block finalization of native click/tab behaviors
+  const interceptCitationMouseUpCapture = useCallback(
+    (e: React.MouseEvent) => {
+      try {
+        const target = e.target as HTMLElement | null;
+        const anchor = target
+          ? (target.closest('a[href^="citation:"]') as HTMLAnchorElement | null)
+          : null;
+        const citeEl = target
+          ? (target.closest(
+              "[data-citation-number], [data-citation]",
+            ) as HTMLElement | null)
+          : null;
+        if (!anchor && !citeEl) return;
         e.preventDefault();
         e.stopPropagation();
         let num = NaN;
         if (anchor) {
-          const href = anchor.getAttribute('href') || '';
+          const href = anchor.getAttribute("href") || "";
           const numMatch = href.match(/(\d+)/);
           num = numMatch ? parseInt(numMatch[1], 10) : NaN;
         } else if (citeEl) {
-          const raw = citeEl.getAttribute('data-citation-number') || citeEl.getAttribute('data-citation') || '';
+          const raw =
+            citeEl.getAttribute("data-citation-number") ||
+            citeEl.getAttribute("data-citation") ||
+            "";
           const numMatch = raw.match(/(\d+)/);
           num = numMatch ? parseInt(numMatch[1], 10) : NaN;
         }
         if (!isNaN(num)) handleCitationClick(num);
+      } catch (err) {
+        console.warn(
+          "[AiTurnBlock] interceptCitationMouseUpCapture error",
+          err,
+        );
       }
-    } catch (err) {
-      console.warn('[AiTurnBlock] interceptCitationPointerDownCapture error', err);
-    }
-  }, [handleCitationClick]);
-
-  // Intercept mouseup similar to composer badge to block finalization of native click/tab behaviors
-  const interceptCitationMouseUpCapture = useCallback((e: React.MouseEvent) => {
-    try {
-      const target = e.target as HTMLElement | null;
-      const anchor = target ? (target.closest('a[href^="citation:"]') as HTMLAnchorElement | null) : null;
-      const citeEl = target ? (target.closest('[data-citation-number], [data-citation]') as HTMLElement | null) : null;
-      if (!anchor && !citeEl) return;
-      e.preventDefault();
-      e.stopPropagation();
-      let num = NaN;
-      if (anchor) {
-        const href = anchor.getAttribute('href') || '';
-        const numMatch = href.match(/(\d+)/);
-        num = numMatch ? parseInt(numMatch[1], 10) : NaN;
-      } else if (citeEl) {
-        const raw = citeEl.getAttribute('data-citation-number') || citeEl.getAttribute('data-citation') || '';
-        const numMatch = raw.match(/(\d+)/);
-        num = numMatch ? parseInt(numMatch[1], 10) : NaN;
-      }
-      if (!isNaN(num)) handleCitationClick(num);
-    } catch (err) {
-      console.warn('[AiTurnBlock] interceptCitationMouseUpCapture error', err);
-    }
-  }, [handleCitationClick]);
+    },
+    [handleCitationClick],
+  );
 
   // Explicitly intercept auxclick (middle click) to prevent new-tab navigation
-  const interceptCitationAuxClickCapture = useCallback((e: React.MouseEvent) => {
-    try {
-      const target = e.target as HTMLElement | null;
-      const anchor = target ? (target.closest('a[href^="citation:"]') as HTMLAnchorElement | null) : null;
-      if (!anchor) return;
-      const isAux = (e as any).button && (e as any).button !== 0;
-      if (isAux) {
-        e.preventDefault();
-        e.stopPropagation();
-        const href = anchor.getAttribute('href') || '';
-        const numMatch = href.match(/(\d+)/);
-        const num = numMatch ? parseInt(numMatch[1], 10) : NaN;
-        if (!isNaN(num)) handleCitationClick(num);
+  const interceptCitationAuxClickCapture = useCallback(
+    (e: React.MouseEvent) => {
+      try {
+        const target = e.target as HTMLElement | null;
+        const anchor = target
+          ? (target.closest('a[href^="citation:"]') as HTMLAnchorElement | null)
+          : null;
+        if (!anchor) return;
+        const isAux = (e as any).button && (e as any).button !== 0;
+        if (isAux) {
+          e.preventDefault();
+          e.stopPropagation();
+          const href = anchor.getAttribute("href") || "";
+          const numMatch = href.match(/(\d+)/);
+          const num = numMatch ? parseInt(numMatch[1], 10) : NaN;
+          if (!isNaN(num)) handleCitationClick(num);
+        }
+      } catch (err) {
+        console.warn(
+          "[AiTurnBlock] interceptCitationAuxClickCapture error",
+          err,
+        );
       }
-    } catch (err) {
-      console.warn('[AiTurnBlock] interceptCitationAuxClickCapture error', err);
-    }
-  }, [handleCitationClick]);
+    },
+    [handleCitationClick],
+  );
 
   // Global capture-phase guard to ensure citation:// never triggers browser navigation
   useEffect(() => {
     const onClick = (e: MouseEvent) => {
       try {
         const target = e.target as HTMLElement | null;
-        const anchor = target ? (target.closest('a[href^="citation:"]') as HTMLAnchorElement | null) : null;
-        const citeEl = target ? (target.closest('[data-citation-number], [data-citation]') as HTMLElement | null) : null;
+        const anchor = target
+          ? (target.closest('a[href^="citation:"]') as HTMLAnchorElement | null)
+          : null;
+        const citeEl = target
+          ? (target.closest(
+              "[data-citation-number], [data-citation]",
+            ) as HTMLElement | null)
+          : null;
         if (!anchor && !citeEl) return;
         e.preventDefault();
         e.stopPropagation();
         let num = NaN;
         if (anchor) {
-          const href = anchor.getAttribute('href') || '';
+          const href = anchor.getAttribute("href") || "";
           const numMatch = href.match(/(\d+)/);
           num = numMatch ? parseInt(numMatch[1], 10) : NaN;
         } else if (citeEl) {
-          const raw = citeEl.getAttribute('data-citation-number') || citeEl.getAttribute('data-citation') || '';
+          const raw =
+            citeEl.getAttribute("data-citation-number") ||
+            citeEl.getAttribute("data-citation") ||
+            "";
           const numMatch = raw.match(/(\d+)/);
           num = numMatch ? parseInt(numMatch[1], 10) : NaN;
         }
         if (!isNaN(num)) handleCitationClick(num);
       } catch (err) {
-        console.warn('[AiTurnBlock] global citation click intercept error', err);
+        console.warn(
+          "[AiTurnBlock] global citation click intercept error",
+          err,
+        );
       }
     };
     const onMouseUp = (e: MouseEvent) => {
       try {
         const target = e.target as HTMLElement | null;
-        const anchor = target ? (target.closest('a[href^="citation:"]') as HTMLAnchorElement | null) : null;
-        const citeEl = target ? (target.closest('[data-citation-number], [data-citation]') as HTMLElement | null) : null;
+        const anchor = target
+          ? (target.closest('a[href^="citation:"]') as HTMLAnchorElement | null)
+          : null;
+        const citeEl = target
+          ? (target.closest(
+              "[data-citation-number], [data-citation]",
+            ) as HTMLElement | null)
+          : null;
         if (!anchor && !citeEl) return;
         e.preventDefault();
         e.stopPropagation();
         let num = NaN;
         if (anchor) {
-          const href = anchor.getAttribute('href') || '';
+          const href = anchor.getAttribute("href") || "";
           const numMatch = href.match(/(\d+)/);
           num = numMatch ? parseInt(numMatch[1], 10) : NaN;
         } else if (citeEl) {
-          const raw = citeEl.getAttribute('data-citation-number') || citeEl.getAttribute('data-citation') || '';
+          const raw =
+            citeEl.getAttribute("data-citation-number") ||
+            citeEl.getAttribute("data-citation") ||
+            "";
           const numMatch = raw.match(/(\d+)/);
           num = numMatch ? parseInt(numMatch[1], 10) : NaN;
         }
         if (!isNaN(num)) handleCitationClick(num);
       } catch (err) {
-        console.warn('[AiTurnBlock] global citation mouseup intercept error', err);
+        console.warn(
+          "[AiTurnBlock] global citation mouseup intercept error",
+          err,
+        );
       }
     };
     const onMouseDown = (e: MouseEvent) => {
       try {
         const target = e.target as HTMLElement | null;
-        const anchor = target ? (target.closest('a[href^="citation:"]') as HTMLAnchorElement | null) : null;
-        const citeEl = target ? (target.closest('[data-citation-number], [data-citation]') as HTMLElement | null) : null;
+        const anchor = target
+          ? (target.closest('a[href^="citation:"]') as HTMLAnchorElement | null)
+          : null;
+        const citeEl = target
+          ? (target.closest(
+              "[data-citation-number], [data-citation]",
+            ) as HTMLElement | null)
+          : null;
         if (!anchor && !citeEl) return;
         const isAux = (e as any).button && (e as any).button !== 0;
-        const isModifier = (e.ctrlKey || (e as any).metaKey);
+        const isModifier = e.ctrlKey || (e as any).metaKey;
         if (isAux || isModifier) {
           e.preventDefault();
           e.stopPropagation();
           let num = NaN;
           if (anchor) {
-            const href = anchor.getAttribute('href') || '';
+            const href = anchor.getAttribute("href") || "";
             const numMatch = href.match(/(\d+)/);
             num = numMatch ? parseInt(numMatch[1], 10) : NaN;
           } else if (citeEl) {
-            const raw = citeEl.getAttribute('data-citation-number') || citeEl.getAttribute('data-citation') || '';
+            const raw =
+              citeEl.getAttribute("data-citation-number") ||
+              citeEl.getAttribute("data-citation") ||
+              "";
             const numMatch = raw.match(/(\d+)/);
             num = numMatch ? parseInt(numMatch[1], 10) : NaN;
           }
           if (!isNaN(num)) handleCitationClick(num);
         }
       } catch (err) {
-        console.warn('[AiTurnBlock] global citation mousedown intercept error', err);
+        console.warn(
+          "[AiTurnBlock] global citation mousedown intercept error",
+          err,
+        );
       }
     };
     const onPointerDown = (e: PointerEvent) => {
       try {
         const target = e.target as HTMLElement | null;
-        const anchor = target ? (target.closest('a[href^="citation:"]') as HTMLAnchorElement | null) : null;
-        const citeEl = target ? (target.closest('[data-citation-number], [data-citation]') as HTMLElement | null) : null;
+        const anchor = target
+          ? (target.closest('a[href^="citation:"]') as HTMLAnchorElement | null)
+          : null;
+        const citeEl = target
+          ? (target.closest(
+              "[data-citation-number], [data-citation]",
+            ) as HTMLElement | null)
+          : null;
         if (!anchor && !citeEl) return;
         const isAux = e.button !== 0;
-        const isModifier = (e.ctrlKey || (e as any).metaKey);
+        const isModifier = e.ctrlKey || (e as any).metaKey;
         if (isAux || isModifier) {
           e.preventDefault();
           e.stopPropagation();
           let num = NaN;
           if (anchor) {
-            const href = anchor.getAttribute('href') || '';
+            const href = anchor.getAttribute("href") || "";
             const numMatch = href.match(/(\d+)/);
             num = numMatch ? parseInt(numMatch[1], 10) : NaN;
           } else if (citeEl) {
-            const raw = citeEl.getAttribute('data-citation-number') || citeEl.getAttribute('data-citation') || '';
+            const raw =
+              citeEl.getAttribute("data-citation-number") ||
+              citeEl.getAttribute("data-citation") ||
+              "";
             const numMatch = raw.match(/(\d+)/);
             num = numMatch ? parseInt(numMatch[1], 10) : NaN;
           }
           if (!isNaN(num)) handleCitationClick(num);
         }
       } catch (err) {
-        console.warn('[AiTurnBlock] global citation pointerdown intercept error', err);
+        console.warn(
+          "[AiTurnBlock] global citation pointerdown intercept error",
+          err,
+        );
       }
     };
 
-    document.addEventListener('click', onClick, true);
-    document.addEventListener('mousedown', onMouseDown, true);
-    document.addEventListener('mouseup', onMouseUp, true);
-    document.addEventListener('pointerdown', onPointerDown, true);
+    document.addEventListener("click", onClick, true);
+    document.addEventListener("mousedown", onMouseDown, true);
+    document.addEventListener("mouseup", onMouseUp, true);
+    document.addEventListener("pointerdown", onPointerDown, true);
     // Some environments dispatch auxclick for middle-click; capture to block new-tab
-    document.addEventListener('auxclick', onMouseDown as any, true);
+    document.addEventListener("auxclick", onMouseDown as any, true);
     return () => {
-      document.removeEventListener('click', onClick, true);
-      document.removeEventListener('mousedown', onMouseDown, true);
-      document.removeEventListener('mouseup', onMouseUp, true);
-      document.removeEventListener('pointerdown', onPointerDown, true);
-      document.removeEventListener('auxclick', onMouseDown as any, true);
+      document.removeEventListener("click", onClick, true);
+      document.removeEventListener("mousedown", onMouseDown, true);
+      document.removeEventListener("mouseup", onMouseUp, true);
+      document.removeEventListener("pointerdown", onPointerDown, true);
+      document.removeEventListener("auxclick", onMouseDown as any, true);
     };
   }, [handleCitationClick]);
 
@@ -829,8 +954,6 @@ const hasSynthesis = !!(
     );
   };
 
-  
-
   // DOM version: aggressively replace any rendered <a href="citation://N"> inside the mapping box
   // with real <button> elements that call handleCitationClick(N). This avoids relying on
   // ReactMarkdown's anchor overrides and guarantees no browser navigation.
@@ -839,45 +962,53 @@ const hasSynthesis = !!(
     if (!m) return;
 
     let rafId: number | null = null;
-    const created: Array<{ btn: HTMLButtonElement; handler: (e: MouseEvent) => void }> = [];
+    const created: Array<{
+      btn: HTMLButtonElement;
+      handler: (e: MouseEvent) => void;
+    }> = [];
 
     rafId = requestAnimationFrame(() => {
-      const anchors = Array.from(m.querySelectorAll('a[href^="citation:"]')) as HTMLAnchorElement[];
+      const anchors = Array.from(
+        m.querySelectorAll('a[href^="citation:"]'),
+      ) as HTMLAnchorElement[];
       anchors.forEach((a) => {
         if (!(a && a.isConnected && a.ownerDocument === document)) return;
-        const href = a.getAttribute('href') || '';
+        const href = a.getAttribute("href") || "";
         const numMatch = href.match(/(\d+)/);
         const num = numMatch ? parseInt(numMatch[1], 10) : NaN;
-        const label = a.textContent || (isNaN(num) ? '↗' : `↗${num}`);
+        const label = a.textContent || (isNaN(num) ? "↗" : `↗${num}`);
 
-        const btn = document.createElement('button');
-        btn.type = 'button';
-        btn.setAttribute('data-citation', String(num));
-        btn.setAttribute('aria-label', isNaN(num) ? 'Citation' : `Citation ${num}`);
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.setAttribute("data-citation", String(num));
+        btn.setAttribute(
+          "aria-label",
+          isNaN(num) ? "Citation" : `Citation ${num}`,
+        );
         btn.textContent = label;
-        btn.style.display = 'inline-flex';
-        btn.style.alignItems = 'center';
-        btn.style.gap = '6px';
-        btn.style.padding = '2px 10px';
-        btn.style.marginLeft = '6px';
-        btn.style.marginRight = '6px';
-        btn.style.background = '#2563eb';
-        btn.style.border = '1px solid #1d4ed8';
-        btn.style.borderRadius = '9999px';
-        btn.style.color = '#ffffff';
-        btn.style.fontSize = '12px';
-        btn.style.fontWeight = '700';
-        btn.style.cursor = 'pointer';
-        btn.style.userSelect = 'none';
-        btn.style.lineHeight = '1.4';
-        btn.style.boxShadow = '0 0 0 1px rgba(29,78,216,0.6)';
+        btn.style.display = "inline-flex";
+        btn.style.alignItems = "center";
+        btn.style.gap = "6px";
+        btn.style.padding = "2px 10px";
+        btn.style.marginLeft = "6px";
+        btn.style.marginRight = "6px";
+        btn.style.background = "#2563eb";
+        btn.style.border = "1px solid #1d4ed8";
+        btn.style.borderRadius = "9999px";
+        btn.style.color = "#ffffff";
+        btn.style.fontSize = "12px";
+        btn.style.fontWeight = "700";
+        btn.style.cursor = "pointer";
+        btn.style.userSelect = "none";
+        btn.style.lineHeight = "1.4";
+        btn.style.boxShadow = "0 0 0 1px rgba(29,78,216,0.6)";
 
         const handler = (e: MouseEvent) => {
           e.preventDefault();
           e.stopPropagation();
           if (!isNaN(num)) handleCitationClick(num);
         };
-        btn.addEventListener('click', handler, { capture: true });
+        btn.addEventListener("click", handler, { capture: true });
         created.push({ btn, handler });
 
         try {
@@ -885,17 +1016,21 @@ const hasSynthesis = !!(
             a.replaceWith(btn);
           }
         } catch (err) {
-          console.warn('[AiTurnBlock] replace citation anchor failed', err);
+          console.warn("[AiTurnBlock] replace citation anchor failed", err);
         }
       });
     });
 
     return () => {
       if (rafId !== null) {
-        try { cancelAnimationFrame(rafId); } catch {}
+        try {
+          cancelAnimationFrame(rafId);
+        } catch {}
       }
       created.forEach(({ btn, handler }) => {
-        try { btn.removeEventListener('click', handler, { capture: true } as any); } catch {}
+        try {
+          btn.removeEventListener("click", handler, { capture: true } as any);
+        } catch {}
       });
     };
   }, [mapRef, displayedMappingText, activeMappingPid]);
@@ -906,44 +1041,50 @@ const hasSynthesis = !!(
     if (!root) return;
 
     let rafId: number | null = null;
-    const created: Array<{ btn: HTMLButtonElement; handler: (e: MouseEvent) => void }> = [];
+    const created: Array<{
+      btn: HTMLButtonElement;
+      handler: (e: MouseEvent) => void;
+    }> = [];
     const rx = /↗(\d+)/g;
 
     const makeBtn = (num: number, label?: string) => {
-      const btn = document.createElement('button');
-      btn.type = 'button';
-      btn.setAttribute('data-citation', String(num));
-      btn.setAttribute('aria-label', `Citation ${num}`);
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.setAttribute("data-citation", String(num));
+      btn.setAttribute("aria-label", `Citation ${num}`);
       btn.textContent = label || `↗${num}`;
-      btn.style.display = 'inline-flex';
-      btn.style.alignItems = 'center';
-      btn.style.gap = '6px';
-      btn.style.padding = '2px 10px';
-      btn.style.marginLeft = '6px';
-      btn.style.marginRight = '6px';
-      btn.style.background = '#2563eb';
-      btn.style.border = '1px solid #1d4ed8';
-      btn.style.borderRadius = '9999px';
-      btn.style.color = '#ffffff';
-      btn.style.fontSize = '12px';
-      btn.style.fontWeight = '700';
-      btn.style.cursor = 'pointer';
-      btn.style.userSelect = 'none';
-      btn.style.lineHeight = '1.4';
-      btn.style.boxShadow = '0 0 0 1px rgba(29,78,216,0.6)';
+      btn.style.display = "inline-flex";
+      btn.style.alignItems = "center";
+      btn.style.gap = "6px";
+      btn.style.padding = "2px 10px";
+      btn.style.marginLeft = "6px";
+      btn.style.marginRight = "6px";
+      btn.style.background = "#2563eb";
+      btn.style.border = "1px solid #1d4ed8";
+      btn.style.borderRadius = "9999px";
+      btn.style.color = "#ffffff";
+      btn.style.fontSize = "12px";
+      btn.style.fontWeight = "700";
+      btn.style.cursor = "pointer";
+      btn.style.userSelect = "none";
+      btn.style.lineHeight = "1.4";
+      btn.style.boxShadow = "0 0 0 1px rgba(29,78,216,0.6)";
       const handler = (e: MouseEvent) => {
         e.preventDefault();
         e.stopPropagation();
         if (!isNaN(num)) handleCitationClick(num);
       };
-      btn.addEventListener('click', handler, { capture: true });
+      btn.addEventListener("click", handler, { capture: true });
       created.push({ btn, handler });
       return btn;
     };
 
     rafId = requestAnimationFrame(() => {
       const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
-      const toReplace: Array<{ node: Text; parts: (string | HTMLButtonElement)[] }> = [];
+      const toReplace: Array<{
+        node: Text;
+        parts: (string | HTMLButtonElement)[];
+      }> = [];
       let node: Node | null = walker.nextNode();
       while (node) {
         const textNode = node as Text;
@@ -951,7 +1092,7 @@ const hasSynthesis = !!(
           node = walker.nextNode();
           continue;
         }
-        const value = textNode.nodeValue || '';
+        const value = textNode.nodeValue || "";
         let match: RegExpExecArray | null;
         rx.lastIndex = 0;
         let lastIdx = 0;
@@ -974,7 +1115,8 @@ const hasSynthesis = !!(
       toReplace.forEach(({ node, parts }) => {
         const frag = document.createDocumentFragment();
         parts.forEach((p) => {
-          if (typeof p === 'string') frag.appendChild(document.createTextNode(p));
+          if (typeof p === "string")
+            frag.appendChild(document.createTextNode(p));
           else frag.appendChild(p);
         });
         try {
@@ -982,17 +1124,21 @@ const hasSynthesis = !!(
             node.parentNode.replaceChild(frag, node);
           }
         } catch (err) {
-          console.warn('[AiTurnBlock] replace citation token failed', err);
+          console.warn("[AiTurnBlock] replace citation token failed", err);
         }
       });
     });
 
     return () => {
       if (rafId !== null) {
-        try { cancelAnimationFrame(rafId); } catch {}
+        try {
+          cancelAnimationFrame(rafId);
+        } catch {}
       }
       created.forEach(({ btn, handler }) => {
-        try { btn.removeEventListener('click', handler, { capture: true } as any); } catch {}
+        try {
+          btn.removeEventListener("click", handler, { capture: true } as any);
+        } catch {}
       });
     };
   }, [mapRef, displayedMappingText]);
@@ -1124,55 +1270,61 @@ const hasSynthesis = !!(
                       onClickCapture={interceptCitationAnchorClick}
                       onMouseDownCapture={interceptCitationMouseDownCapture}
                       onPointerDownCapture={interceptCitationPointerDownCapture}
-        onMouseUpCapture={interceptCitationMouseUpCapture}
-        onAuxClickCapture={interceptCitationAuxClickCapture}
-        onWheelCapture={(e: React.WheelEvent<HTMLDivElement>) => {
-          const el = e.currentTarget;
-          const dy = e.deltaY ?? 0;
-          const canDown =
-            el.scrollTop + el.clientHeight < el.scrollHeight;
-          const canUp = el.scrollTop > 0;
-          if ((dy > 0 && canDown) || (dy < 0 && canUp)) {
-            e.stopPropagation();
-          }
-        }}
-        onWheel={(e: React.WheelEvent<HTMLDivElement>) => {
-          const el = e.currentTarget;
-          const dy = e.deltaY ?? 0;
-          const canDown =
-            el.scrollTop + el.clientHeight < el.scrollHeight;
-          const canUp = el.scrollTop > 0;
-          if ((dy > 0 && canDown) || (dy < 0 && canUp)) {
-            e.stopPropagation();
-          }
-        }}
-        onTouchStartCapture={(
-          e: React.TouchEvent<HTMLDivElement>
-        ) => {
-          e.stopPropagation();
-        }}
-        onTouchMove={(e: React.TouchEvent<HTMLDivElement>) => {
-          const el = e.currentTarget;
-          const canDown =
-            el.scrollTop + el.clientHeight < el.scrollHeight;
-          const canUp = el.scrollTop > 0;
-          if (canDown || canUp) {
-            e.stopPropagation();
-          }
-        }}
-      >
+                      onMouseUpCapture={interceptCitationMouseUpCapture}
+                      onAuxClickCapture={interceptCitationAuxClickCapture}
+                      onWheelCapture={(e: React.WheelEvent<HTMLDivElement>) => {
+                        const el = e.currentTarget;
+                        const dy = e.deltaY ?? 0;
+                        const canDown =
+                          el.scrollTop + el.clientHeight < el.scrollHeight;
+                        const canUp = el.scrollTop > 0;
+                        if ((dy > 0 && canDown) || (dy < 0 && canUp)) {
+                          e.stopPropagation();
+                        }
+                      }}
+                      onWheel={(e: React.WheelEvent<HTMLDivElement>) => {
+                        const el = e.currentTarget;
+                        const dy = e.deltaY ?? 0;
+                        const canDown =
+                          el.scrollTop + el.clientHeight < el.scrollHeight;
+                        const canUp = el.scrollTop > 0;
+                        if ((dy > 0 && canDown) || (dy < 0 && canUp)) {
+                          e.stopPropagation();
+                        }
+                      }}
+                      onTouchStartCapture={(
+                        e: React.TouchEvent<HTMLDivElement>,
+                      ) => {
+                        e.stopPropagation();
+                      }}
+                      onTouchMove={(e: React.TouchEvent<HTMLDivElement>) => {
+                        const el = e.currentTarget;
+                        const canDown =
+                          el.scrollTop + el.clientHeight < el.scrollHeight;
+                        const canUp = el.scrollTop > 0;
+                        if (canDown || canUp) {
+                          e.stopPropagation();
+                        }
+                      }}
+                    >
                       {(() => {
                         // If synthesis was not requested for this turn, show a clear placeholder
                         if (!wasSynthRequested) {
                           return (
-                            <div style={{ color: "#64748b", fontStyle: "italic", textAlign: "center" }}>
+                            <div
+                              style={{
+                                color: "#64748b",
+                                fontStyle: "italic",
+                                textAlign: "center",
+                              }}
+                            >
                               Synthesis not enabled for this turn.
                             </div>
                           );
                         }
                         const latest = activeSynthPid
                           ? getLatestResponse(
-                              synthesisResponses[activeSynthPid]
+                              synthesisResponses[activeSynthPid],
                             )
                           : undefined;
                         const isGenerating =
@@ -1200,11 +1352,13 @@ const hasSynthesis = !!(
                         }
                         if (activeSynthPid) {
                           const take = getLatestResponse(
-                                                          synthesisResponses[activeSynthPid]
-                          // Error rendering for synthesis
-                          )
+                            synthesisResponses[activeSynthPid],
+                            // Error rendering for synthesis
+                          );
                           if (take && take.status === "error") {
-                            const errText = String(take.text || "Synthesis failed");
+                            const errText = String(
+                              take.text || "Synthesis failed",
+                            );
                             return (
                               <div
                                 style={{
@@ -1218,10 +1372,19 @@ const hasSynthesis = !!(
                                 <div style={{ fontSize: 12, marginBottom: 8 }}>
                                   {activeSynthPid} · error
                                 </div>
-                                <div className="prose prose-sm max-w-none dark:prose-invert" style={{ lineHeight: 1.7, fontSize: 14 }}>
-                                <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ a: CitationLink, code: CodeBlock }}>
-                                  {errText}
-                                </ReactMarkdown>
+                                <div
+                                  className="prose prose-sm max-w-none dark:prose-invert"
+                                  style={{ lineHeight: 1.7, fontSize: 14 }}
+                                >
+                                  <ReactMarkdown
+                                    remarkPlugins={[remarkGfm]}
+                                    components={{
+                                      a: CitationLink,
+                                      code: CodeBlock,
+                                    }}
+                                  >
+                                    {errText}
+                                  </ReactMarkdown>
                                 </div>
                               </div>
                             );
@@ -1237,7 +1400,7 @@ const hasSynthesis = !!(
                             e.stopPropagation();
                             try {
                               await navigator.clipboard.writeText(
-                                String(take.text || "")
+                                String(take.text || ""),
                               );
                             } catch (err) {
                               console.error("Copy failed", err);
@@ -1276,11 +1439,16 @@ const hasSynthesis = !!(
                                 className="prose prose-sm max-w-none dark:prose-invert"
                                 style={{ lineHeight: 1.7, fontSize: 16 }}
                               >
-                                <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ a: CitationLink, code: CodeBlock }}>
+                                <ReactMarkdown
+                                  remarkPlugins={[remarkGfm]}
+                                  components={{
+                                    a: CitationLink,
+                                    code: CodeBlock,
+                                  }}
+                                >
                                   {String(take.text || "")}
                                 </ReactMarkdown>
                               </div>
-
                             </div>
                           );
                         }
@@ -1409,51 +1577,74 @@ const hasSynthesis = !!(
                     </button>
                     <button
                       onClick={() => setMappingTab("options")}
-        title="All Options"
-        style={{
-          padding: "4px 8px",
-          background: mappingTab === "options" ? "#334155" : "transparent",
-          border: mappingTab === "options" ? "1px solid #475569" : "1px solid transparent",
-          borderRadius: 6,
-          color: mappingTab === "options" ? "#e2e8f0" : "#94a3b8",
-          cursor: "pointer",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-        }}
-      >
-        <ListIcon style={{ width: 16, height: 16 }} />
-      </button>
-      <button
-        onClick={async () => {
-          // ... ✅ FIX "Copy All" logic here
-          try {
-            const ORDER = ["claude", "gemini-pro", "qwen", "chatgpt", "gemini"];
-            const nameMap = new Map(LLM_PROVIDERS_CONFIG.map((p) => [String(p.id), p.name]));
-            const lines: string[] = [];
+                      title="All Options"
+                      style={{
+                        padding: "4px 8px",
+                        background:
+                          mappingTab === "options" ? "#334155" : "transparent",
+                        border:
+                          mappingTab === "options"
+                            ? "1px solid #475569"
+                            : "1px solid transparent",
+                        borderRadius: 6,
+                        color: mappingTab === "options" ? "#e2e8f0" : "#94a3b8",
+                        cursor: "pointer",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                      }}
+                    >
+                      <ListIcon style={{ width: 16, height: 16 }} />
+                    </button>
+                    <button
+                      onClick={async () => {
+                        // ... ✅ FIX "Copy All" logic here
+                        try {
+                          const ORDER = [
+                            "claude",
+                            "gemini-pro",
+                            "qwen",
+                            "chatgpt",
+                            "gemini",
+                          ];
+                          const nameMap = new Map(
+                            LLM_PROVIDERS_CONFIG.map((p) => [
+                              String(p.id),
+                              p.name,
+                            ]),
+                          );
+                          const lines: string[] = [];
 
-            // Synthesis section
-            ORDER.forEach((pid) => {
-              const take = getLatestResponse(synthesisResponses[pid] || []);
-              // ✅ FIXED: Get text from the 'take' object
-              const text = take?.text ? String(take.text) : "";
-              if (text && text.trim().length > 0) {
-                lines.push(`=== Synthesis • ${nameMap.get(pid) || pid} ===`);
-                lines.push(text.trim());
-                lines.push("\n---\n");
-              }
-            });
+                          // Synthesis section
+                          ORDER.forEach((pid) => {
+                            const take = getLatestResponse(
+                              synthesisResponses[pid] || [],
+                            );
+                            // ✅ FIXED: Get text from the 'take' object
+                            const text = take?.text ? String(take.text) : "";
+                            if (text && text.trim().length > 0) {
+                              lines.push(
+                                `=== Synthesis • ${nameMap.get(pid) || pid} ===`,
+                              );
+                              lines.push(text.trim());
+                              lines.push("\n---\n");
+                            }
+                          });
 
-            // Mapping section
-            ORDER.forEach((pid) => {
-              const take = getLatestResponse(mappingResponses[pid] || []);
-              const text = take?.text ? String(take.text) : "";
-              if (text && text.trim().length > 0) {
-                lines.push(`=== Mapping • ${nameMap.get(pid) || pid} ===`);
-                lines.push(text.trim());
-                lines.push("\n---\n");
-              }
-            });
+                          // Mapping section
+                          ORDER.forEach((pid) => {
+                            const take = getLatestResponse(
+                              mappingResponses[pid] || [],
+                            );
+                            const text = take?.text ? String(take.text) : "";
+                            if (text && text.trim().length > 0) {
+                              lines.push(
+                                `=== Mapping • ${nameMap.get(pid) || pid} ===`,
+                              );
+                              lines.push(text.trim());
+                              lines.push("\n---\n");
+                            }
+                          });
 
                           // Batch source responses (original providers)
                           ORDER.forEach((pid) => {
@@ -1537,269 +1728,306 @@ const hasSynthesis = !!(
                       />
                     )}
 
-                  
-      <div
-        className="clip-content"
-        style={{
-          marginTop: 12,
-          background: "#0f172a",
-          border: "1px solid #334155",
-          borderRadius: 8,
-          padding: 12,
-          paddingBottom: 18,
-          flex: 1,
-          minWidth: 0,
-          wordBreak: "break-word",
-          overflowWrap: "break-word",
-          overflowY: isLive || isLoading ? "auto" : "visible",
-          maxHeight: isLive || isLoading ? "40vh" : "none",
-          minHeight: 0,
-        }}
-        onClickCapture={interceptCitationAnchorClick}
-        onMouseDownCapture={interceptCitationMouseDownCapture}
-        onPointerDownCapture={interceptCitationPointerDownCapture}
-        onMouseUpCapture={interceptCitationMouseUpCapture}
-        
-        onAuxClickCapture={interceptCitationAuxClickCapture}
-      >
-        {/* Persistently mounted tab containers to avoid unmount/mount churn */}
-        {(() => {
-          const options = getOptions();
-          const optionsInner = (() => {
-            if (!options) {
-              return (
-                <div style={{ color: "#64748b" }}>
-                  {!activeMappingPid
-                    ? "Select a mapping provider to see options."
-                    : "No options found in the mapping response."}
-                </div>
-              );
-            }
-            const text = String(options || "");
-            return (
-              <div>
-                <div
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    gap: 8,
-                    marginBottom: 8,
-                  }}
-                >
-                  <div style={{ fontSize: 12, color: "#94a3b8" }}>
-                    All Available Options • via {activeMappingPid}
-                  </div>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      try {
-                        navigator.clipboard.writeText(text);
-                      } catch (err) {
-                        console.error("Copy options failed", err);
-                      }
-                    }}
-                    style={{
-                      background: "#334155",
-                      border: "1px solid #475569",
-                      borderRadius: 6,
-                      padding: "4px 8px",
-                      color: "#94a3b8",
-                      fontSize: 12,
-                      cursor: "pointer",
-                    }}
-                  >
-                    📋 Copy
-                  </button>
-                </div>
-                <div
-                  ref={optionsProseRef}
-                  className="prose prose-sm max-w-none dark:prose-invert"
-                  style={{ lineHeight: 1.7, fontSize: 14 }}
-                  onClickCapture={interceptCitationAnchorClick}
-                  onMouseDownCapture={interceptCitationMouseDownCapture}
-                  onPointerDownCapture={interceptCitationPointerDownCapture}
-
-                >
-                  <ReactMarkdown
-                    remarkPlugins={[remarkGfm]}
-                    components={{ a: CitationLink, code: CodeBlock }}
-                  >
-                    {transformCitations(options)}
-                  </ReactMarkdown>
-                </div>
-
-              </div>
-            );
-          })();
-
-          const mapInner = (() => {
-            if (!wasMapRequested) {
-              return (
-                <div
-                  style={{
-                    color: "#64748b",
-                    fontStyle: "italic",
-                    textAlign: "center",
-                  }}
-                >
-                  Mapping not enabled for this turn.
-                </div>
-              );
-            }
-            const latest = displayedMappingTake;
-            const isGenerating =
-              (latest &&
-                (latest.status === "streaming" || latest.status === "pending")) ||
-              isMappingTarget;
-            if (isGenerating) {
-              return (
-                <div
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    gap: 8,
-                    color: "#94a3b8",
-                  }}
-                >
-                  <span style={{ fontStyle: "italic" }}>
-                    Conflict map generating
-                  </span>
-                  <span className="streaming-dots" />
-                </div>
-              );
-            }
-            if (activeMappingPid) {
-              const take = displayedMappingTake;
-              if (take && take.status === "error") {
-                const errText = String(take.text || "Mapping failed");
-                return (
-                  <div
-                    style={{
-                      background: "#1f2937",
-                      border: "1px solid #ef4444",
-                      color: "#fecaca",
-                      borderRadius: 8,
-                      padding: 12,
-                    }}
-                  >
-                    <div style={{ fontSize: 12, marginBottom: 8 }}>
-                      {activeMappingPid} · error
-                    </div>
                     <div
-                      className="prose prose-sm max-w-none dark:prose-invert"
-                      style={{ lineHeight: 1.7, fontSize: 14 }}
-                    >
-                      <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ code: CodeBlock }}>
-                        {errText}
-                      </ReactMarkdown>
-                    </div>
-                  </div>
-                );
-              }
-              if (!take) {
-                return (
-                  <div style={{ color: "#64748b" }}>
-                    No mapping yet for this model.
-                  </div>
-                );
-              }
-
-              const handleCopy = async (e: React.MouseEvent) => {
-                e.stopPropagation();
-                await navigator.clipboard.writeText(displayedMappingText);
-              };
-              return (
-                <div>
-                  <div
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "space-between",
-                      gap: 8,
-                      marginBottom: 8,
-                    }}
-                  >
-                    <div style={{ fontSize: 12, color: "#94a3b8" }}>
-                      {activeMappingPid} · {take.status}
-                    </div>
-                    <button
-                      onClick={handleCopy}
+                      className="clip-content"
                       style={{
-                        background: "#334155",
-                        border: "1px solid #475569",
-                        borderRadius: 6,
-                        padding: "4px 8px",
-                        color: "#94a3b8",
-                        fontSize: 12,
-                        cursor: "pointer",
+                        marginTop: 12,
+                        background: "#0f172a",
+                        border: "1px solid #334155",
+                        borderRadius: 8,
+                        padding: 12,
+                        paddingBottom: 18,
+                        flex: 1,
+                        minWidth: 0,
+                        wordBreak: "break-word",
+                        overflowWrap: "break-word",
+                        overflowY: isLive || isLoading ? "auto" : "visible",
+                        maxHeight: isLive || isLoading ? "40vh" : "none",
+                        minHeight: 0,
                       }}
+                      onClickCapture={interceptCitationAnchorClick}
+                      onMouseDownCapture={interceptCitationMouseDownCapture}
+                      onPointerDownCapture={interceptCitationPointerDownCapture}
+                      onMouseUpCapture={interceptCitationMouseUpCapture}
+                      onAuxClickCapture={interceptCitationAuxClickCapture}
                     >
-                      📋 Copy
-                    </button>
-                  </div>
-                  <div
-                    ref={mapProseRef}
-                    className="prose prose-sm max-w-none dark:prose-invert"
-                    style={{ lineHeight: 1.7, fontSize: 16 }}
-                    onClickCapture={interceptCitationAnchorClick}
-                    onMouseDownCapture={interceptCitationMouseDownCapture}
-                    onPointerDownCapture={interceptCitationPointerDownCapture}
+                      {/* Persistently mounted tab containers to avoid unmount/mount churn */}
+                      {(() => {
+                        const options = getOptions();
+                        const optionsInner = (() => {
+                          if (!options) {
+                            return (
+                              <div style={{ color: "#64748b" }}>
+                                {!activeMappingPid
+                                  ? "Select a mapping provider to see options."
+                                  : "No options found in the mapping response."}
+                              </div>
+                            );
+                          }
+                          const text = String(options || "");
+                          return (
+                            <div>
+                              <div
+                                style={{
+                                  display: "flex",
+                                  alignItems: "center",
+                                  justifyContent: "space-between",
+                                  gap: 8,
+                                  marginBottom: 8,
+                                }}
+                              >
+                                <div style={{ fontSize: 12, color: "#94a3b8" }}>
+                                  All Available Options • via {activeMappingPid}
+                                </div>
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    try {
+                                      navigator.clipboard.writeText(text);
+                                    } catch (err) {
+                                      console.error("Copy options failed", err);
+                                    }
+                                  }}
+                                  style={{
+                                    background: "#334155",
+                                    border: "1px solid #475569",
+                                    borderRadius: 6,
+                                    padding: "4px 8px",
+                                    color: "#94a3b8",
+                                    fontSize: 12,
+                                    cursor: "pointer",
+                                  }}
+                                >
+                                  📋 Copy
+                                </button>
+                              </div>
+                              <div
+                                ref={optionsProseRef}
+                                className="prose prose-sm max-w-none dark:prose-invert"
+                                style={{ lineHeight: 1.7, fontSize: 14 }}
+                                onClickCapture={interceptCitationAnchorClick}
+                                onMouseDownCapture={
+                                  interceptCitationMouseDownCapture
+                                }
+                                onPointerDownCapture={
+                                  interceptCitationPointerDownCapture
+                                }
+                              >
+                                <ReactMarkdown
+                                  remarkPlugins={[remarkGfm]}
+                                  components={{
+                                    a: CitationLink,
+                                    code: CodeBlock,
+                                  }}
+                                >
+                                  {transformCitations(options)}
+                                </ReactMarkdown>
+                              </div>
+                            </div>
+                          );
+                        })();
 
-                  >
-                    <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ a: CitationLink, code: CodeBlock }}>
-                      {transformCitations(displayedMappingText)}
-                    </ReactMarkdown>
-                  </div>
-                </div>
-              );
-            }
-            return (
-              <div
-                style={{
-                  color: "#64748b",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  height: "100%",
-                  fontStyle: "italic",
-                }}
-              >
-                Choose a model to map.
-              </div>
-            );
-          })();
+                        const mapInner = (() => {
+                          if (!wasMapRequested) {
+                            return (
+                              <div
+                                style={{
+                                  color: "#64748b",
+                                  fontStyle: "italic",
+                                  textAlign: "center",
+                                }}
+                              >
+                                Mapping not enabled for this turn.
+                              </div>
+                            );
+                          }
+                          const latest = displayedMappingTake;
+                          const isGenerating =
+                            (latest &&
+                              (latest.status === "streaming" ||
+                                latest.status === "pending")) ||
+                            isMappingTarget;
+                          if (isGenerating) {
+                            return (
+                              <div
+                                style={{
+                                  display: "flex",
+                                  alignItems: "center",
+                                  justifyContent: "center",
+                                  gap: 8,
+                                  color: "#94a3b8",
+                                }}
+                              >
+                                <span style={{ fontStyle: "italic" }}>
+                                  Conflict map generating
+                                </span>
+                                <span className="streaming-dots" />
+                              </div>
+                            );
+                          }
+                          if (activeMappingPid) {
+                            const take = displayedMappingTake;
+                            if (take && take.status === "error") {
+                              const errText = String(
+                                take.text || "Mapping failed",
+                              );
+                              return (
+                                <div
+                                  style={{
+                                    background: "#1f2937",
+                                    border: "1px solid #ef4444",
+                                    color: "#fecaca",
+                                    borderRadius: 8,
+                                    padding: 12,
+                                  }}
+                                >
+                                  <div
+                                    style={{ fontSize: 12, marginBottom: 8 }}
+                                  >
+                                    {activeMappingPid} · error
+                                  </div>
+                                  <div
+                                    className="prose prose-sm max-w-none dark:prose-invert"
+                                    style={{ lineHeight: 1.7, fontSize: 14 }}
+                                  >
+                                    <ReactMarkdown
+                                      remarkPlugins={[remarkGfm]}
+                                      components={{ code: CodeBlock }}
+                                    >
+                                      {errText}
+                                    </ReactMarkdown>
+                                  </div>
+                                </div>
+                              );
+                            }
+                            if (!take) {
+                              return (
+                                <div style={{ color: "#64748b" }}>
+                                  No mapping yet for this model.
+                                </div>
+                              );
+                            }
 
-          return (
-            <>
-              <div
-                data-tab="options"
-                style={{ display: mappingTab === "options" ? "block" : "none" }}
-                onClickCapture={interceptCitationAnchorClick}
-                onMouseDownCapture={interceptCitationMouseDownCapture}
-                onPointerDownCapture={interceptCitationPointerDownCapture}
-              >
-                {optionsInner}
-              </div>
-              <div
-                data-tab="map"
-                style={{ display: mappingTab === "map" ? "block" : "none" }}
-                onClickCapture={interceptCitationAnchorClick}
-                onMouseDownCapture={interceptCitationMouseDownCapture}
-                onPointerDownCapture={interceptCitationPointerDownCapture}
-              >
-                {mapInner}
-              </div>
-            </>
-          );
-        })()}
-        {/* legacy conditional tab rendering removed; using persistent containers above */}
-        
-      </div>
+                            const handleCopy = async (e: React.MouseEvent) => {
+                              e.stopPropagation();
+                              await navigator.clipboard.writeText(
+                                displayedMappingText,
+                              );
+                            };
+                            return (
+                              <div>
+                                <div
+                                  style={{
+                                    display: "flex",
+                                    alignItems: "center",
+                                    justifyContent: "space-between",
+                                    gap: 8,
+                                    marginBottom: 8,
+                                  }}
+                                >
+                                  <div
+                                    style={{ fontSize: 12, color: "#94a3b8" }}
+                                  >
+                                    {activeMappingPid} · {take.status}
+                                  </div>
+                                  <button
+                                    onClick={handleCopy}
+                                    style={{
+                                      background: "#334155",
+                                      border: "1px solid #475569",
+                                      borderRadius: 6,
+                                      padding: "4px 8px",
+                                      color: "#94a3b8",
+                                      fontSize: 12,
+                                      cursor: "pointer",
+                                    }}
+                                  >
+                                    📋 Copy
+                                  </button>
+                                </div>
+                                <div
+                                  ref={mapProseRef}
+                                  className="prose prose-sm max-w-none dark:prose-invert"
+                                  style={{ lineHeight: 1.7, fontSize: 16 }}
+                                  onClickCapture={interceptCitationAnchorClick}
+                                  onMouseDownCapture={
+                                    interceptCitationMouseDownCapture
+                                  }
+                                  onPointerDownCapture={
+                                    interceptCitationPointerDownCapture
+                                  }
+                                >
+                                  <ReactMarkdown
+                                    remarkPlugins={[remarkGfm]}
+                                    components={{
+                                      a: CitationLink,
+                                      code: CodeBlock,
+                                    }}
+                                  >
+                                    {transformCitations(displayedMappingText)}
+                                  </ReactMarkdown>
+                                </div>
+                              </div>
+                            );
+                          }
+                          return (
+                            <div
+                              style={{
+                                color: "#64748b",
+                                display: "flex",
+                                alignItems: "center",
+                                justifyContent: "center",
+                                height: "100%",
+                                fontStyle: "italic",
+                              }}
+                            >
+                              Choose a model to map.
+                            </div>
+                          );
+                        })();
 
-      {/* Expand/Collapse buttons - your logic here was already correct */}
-      {mapTruncated && !mapExpanded && mappingTab === "map" && (
+                        return (
+                          <>
+                            <div
+                              data-tab="options"
+                              style={{
+                                display:
+                                  mappingTab === "options" ? "block" : "none",
+                              }}
+                              onClickCapture={interceptCitationAnchorClick}
+                              onMouseDownCapture={
+                                interceptCitationMouseDownCapture
+                              }
+                              onPointerDownCapture={
+                                interceptCitationPointerDownCapture
+                              }
+                            >
+                              {optionsInner}
+                            </div>
+                            <div
+                              data-tab="map"
+                              style={{
+                                display:
+                                  mappingTab === "map" ? "block" : "none",
+                              }}
+                              onClickCapture={interceptCitationAnchorClick}
+                              onMouseDownCapture={
+                                interceptCitationMouseDownCapture
+                              }
+                              onPointerDownCapture={
+                                interceptCitationPointerDownCapture
+                              }
+                            >
+                              {mapInner}
+                            </div>
+                          </>
+                        );
+                      })()}
+                      {/* legacy conditional tab rendering removed; using persistent containers above */}
+                    </div>
+
+                    {/* Expand/Collapse buttons - your logic here was already correct */}
+                    {mapTruncated && !mapExpanded && mappingTab === "map" && (
                       <>
                         <div
                           style={{

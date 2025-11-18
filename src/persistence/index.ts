@@ -19,13 +19,13 @@ export async function initializePersistenceLayer(): Promise<PersistenceLayer> {
   const storeNames = Array.from(db.objectStoreNames);
   const expectedStores = STORE_CONFIGS.map((cfg) => cfg.name);
   const missingStores = expectedStores.filter(
-    (name) => !storeNames.includes(name)
+    (name) => !storeNames.includes(name),
   );
 
   if (missingStores.length > 0) {
     db.close();
     throw new Error(
-      `SchemaError: Missing object stores: ${missingStores.join(", ")}`
+      `SchemaError: Missing object stores: ${missingStores.join(", ")}`,
     );
   }
 
@@ -42,7 +42,7 @@ export async function initializePersistenceLayer(): Promise<PersistenceLayer> {
     if (version !== SCHEMA_VERSION) {
       db.close();
       throw new Error(
-        `SchemaError: schema_version mismatch (current=${version}, expected=${SCHEMA_VERSION})`
+        `SchemaError: schema_version mismatch (current=${version}, expected=${SCHEMA_VERSION})`,
       );
     }
   } catch (e) {
@@ -50,7 +50,7 @@ export async function initializePersistenceLayer(): Promise<PersistenceLayer> {
     throw new Error(
       `SchemaError: unable to read metadata schema_version: ${
         e instanceof Error ? e.message : String(e)
-      }`
+      }`,
     );
   }
 

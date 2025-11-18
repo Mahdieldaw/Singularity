@@ -1,7 +1,11 @@
-import { useEffect } from 'react';
-import { useAtom } from 'jotai';
-import api from '../services/extension-api';
-import { isHistoryPanelOpenAtom, isHistoryLoadingAtom, historySessionsAtom } from '../state/atoms';
+import { useEffect } from "react";
+import { useAtom } from "jotai";
+import api from "../services/extension-api";
+import {
+  isHistoryPanelOpenAtom,
+  isHistoryLoadingAtom,
+  historySessionsAtom,
+} from "../state/atoms";
 
 // The hook now accepts the `isInitialized` flag.
 export function useHistoryLoader(isInitialized: boolean) {
@@ -12,7 +16,7 @@ export function useHistoryLoader(isInitialized: boolean) {
   useEffect(() => {
     // Do not run if the panel isn't open OR if the app hasn't been initialized.
     if (!isHistoryPanelOpen || !isInitialized) return;
-    
+
     let cancelled = false;
     const loadHistory = async () => {
       setIsHistoryLoading(true);
@@ -23,22 +27,29 @@ export function useHistoryLoader(isInitialized: boolean) {
         const formatted = sessions.map((s: any) => ({
           id: s.sessionId,
           sessionId: s.sessionId,
-          title: s.title || 'Untitled',
+          title: s.title || "Untitled",
           startTime: s.startTime || Date.now(),
           lastActivity: s.lastActivity || Date.now(),
           messageCount: s.messageCount || 0,
-          firstMessage: s.firstMessage || '',
-          messages: []
+          firstMessage: s.firstMessage || "",
+          messages: [],
         }));
         if (!cancelled) setHistorySessions(formatted);
       } catch (e) {
-        console.error('Failed to load history', e);
+        console.error("Failed to load history", e);
       } finally {
         if (!cancelled) setIsHistoryLoading(false);
       }
     };
 
     loadHistory();
-    return () => { cancelled = true; };
-  }, [isHistoryPanelOpen, isInitialized, setIsHistoryLoading, setHistorySessions]);
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    isHistoryPanelOpen,
+    isInitialized,
+    setIsHistoryLoading,
+    setHistorySessions,
+  ]);
 }

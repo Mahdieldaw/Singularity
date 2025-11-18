@@ -39,12 +39,12 @@ export const HTOSErrorMap = {
   cloudgptNoSpace: "cloudgpt-no-space",
   cloudgptNoTokens: "cloudgpt-no-tokens",
   cloudgptFunctionsNotSupported: "functions-not-supported",
-  cloudgptFailedToReadResponse: "cloudgpt-failed-to-read-response"
+  cloudgptFailedToReadResponse: "cloudgpt-failed-to-read-response",
 };
 
 /**
  * HTOS Request Lifecycle Management - Extracted from HTOS1
- * 
+ *
  * Manages request lifecycle with abort controllers, timeouts, and state persistence.
  * Unified patterns for provider communication with proper cleanup semantics.
  */
@@ -77,7 +77,7 @@ export class HTOSRequestLifecycleManager {
   createAbortController(requestId) {
     // Clean up any existing controller for this request
     this.cleanup(requestId);
-    
+
     // Create new controller
     this._abortControllers[requestId] = new AbortController();
     return this._abortControllers[requestId];
@@ -131,7 +131,7 @@ export class HTOSRequestLifecycleManager {
   async enforceThrottle() {
     const timeSinceLastRequest = Date.now() - this._lastAskFinishedAt;
     const throttleDelay = this.REQUEST_THROTTLE_MS - timeSinceLastRequest;
-    
+
     if (throttleDelay > 0) {
       await this.utils.sleep(throttleDelay);
     }
@@ -174,7 +174,7 @@ export class HTOSRequestLifecycleManager {
    * @returns {boolean} True if enough time has passed
    */
   canMakeRequest() {
-    return (Date.now() - this._lastAskFinishedAt) >= this.REQUEST_THROTTLE_MS;
+    return Date.now() - this._lastAskFinishedAt >= this.REQUEST_THROTTLE_MS;
   }
 }
 
@@ -216,7 +216,7 @@ export class HTOSRequestStateManager {
     chat.updateAnswer(answerId, {
       done: true,
       date: Date.now(),
-      ...finalUpdates
+      ...finalUpdates,
     });
   }
 
@@ -229,7 +229,7 @@ export class HTOSRequestStateManager {
   handleRequestError(chat, error, errorDetails = null) {
     const errorUpdate = {
       error: error.type || "unexpected",
-      done: true
+      done: true,
     };
 
     if (errorDetails) {
@@ -252,21 +252,32 @@ export class HTOSRequestStateManager {
 }
 
 export class HTOSProviderStateManager {
-  constructor(sharedState) { this.sharedState = sharedState; }
+  constructor(sharedState) {
+    this.sharedState = sharedState;
+  }
   updateOpenAIState(chat, chatId, messageId) {
-    chat.openaiChatId = chatId; chat.openaiLastAnswerId = messageId;
+    chat.openaiChatId = chatId;
+    chat.openaiLastAnswerId = messageId;
   }
   updateGeminiState(chat, connection, token, cursor) {
-    connection.token = token; chat.geminiCursor = cursor;
+    connection.token = token;
+    chat.geminiCursor = cursor;
   }
   updateClaudeState(chat, connection, chatId, orgId) {
-    chat.claudeChatId = chatId; connection.orgId = orgId;
+    chat.claudeChatId = chatId;
+    connection.orgId = orgId;
   }
   resetProviderState(chat, provider) {
     switch (provider) {
-      case "openai-session": chat.openaiChatId = null; break;
-      case "gemini-session": chat.geminiCursor = null; break;
-      case "claude-session": chat.claudeChatId = null; break;
+      case "openai-session":
+        chat.openaiChatId = null;
+        break;
+      case "gemini-session":
+        chat.geminiCursor = null;
+        break;
+      case "claude-session":
+        chat.claudeChatId = null;
+        break;
     }
   }
 }
@@ -274,7 +285,11 @@ export class HTOSProviderStateManager {
 export function classifyProviderError(provider, error) {
   const t = (s) => HTOSErrorMap[s] || s || HTOSErrorMap.claudeUnexpected;
   const type = error?.type || error?.code || null;
-  const message = (typeof error === "string" ? error : (error?.message || ""))?.toLowerCase?.() || "";
+  const message =
+    (typeof error === "string"
+      ? error
+      : error?.message || ""
+    )?.toLowerCase?.() || "";
   if (type === "aborted" || message.includes("aborted")) {
     return { type: null, suppressed: true };
   }
@@ -283,17 +298,24 @@ export function classifyProviderError(provider, error) {
       if (type === "login") return { type: t("geminiLogin") };
       if (type === "noGeminiAccess") return { type: t("geminiNoAccess") };
       if (type === "badToken") return { type: t("geminiLogin") };
-      if (type === "failedToReadResponse") return { type: t("geminiUnexpected") };
+      if (type === "failedToReadResponse")
+        return { type: t("geminiUnexpected") };
       if (type === "network") return { type: t("geminiUnexpected") };
       if (type === "tooManyRequests") return { type: t("tooManyRequests") };
       return { type: t("geminiUnexpected") };
     }
     case "claude-session": {
       if (type === "tooManyRequests") return { type: t("tooManyRequests") };
-      if (type === "freeLimitExceeded" || message.includes("exceeded_limit") || message.includes("free limit")) return { type: t("claudeFreeLimitExceeded") };
+      if (
+        type === "freeLimitExceeded" ||
+        message.includes("exceeded_limit") ||
+        message.includes("free limit")
+      )
+        return { type: t("claudeFreeLimitExceeded") };
       if (type === "badModel") return { type: t("claudeBadModel") };
       if (type === "badOrgId") return { type: t("claudeLogin") };
-      if (type === "failedToReadResponse") return { type: t("claudeUnexpected") };
+      if (type === "failedToReadResponse")
+        return { type: t("claudeUnexpected") };
       if (type === "network") return { type: t("claudeUnexpected") };
       return { type: t("claudeUnexpected") };
     }
@@ -302,25 +324,35 @@ export function classifyProviderError(provider, error) {
       if (type === "badModel") return { type: t("openaiBadModel") };
       if (type === "badApiKey") return { type: t("openaiBadApiKey") };
       if (type === "messageTooLong") return { type: t("openaiMessageTooLong") };
-      if (type === "requestsLimit" || type === "tooManyRequests") return { type: t("openaiRequestsLimit") };
-      if (type === "tooManyRequestsFiles") return { type: t("openaiTooManyRequestsFiles") };
-      if (message.includes("cloudflare")) return { type: t("openaiCloudflare") };
+      if (type === "requestsLimit" || type === "tooManyRequests")
+        return { type: t("openaiRequestsLimit") };
+      if (type === "tooManyRequestsFiles")
+        return { type: t("openaiTooManyRequestsFiles") };
+      if (message.includes("cloudflare"))
+        return { type: t("openaiCloudflare") };
       return { type: t("openaiServerError") };
     }
     case "qwen-session": {
-      if (type === 401 || message.includes("incorrect api key")) return { type: t("qwenBadApiKey") };
+      if (type === 401 || message.includes("incorrect api key"))
+        return { type: t("qwenBadApiKey") };
       if (type === "login") return { type: t("qwenLogin") };
-      if (type === "network" || message.includes("connection error")) return { type: t("cloudgptNetwork") };
-      if (type === "tooManyRequests" || message.includes("exceeds the model limit")) return { type: t("tooManyRequests") };
+      if (type === "network" || message.includes("connection error"))
+        return { type: t("cloudgptNetwork") };
+      if (
+        type === "tooManyRequests" ||
+        message.includes("exceeds the model limit")
+      )
+        return { type: t("tooManyRequests") };
       return { type: t("qwenUnexpected") };
     }
-     default: {
-       if (type === "tooManyRequests") return { type: t("tooManyRequests") };
-       if (type === "functionsNotSupported") return { type: t("functionsNotSupported") };
-       return { type: t("cloudgptUnknown") };
-     }
-   }
- }
+    default: {
+      if (type === "tooManyRequests") return { type: t("tooManyRequests") };
+      if (type === "functionsNotSupported")
+        return { type: t("functionsNotSupported") };
+      return { type: t("cloudgptUnknown") };
+    }
+  }
+}
 
 export class HTOSUnifiedRequestController {
   constructor(utils, sharedState) {
@@ -330,13 +362,21 @@ export class HTOSUnifiedRequestController {
     this.utils = utils;
     this.sharedState = sharedState;
   }
-  init() { this.lifecycleManager.init(); }
+  init() {
+    this.lifecycleManager.init();
+  }
   async startRequest(chatId, options = {}) {
     const chat = this.sharedState.chats.get(chatId);
-    if (!chat) { throw new Error(`Chat not found: ${chatId}`); }
+    if (!chat) {
+      throw new Error(`Chat not found: ${chatId}`);
+    }
     await this.lifecycleManager.enforceThrottle();
-    const abortController = this.lifecycleManager.createAbortController(chat.id);
-    if (!this.lifecycleManager.isActive(chat.id)) { return null; }
+    const abortController = this.lifecycleManager.createAbortController(
+      chat.id,
+    );
+    if (!this.lifecycleManager.isActive(chat.id)) {
+      return null;
+    }
     const answerId = this.lifecycleManager.generateRequestId();
     this.stateManager.updateLastQuestion(chat);
     this.stateManager.updateLastAnswer(chat, { answerId });
@@ -344,7 +384,10 @@ export class HTOSUnifiedRequestController {
   }
   completeRequest(context, result) {
     const { chat, answerId } = context;
-    this.stateManager.completeAnswer(chat, answerId, { text: result.text, model: result.model || "" });
+    this.stateManager.completeAnswer(chat, answerId, {
+      text: result.text,
+      model: result.model || "",
+    });
     this.lifecycleManager.cleanup(chat.id);
     this.lifecycleManager.markRequestFinished();
   }
@@ -357,24 +400,40 @@ export class HTOSUnifiedRequestController {
   _resolveProviderType(chat) {
     try {
       const connectionId = chat?.connectionId || chat?.connection?.id;
-      const connection = connectionId ? this.sharedState.ai?.connections?.get?.(connectionId) : (chat?.connection || null);
+      const connection = connectionId
+        ? this.sharedState.ai?.connections?.get?.(connectionId)
+        : chat?.connection || null;
       return connection?.type || connection?.id || null;
-    } catch { return null; }
+    } catch {
+      return null;
+    }
   }
   _classify(chat, error, fallbackClassification) {
-    const provider = this._resolveProviderType(chat) || fallbackClassification?.provider || null;
-    try { return classifyProviderError(provider, error); } catch { return { type: HTOSErrorMap.cloudgptUnknown }; }
+    const provider =
+      this._resolveProviderType(chat) ||
+      fallbackClassification?.provider ||
+      null;
+    try {
+      return classifyProviderError(provider, error);
+    } catch {
+      return { type: HTOSErrorMap.cloudgptUnknown };
+    }
   }
   handleRequestError(context, error, errorClassification) {
     const { chat } = context;
-    const classification = errorClassification || this._classify(chat, error, null);
+    const classification =
+      errorClassification || this._classify(chat, error, null);
     if (classification?.suppressed) {
       this.lifecycleManager.cleanup(chat.id);
       this.lifecycleManager.markRequestFinished();
       this.stateManager.cleanupIncompleteAnswer(chat);
       return;
     }
-    this.stateManager.handleRequestError(chat, classification, this._errorToString(error));
+    this.stateManager.handleRequestError(
+      chat,
+      classification,
+      this._errorToString(error),
+    );
     this.lifecycleManager.cleanup(chat.id);
     this.lifecycleManager.markRequestFinished();
   }
@@ -383,7 +442,9 @@ export class HTOSUnifiedRequestController {
     const type = error?.type ? `[${error.type}] ` : "";
     if (error?.message) return `${type}${error.message}`;
     if (error?.details) {
-      try { return `${type}${JSON.stringify(error.details)}`; } catch {}
+      try {
+        return `${type}${JSON.stringify(error.details)}`;
+      } catch {}
     }
     if (error?.toString) return `${type}${error.toString()}`;
     return `${type}Unknown error`;

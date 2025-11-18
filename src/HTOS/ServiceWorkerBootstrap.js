@@ -6,8 +6,13 @@
 
 // Build-phase safe: emitted to dist/core/*
 
-import { BusController } from './BusController.js';
-import { NetRulesManager, CSPController, UserAgentController, ArkoseController } from './NetRulesManager.js';
+import { BusController } from "./BusController.js";
+import {
+  NetRulesManager,
+  CSPController,
+  UserAgentController,
+  ArkoseController,
+} from "./NetRulesManager.js";
 
 const SWBootstrap = {
   _readyPromise: null,

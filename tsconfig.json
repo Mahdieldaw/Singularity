@@ -14,21 +14,13 @@
     "allowSyntheticDefaultImports": true,
     "isolatedModules": true,
     "noEmit": true,
-    "typeRoots": [
-      "./node_modules/@types",
-      "./ui/types"
-    ],
+    "typeRoots": ["./node_modules/@types", "./ui/types"],
     "paths": {
       "react-window": ["./ui/types/react-window.d.ts"],
       "react-window/*": ["./ui/types/react-window.d.ts"]
     },
-    "types": [
-      "react",
-      "react-dom",
-      "chrome",
-      "node"
-    ]
+    "types": ["react", "react-dom", "chrome", "node"]
   },
-  "include": ["./**/*.ts", "./**/*.tsx", "./**/*.d.ts", "src/utils/logger.js" ],
+  "include": ["./**/*.ts", "./**/*.tsx", "./**/*.d.ts", "src/utils/logger.js"],
   "exclude": ["dist", "node_modules"]
 }

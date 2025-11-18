@@ -1,9 +1,9 @@
-import { useCallback } from 'react';
-import { useAtomValue, useSetAtom } from 'jotai';
-import { activeClipsAtom, alertTextAtom, turnsMapAtom } from '../state/atoms';
-import { useRoundActions } from './useRoundActions';
-import type { AiTurn } from '../types';
-import { PRIMARY_STREAMING_PROVIDER_IDS } from '../constants';
+import { useCallback } from "react";
+import { useAtomValue, useSetAtom } from "jotai";
+import { activeClipsAtom, alertTextAtom, turnsMapAtom } from "../state/atoms";
+import { useRoundActions } from "./useRoundActions";
+import type { AiTurn } from "../types";
+import { PRIMARY_STREAMING_PROVIDER_IDS } from "../constants";
 
 export function useClipActions() {
   const turnsMap = useAtomValue(turnsMapAtom);
@@ -14,28 +14,38 @@ export function useClipActions() {
   const { runSynthesisForAiTurn, runMappingForAiTurn } = useRoundActions();
 
   const handleClipClick = useCallback(
-    async (aiTurnId: string, type: 'synthesis' | 'mapping', providerId: string) => {
+    async (
+      aiTurnId: string,
+      type: "synthesis" | "mapping",
+      providerId: string,
+    ) => {
       const aiTurn = turnsMap.get(aiTurnId) as AiTurn | undefined;
-      if (!aiTurn || aiTurn.type !== 'ai') {
-        setAlertText('Cannot find AI turn. Please try again.');
+      if (!aiTurn || aiTurn.type !== "ai") {
+        setAlertText("Cannot find AI turn. Please try again.");
         return;
       }
 
       // Validate turn is finalized before allowing historical reruns
       const isOptimistic = aiTurn.meta?.isOptimistic === true;
       if (!aiTurn.userTurnId || isOptimistic) {
-        setAlertText('Turn data is still loading. Please wait a moment and try again.');
-        console.warn('[ClipActions] Attempted rerun on unfinalized turn:', {
+        setAlertText(
+          "Turn data is still loading. Please wait a moment and try again.",
+        );
+        console.warn("[ClipActions] Attempted rerun on unfinalized turn:", {
           aiTurnId,
           hasUserTurnId: !!aiTurn.userTurnId,
-          isOptimistic
+          isOptimistic,
         });
         return;
       }
 
-      const responsesMap = type === 'synthesis' ? aiTurn.synthesisResponses || {} : aiTurn.mappingResponses || {};
+      const responsesMap =
+        type === "synthesis"
+          ? aiTurn.synthesisResponses || {}
+          : aiTurn.mappingResponses || {};
       const responseEntry = responsesMap[providerId];
-      const hasExisting = Array.isArray(responseEntry) && responseEntry.length > 0;
+      const hasExisting =
+        Array.isArray(responseEntry) && responseEntry.length > 0;
 
       setActiveClips((prev) => ({
         ...prev,
@@ -50,13 +60,16 @@ export function useClipActions() {
       if (!aiTurn.batchResponses || !aiTurn.batchResponses[providerId]) {
         setTurnsMap((draft) => {
           const turn = draft.get(aiTurnId) as AiTurn | undefined;
-          if (!turn || turn.type !== 'ai') return;
+          if (!turn || turn.type !== "ai") return;
           turn.batchResponses = (turn.batchResponses || {}) as any;
           if (!turn.batchResponses[providerId]) {
-            const initialStatus: 'streaming' | 'pending' = PRIMARY_STREAMING_PROVIDER_IDS.includes(providerId) ? 'streaming' : 'pending';
+            const initialStatus: "streaming" | "pending" =
+              PRIMARY_STREAMING_PROVIDER_IDS.includes(providerId)
+                ? "streaming"
+                : "pending";
             (turn.batchResponses as any)[providerId] = {
               providerId,
-              text: '',
+              text: "",
               status: initialStatus,
               createdAt: Date.now(),
               updatedAt: Date.now(),
@@ -67,18 +80,28 @@ export function useClipActions() {
 
       if (hasExisting) return;
 
-      if (type === 'synthesis') {
+      if (type === "synthesis") {
         // For historical turns, allow synthesis even if mapping doesn't exist yet
-        const isHistoricalTurn = !aiTurn.batchResponses || Object.keys(aiTurn.batchResponses).length === 0;
+        const isHistoricalTurn =
+          !aiTurn.batchResponses ||
+          Object.keys(aiTurn.batchResponses).length === 0;
         if (!isHistoricalTurn) {
           const mappingResponses = aiTurn.mappingResponses || {};
-          const hasCompletedMapping = Object.values(mappingResponses).some((value: any) => {
-            const arr = Array.isArray(value) ? value : [value];
-            const last = arr[arr.length - 1];
-            return !!(last && last.status === 'completed' && last.text?.trim());
-          });
+          const hasCompletedMapping = Object.values(mappingResponses).some(
+            (value: any) => {
+              const arr = Array.isArray(value) ? value : [value];
+              const last = arr[arr.length - 1];
+              return !!(
+                last &&
+                last.status === "completed" &&
+                last.text?.trim()
+              );
+            },
+          );
           if (!hasCompletedMapping) {
-            setAlertText('No mapping result exists for this round. Run mapping first before synthesizing.');
+            setAlertText(
+              "No mapping result exists for this round. Run mapping first before synthesizing.",
+            );
             return;
           }
         }
@@ -87,7 +110,14 @@ export function useClipActions() {
         await runMappingForAiTurn(aiTurnId, providerId);
       }
     },
-    [turnsMap, runSynthesisForAiTurn, runMappingForAiTurn, setActiveClips, setAlertText, setTurnsMap]
+    [
+      turnsMap,
+      runSynthesisForAiTurn,
+      runMappingForAiTurn,
+      setActiveClips,
+      setAlertText,
+      setTurnsMap,
+    ],
   );
 
   return { handleClipClick, activeClips };

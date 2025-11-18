@@ -12,7 +12,7 @@ export class LifecycleManager {
     this.heartbeatTimer = null;
     this.heartbeatIntervalMs = 25000; // Ping every 25s (below 30s threshold)
     this.INACTIVITY_THRESHOLD = 20 * 60 * 1000; // 20 minutes
-    this.ALARM_NAME = 'htos-heartbeat';
+    this.ALARM_NAME = "htos-heartbeat";
   }
 
   /**
@@ -24,7 +24,7 @@ export class LifecycleManager {
     // Start heartbeat if not running
     if (!this.heartbeatTimer) {
       try {
-        console.log('[Lifecycle] Activity detected, starting heartbeat');
+        console.log("[Lifecycle] Activity detected, starting heartbeat");
       } catch (e) {}
       this.startHeartbeat();
     }
@@ -36,7 +36,7 @@ export class LifecycleManager {
   startHeartbeat() {
     if (this.heartbeatTimer) return;
 
-    if (typeof chrome !== 'undefined' && chrome.alarms) {
+    if (typeof chrome !== "undefined" && chrome.alarms) {
       this.startAlarmBasedHeartbeat();
     } else {
       this.startTimerBasedHeartbeat();
@@ -57,10 +57,13 @@ export class LifecycleManager {
         chrome.alarms.onAlarm.addListener(this._alarmListener);
       }
 
-      const periodMinutes = Math.max(0.016, this.heartbeatIntervalMs / (1000 * 60));
+      const periodMinutes = Math.max(
+        0.016,
+        this.heartbeatIntervalMs / (1000 * 60),
+      );
       chrome.alarms.create(this.ALARM_NAME, {
         delayInMinutes: periodMinutes,
-        periodInMinutes: periodMinutes
+        periodInMinutes: periodMinutes,
       });
 
       this.heartbeatTimer = 1;
@@ -68,7 +71,9 @@ export class LifecycleManager {
       this.executePing();
     } catch (e) {
       // Fallback to timer-based if alarms fail
-      try { this.startTimerBasedHeartbeat(); } catch (_) {}
+      try {
+        this.startTimerBasedHeartbeat();
+      } catch (_) {}
     }
   }
 
@@ -88,18 +93,22 @@ export class LifecycleManager {
 
       // Stop heartbeat if truly inactive for threshold
       if (timeSinceActivity > this.INACTIVITY_THRESHOLD) {
-        try { console.log('[Lifecycle] No activity for threshold, allowing SW shutdown'); } catch (e) {}
+        try {
+          console.log(
+            "[Lifecycle] No activity for threshold, allowing SW shutdown",
+          );
+        } catch (e) {}
         this.stopHeartbeat();
         return;
       }
 
       if (this.ping) {
         await this.ping();
-      } else if (typeof chrome !== 'undefined' && chrome.runtime?.id) {
+      } else if (typeof chrome !== "undefined" && chrome.runtime?.id) {
         try {
-          const res = chrome.runtime.sendMessage({ type: 'htos.keepalive' });
+          const res = chrome.runtime.sendMessage({ type: "htos.keepalive" });
           // Some chrome implementations return a Promise; guard it
-          if (res && typeof res.then === 'function') {
+          if (res && typeof res.then === "function") {
             await res.catch(() => {});
           }
         } catch (e) {
@@ -108,16 +117,25 @@ export class LifecycleManager {
       }
     } catch (e) {
       // Non-fatal
-      try { console.warn('LifecycleManager ping error', e); } catch (err) {}
+      try {
+        console.warn("LifecycleManager ping error", e);
+      } catch (err) {}
     }
   }
 
   stopHeartbeat() {
     try {
-      if (typeof chrome !== 'undefined' && chrome.alarms) {
+      if (typeof chrome !== "undefined" && chrome.alarms) {
         chrome.alarms.clear(this.ALARM_NAME);
-        if (this._alarmListener && chrome.alarms && chrome.alarms.onAlarm && chrome.alarms.onAlarm.removeListener) {
-          try { chrome.alarms.onAlarm.removeListener(this._alarmListener); } catch (e) {}
+        if (
+          this._alarmListener &&
+          chrome.alarms &&
+          chrome.alarms.onAlarm &&
+          chrome.alarms.onAlarm.removeListener
+        ) {
+          try {
+            chrome.alarms.onAlarm.removeListener(this._alarmListener);
+          } catch (e) {}
           this._alarmListener = null;
         }
       } else if (this.heartbeatTimer) {

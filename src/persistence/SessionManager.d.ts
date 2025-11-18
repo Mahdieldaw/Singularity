@@ -47,20 +47,29 @@ export declare class SessionManager {
   isInitialized: boolean;
 
   constructor();
-  
+
   initialize(config?: { adapter?: any; initTimeoutMs?: number }): Promise<void>;
-  
+
   getOrCreateSession(sessionId: string): Promise<SessionData>;
-  
+
   saveSession(sessionId: string): Promise<void>;
-  
+
   deleteSession(sessionId: string): Promise<boolean>;
-  
-  updateProviderContext(sessionId: string, providerId: string, result: any, options?: ProviderContextOptions): Promise<void>;
-  updateProviderContextsBatch(sessionId: string, updates: Record<string, any>, options?: ProviderContextOptions): Promise<void>;
-  
+
+  updateProviderContext(
+    sessionId: string,
+    providerId: string,
+    result: any,
+    options?: ProviderContextOptions,
+  ): Promise<void>;
+  updateProviderContextsBatch(
+    sessionId: string,
+    updates: Record<string, any>,
+    options?: ProviderContextOptions,
+  ): Promise<void>;
+
   getProviderContexts(sessionId: string, threadId?: string): any;
-  
+
   getTurn(sessionId: string, turnId: string): any;
   getTurns(sessionId: string): any[];
   getPersistenceStatus(): PersistenceStatus;

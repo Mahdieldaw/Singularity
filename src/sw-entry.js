@@ -4,7 +4,6 @@
 // ============================================================================
 // === bg: idempotent listener registration ===
 
-
 // Core Infrastructure Imports
 
 // ...rest of your service worker logic
@@ -35,12 +34,12 @@ import { DNRUtils } from "./core/dnr-utils.js";
 import { ConnectionHandler } from "./core/connection-handler.js";
 
 // Persistence Layer Imports
-import { SessionManager } from './persistence/SessionManager.js';
-import { initializePersistenceLayer } from './persistence/index.js';
-import { errorHandler } from './utils/ErrorHandler.js';
-import { persistenceMonitor } from './debug/PersistenceMonitor.js';
+import { SessionManager } from "./persistence/SessionManager.js";
+import { initializePersistenceLayer } from "./persistence/index.js";
+import { errorHandler } from "./utils/ErrorHandler.js";
+import { persistenceMonitor } from "./debug/PersistenceMonitor.js";
 // Prompt refinement service
-import { PromptRefinerService } from './services/PromptRefinerService.ts';
+import { PromptRefinerService } from "./services/PromptRefinerService.ts";
 
 // ============================================================================
 // FEATURE FLAGS (Source of Truth)
@@ -72,30 +71,40 @@ self.BusController = BusController;
 // PERSISTENCE LAYER INITIALIZATION
 // ============================================================================
 async function initializePersistence() {
-  const operationId = persistenceMonitor.startOperation('INITIALIZE_PERSISTENCE', {
-    useAdapter: true,
-  });
-  
+  const operationId = persistenceMonitor.startOperation(
+    "INITIALIZE_PERSISTENCE",
+    {
+      useAdapter: true,
+    },
+  );
+
   try {
     persistenceLayer = await initializePersistenceLayer();
     // Expose globally for UI bridge and debugging
     self.__HTOS_PERSISTENCE_LAYER = persistenceLayer;
-    
-    persistenceMonitor.recordConnection('HTOSPersistenceDB', 1, [
-      'sessions', 'threads', 'turns', 'provider_responses', 
-      'provider_contexts', 'metadata'
+
+    persistenceMonitor.recordConnection("HTOSPersistenceDB", 1, [
+      "sessions",
+      "threads",
+      "turns",
+      "provider_responses",
+      "provider_contexts",
+      "metadata",
     ]);
-    
-    console.log('[SW] ✅ Persistence layer initialized');
+
+    console.log("[SW] ✅ Persistence layer initialized");
     persistenceMonitor.endOperation(operationId, { success: true });
     return persistenceLayer;
   } catch (error) {
     persistenceMonitor.endOperation(operationId, null, error);
     const handledError = await errorHandler.handleError(error, {
-      operation: 'initializePersistence',
-      context: { useAdapter: true }
+      operation: "initializePersistence",
+      context: { useAdapter: true },
     });
-    console.error('[SW] ❌ Failed to initialize persistence layer:', handledError);
+    console.error(
+      "[SW] ❌ Failed to initialize persistence layer:",
+      handledError,
+    );
     // Do NOT fallback silently; propagate error to fail initialization
     throw handledError;
   }
@@ -135,7 +144,6 @@ async function initializeSessionManager(persistenceLayer) {
   }
 }
 
-
 // ============================================================================
 // PERSISTENT OFFSCREEN DOCUMENT CONTROLLER
 // ============================================================================
@@ -143,7 +151,9 @@ const OffscreenController = {
   _initialized: false,
   async init() {
     if (this._initialized) return;
-    console.log('[SW] Initializing persistent offscreen document controller...');
+    console.log(
+      "[SW] Initializing persistent offscreen document controller...",
+    );
     await this._createOffscreenPageIfMissing();
     if (!self.BusController) {
       self.BusController = BusController;
@@ -154,12 +164,16 @@ const OffscreenController = {
   async _createOffscreenPageIfMissing() {
     if (!(await chrome.offscreen.hasDocument())) {
       await chrome.offscreen.createDocument({
-        url: 'offscreen.html',
-        reasons: [chrome.offscreen.Reason.BLOBS, chrome.offscreen.Reason.DOM_PARSER],
-        justification: 'HTOS needs persistent offscreen DOM for complex operations and a stable message bus.',
+        url: "offscreen.html",
+        reasons: [
+          chrome.offscreen.Reason.BLOBS,
+          chrome.offscreen.Reason.DOM_PARSER,
+        ],
+        justification:
+          "HTOS needs persistent offscreen DOM for complex operations and a stable message bus.",
       });
     }
-  }
+  },
 };
 
 // ============================================================================
@@ -174,10 +188,18 @@ class ProviderRegistry {
     this.controllers.set(providerId, controller);
     this.adapters.set(providerId, adapter);
   }
-  getAdapter(providerId) { return this.adapters.get(String(providerId).toLowerCase()); }
-  getController(providerId) { return this.controllers.get(String(providerId).toLowerCase()); }
-  listProviders() { return Array.from(this.adapters.keys()); }
-  isAvailable(providerId) { return this.adapters.has(String(providerId).toLowerCase()); }
+  getAdapter(providerId) {
+    return this.adapters.get(String(providerId).toLowerCase());
+  }
+  getController(providerId) {
+    return this.controllers.get(String(providerId).toLowerCase());
+  }
+  listProviders() {
+    return Array.from(this.adapters.keys());
+  }
+  isAvailable(providerId) {
+    return this.adapters.has(String(providerId).toLowerCase());
+  }
 }
 const providerRegistry = new ProviderRegistry();
 self.providerRegistry = providerRegistry;
@@ -198,7 +220,7 @@ class FaultTolerantOrchestrator {
       onAllComplete = () => {},
       useThinking = false,
       providerContexts = {},
-      providerMeta = {}
+      providerMeta = {},
     } = options;
 
     if (this.lifecycleManager) this.lifecycleManager.keepalive(true);
@@ -208,18 +230,18 @@ class FaultTolerantOrchestrator {
     const abortControllers = new Map();
     this.activeRequests.set(sessionId, { abortControllers });
 
-    const providerPromises = providers.map(providerId => {
+    const providerPromises = providers.map((providerId) => {
       // This IIFE returns a promise that *always resolves*
       return (async () => {
         const abortController = new AbortController();
         abortControllers.set(providerId, abortController);
-        
+
         const adapter = providerRegistry.getAdapter(providerId);
         if (!adapter) {
           return {
             providerId,
-            status: 'rejected',
-            reason: new Error(`Provider ${providerId} not available`)
+            status: "rejected",
+            reason: new Error(`Provider ${providerId} not available`),
           };
         }
 
@@ -229,9 +251,19 @@ class FaultTolerantOrchestrator {
 
         // Uniform dispatch-start log for cross-provider timing comparison
         try {
-          const metaKeys = Object.keys((providerContexts[providerId]?.meta) || (providerContexts[providerId] || {}));
-          const modelOverride = (providerMeta?.[providerId] || {}).model || (providerContexts[providerId]?.model) || (providerContexts[providerId]?.meta?.model) || 'auto';
-          console.log(`[Fanout] DISPATCH_STARTED provider=${providerId} sessionId=${sessionId} useThinking=${useThinking ? 'true' : 'false'} model=${modelOverride} contextKeys=${metaKeys.join('|')}`);
+          const metaKeys = Object.keys(
+            providerContexts[providerId]?.meta ||
+              providerContexts[providerId] ||
+              {},
+          );
+          const modelOverride =
+            (providerMeta?.[providerId] || {}).model ||
+            providerContexts[providerId]?.model ||
+            providerContexts[providerId]?.meta?.model ||
+            "auto";
+          console.log(
+            `[Fanout] DISPATCH_STARTED provider=${providerId} sessionId=${sessionId} useThinking=${useThinking ? "true" : "false"} model=${modelOverride} contextKeys=${metaKeys.join("|")}`,
+          );
         } catch (_) {}
 
         // If we have a provider-specific context, attempt a continuation.
@@ -244,93 +276,105 @@ class FaultTolerantOrchestrator {
           meta: {
             ...(providerContexts[providerId]?.meta || {}),
             ...(providerMeta?.[providerId] || {}),
-            useThinking
-          }
+            useThinking,
+          },
         };
 
         try {
           // Favor unified ask() if available; fall back to sendPrompt().
           // ask(prompt, providerContext?, sessionId?, onChunk, signal)
           // Prefer passing only the meta shape to adapters for consistency.
-          const providerContext = providerContexts[providerId]?.meta || providerContexts[providerId] || null;
+          const providerContext =
+            providerContexts[providerId]?.meta ||
+            providerContexts[providerId] ||
+            null;
           const onChunkWrapped = (chunk) => {
-            const textChunk = typeof chunk === 'string' ? chunk : chunk.text;
+            const textChunk = typeof chunk === "string" ? chunk : chunk.text;
             if (textChunk) aggregatedText += textChunk;
             if (!firstPartialAt) {
               firstPartialAt = Date.now();
               try {
-                const preview = (textChunk || '').slice(0, 80);
-                console.log(`[Fanout] FIRST_PARTIAL provider=${providerId} t=${firstPartialAt - startTime}ms preview=${JSON.stringify(preview)}`);
+                const preview = (textChunk || "").slice(0, 80);
+                console.log(
+                  `[Fanout] FIRST_PARTIAL provider=${providerId} t=${firstPartialAt - startTime}ms preview=${JSON.stringify(preview)}`,
+                );
               } catch (_) {}
             }
-            onPartial(providerId, typeof chunk === 'string' ? { text: chunk } : chunk);
+            onPartial(
+              providerId,
+              typeof chunk === "string" ? { text: chunk } : chunk,
+            );
           };
 
           let result;
-          if (typeof adapter.ask === 'function') {
+          if (typeof adapter.ask === "function") {
             // Pass the canonicalized providerContext (prefer meta shape) to adapters
             result = await adapter.ask(
               request.originalPrompt,
               providerContext,
               sessionId,
               onChunkWrapped,
-              abortController.signal
+              abortController.signal,
             );
           } else {
             // When context exists, it's already merged into request.meta above.
             result = await adapter.sendPrompt(
               request,
               onChunkWrapped,
-              abortController.signal
+              abortController.signal,
             );
           }
-          
+
           if (!result.text && aggregatedText) {
             result.text = aggregatedText;
           }
           try {
-            const latency = result.latencyMs ?? (Date.now() - startTime);
-            const len = (result.text || '').length;
+            const latency = result.latencyMs ?? Date.now() - startTime;
+            const len = (result.text || "").length;
             const ok = result.ok !== false;
-            console.log(`[Fanout] PROVIDER_COMPLETE provider=${providerId} ok=${ok} latencyMs=${latency} textLen=${len}`);
+            console.log(
+              `[Fanout] PROVIDER_COMPLETE provider=${providerId} ok=${ok} latencyMs=${latency} textLen=${len}`,
+            );
           } catch (_) {}
-          
-          return { providerId, status: 'fulfilled', value: result };
 
+          return { providerId, status: "fulfilled", value: result };
         } catch (error) {
           try {
-            console.warn(`[Fanout] PROVIDER_ERROR provider=${providerId}`, error?.message || String(error));
+            console.warn(
+              `[Fanout] PROVIDER_ERROR provider=${providerId}`,
+              error?.message || String(error),
+            );
           } catch (_) {}
           if (aggregatedText) {
             return {
               providerId,
-              status: 'fulfilled',
+              status: "fulfilled",
               value: {
                 text: aggregatedText,
                 meta: {},
                 softError: {
                   name: error.name,
-                  message: error.message
-                }
-              }
+                  message: error.message,
+                },
+              },
             };
           }
-          return { providerId, status: 'rejected', reason: error };
+          return { providerId, status: "rejected", reason: error };
         }
       })(); // End of IIFE
     });
 
     Promise.all(providerPromises).then((settledResults) => {
-      settledResults.forEach(item => {
-        if (item.status === 'fulfilled') {
+      settledResults.forEach((item) => {
+        if (item.status === "fulfilled") {
           results.set(item.providerId, item.value);
         } else {
           errors.set(item.providerId, item.reason);
         }
       });
-      
+
       onAllComplete(results, errors);
-      
+
       this.activeRequests.delete(sessionId);
       if (this.lifecycleManager) this.lifecycleManager.keepalive(false);
     });
@@ -339,7 +383,7 @@ class FaultTolerantOrchestrator {
   _abortRequest(sessionId) {
     const request = this.activeRequests.get(sessionId);
     if (request) {
-      request.abortControllers.forEach(controller => controller.abort());
+      request.abortControllers.forEach((controller) => controller.abort());
       this.activeRequests.delete(sessionId);
       if (this.lifecycleManager) this.lifecycleManager.keepalive(false);
     }
@@ -372,19 +416,35 @@ async function initializeGlobalInfrastructure() {
 async function initializeProviders() {
   console.log("[SW] Initializing providers...");
   const providerConfigs = [
-    { name: 'claude', Controller: ClaudeProviderController, Adapter: ClaudeAdapter },
-    { name: 'gemini', Controller: GeminiProviderController, Adapter: GeminiAdapter },
-    { name: 'gemini-pro', Controller: GeminiProviderController, Adapter: GeminiProAdapter },
-    { name: 'chatgpt', Controller: ChatGPTProviderController, Adapter: ChatGPTAdapter },
-    { name: 'qwen', Controller: QwenProviderController, Adapter: QwenAdapter },
+    {
+      name: "claude",
+      Controller: ClaudeProviderController,
+      Adapter: ClaudeAdapter,
+    },
+    {
+      name: "gemini",
+      Controller: GeminiProviderController,
+      Adapter: GeminiAdapter,
+    },
+    {
+      name: "gemini-pro",
+      Controller: GeminiProviderController,
+      Adapter: GeminiProAdapter,
+    },
+    {
+      name: "chatgpt",
+      Controller: ChatGPTProviderController,
+      Adapter: ChatGPTAdapter,
+    },
+    { name: "qwen", Controller: QwenProviderController, Adapter: QwenAdapter },
   ];
   const initialized = [];
   for (const config of providerConfigs) {
     try {
       const controller = new config.Controller();
-      if (typeof controller.init === 'function') await controller.init();
+      if (typeof controller.init === "function") await controller.init();
       const adapter = new config.Adapter(controller);
-      if (typeof adapter.init === 'function') await adapter.init();
+      if (typeof adapter.init === "function") await adapter.init();
       providerRegistry.register(config.name, controller, adapter);
       initialized.push(config.name);
     } catch (e) {
@@ -392,7 +452,7 @@ async function initializeProviders() {
     }
   }
   if (initialized.length > 0) {
-    console.info(`[SW] ✅ Providers initialized: ${initialized.join(', ')}`);
+    console.info(`[SW] ✅ Providers initialized: ${initialized.join(", ")}`);
   }
   return providerRegistry.listProviders();
 }
@@ -420,33 +480,33 @@ async function initializeGlobalServices() {
 
   globalServicesReady = (async () => {
     console.log("[SW] 🚀 Initializing global services...");
-    
+
     // 1. Initialize persistence layer FIRST
     const pl = await initializePersistence();
     // Expose persistence layer globally for runtime checks
     persistenceLayer = pl;
     self.__HTOS_PERSISTENCE_LAYER = pl;
-    
+
     // 2. Initialize session manager (depends on persistence)
     const sessionManager = await initializeSessionManager(pl);
-    
+
     // 3. Initialize infrastructure
     await initializeGlobalInfrastructure();
-    
+
     // 4. Initialize providers
     await initializeProviders();
-    
+
     // 5. Initialize orchestrator
     await initializeOrchestrator();
-    
+
     // 6. Create compiler and context resolver
     const compiler = new WorkflowCompiler(sessionManager);
     const contextResolver = new ContextResolver(sessionManager);
 
     // Initialize PromptRefinerService
-    promptRefinerService = new PromptRefinerService({ refinerModel: 'gemini' });
-    console.log('[SW] ✓ PromptRefinerService initialized');
-    
+    promptRefinerService = new PromptRefinerService({ refinerModel: "gemini" });
+    console.log("[SW] ✓ PromptRefinerService initialized");
+
     console.log("[SW] ✅ Global services ready");
     return {
       orchestrator: self.faultTolerantOrchestrator,
@@ -467,122 +527,167 @@ async function initializeGlobalServices() {
 // ============================================================================
 async function handleUnifiedMessage(message, sender, sendResponse) {
   try {
-    const sm = sessionManager || await initializeSessionManager();
+    const sm = sessionManager || (await initializeSessionManager());
     if (!sm) {
-      sendResponse({ success: false, error: 'Service not ready' });
+      sendResponse({ success: false, error: "Service not ready" });
       return true;
     }
-    
+
     switch (message.type) {
       // ========================================================================
       // HISTORY OPERATIONS
       // ========================================================================
-      case 'GET_FULL_HISTORY': {
+      case "GET_FULL_HISTORY": {
         // Always use persistence layer for history
         let sessions = [];
         try {
           // 1. Attempt to load from the new, normalized persistence layer first.
           const allSessions = await sm.adapter.getAllSessions();
           if (allSessions && allSessions.length > 0) {
-            sessions = allSessions.map(r => ({
-            id: r.id,
-            sessionId: r.id,
-            title: r.title || 'New Chat',
-            startTime: r.createdAt,
-            lastActivity: r.updatedAt || r.lastActivity,
-            messageCount: r.turnCount || 0,
-            firstMessage: ''
-          })).sort((a, b) => (b.lastActivity || 0) - (a.lastActivity || 0));
+            sessions = allSessions
+              .map((r) => ({
+                id: r.id,
+                sessionId: r.id,
+                title: r.title || "New Chat",
+                startTime: r.createdAt,
+                lastActivity: r.updatedAt || r.lastActivity,
+                messageCount: r.turnCount || 0,
+                firstMessage: "",
+              }))
+              .sort((a, b) => (b.lastActivity || 0) - (a.lastActivity || 0));
           } else {
             // 2. FALLBACK: If new layer is empty, read from the old monolith storage.
-            console.warn('[SW] No sessions in new persistence layer, attempting fallback to legacy chrome.storage...');
-            const legacyData = await chrome.storage.local.get(['htos_sessions']);
+            console.warn(
+              "[SW] No sessions in new persistence layer, attempting fallback to legacy chrome.storage...",
+            );
+            const legacyData = await chrome.storage.local.get([
+              "htos_sessions",
+            ]);
             const legacySessions = legacyData?.htos_sessions || {};
-            sessions = Object.values(legacySessions).map((s) => ({
-              id: s.sessionId,
-              sessionId: s.sessionId,
-              title: s.title || 'Legacy Chat',
-              startTime: s.createdAt || 0,
-              lastActivity: s.lastActivity || 0,
-              messageCount: s.turns?.length || 0,
-            })).sort((a, b) => b.lastActivity - a.lastActivity);
+            sessions = Object.values(legacySessions)
+              .map((s) => ({
+                id: s.sessionId,
+                sessionId: s.sessionId,
+                title: s.title || "Legacy Chat",
+                startTime: s.createdAt || 0,
+                lastActivity: s.lastActivity || 0,
+                messageCount: s.turns?.length || 0,
+              }))
+              .sort((a, b) => b.lastActivity - a.lastActivity);
           }
         } catch (e) {
-          console.error('[SW] Failed to build full history from persistence:', e);
+          console.error(
+            "[SW] Failed to build full history from persistence:",
+            e,
+          );
           sessions = [];
         }
         sendResponse({ success: true, data: { sessions } });
         return true;
       }
-      
-      case 'GET_HISTORY_SESSION': {
+
+      case "GET_HISTORY_SESSION": {
         try {
           const sessionId = message.sessionId || message.payload?.sessionId;
           if (!sessionId) {
-            console.error('[SW] GET_HISTORY_SESSION missing sessionId in message:', message);
-            sendResponse({ success: false, error: 'Missing sessionId' });
+            console.error(
+              "[SW] GET_HISTORY_SESSION missing sessionId in message:",
+              message,
+            );
+            sendResponse({ success: false, error: "Missing sessionId" });
             return true;
           }
 
           // New persistence-first logic: return raw records for UI assembly
           const adapterIsReady = sm.getPersistenceStatus?.().adapterReady;
           if (!adapterIsReady) {
-            console.warn('[SW] Persistence adapter not ready; returning empty record sets for GET_HISTORY_SESSION');
+            console.warn(
+              "[SW] Persistence adapter not ready; returning empty record sets for GET_HISTORY_SESSION",
+            );
           }
 
-      let sessionRecord = null;
-      let turns = [];
-      let providerResponses = [];
+          let sessionRecord = null;
+          let turns = [];
+          let providerResponses = [];
 
-      if (adapterIsReady) {
-        sessionRecord = await sm.adapter.get('sessions', sessionId);
-        // Prefer indexed turn lookup by sessionId; fallback to full-scan
-        turns = await sm.adapter.getTurnsBySessionId(sessionId);
-        turns = Array.isArray(turns)
-          ? turns.sort((a, b) => (a.sequence ?? a.createdAt) - (b.sequence ?? b.createdAt))
-          : [];
+          if (adapterIsReady) {
+            sessionRecord = await sm.adapter.get("sessions", sessionId);
+            // Prefer indexed turn lookup by sessionId; fallback to full-scan
+            turns = await sm.adapter.getTurnsBySessionId(sessionId);
+            turns = Array.isArray(turns)
+              ? turns.sort(
+                  (a, b) =>
+                    (a.sequence ?? a.createdAt) - (b.sequence ?? b.createdAt),
+                )
+              : [];
 
-        // Provider responses: prefer single session-scoped indexed lookup; fallback to full-scan
-        providerResponses = await sm.adapter.getResponsesBySessionId(sessionId);
-      }
+            // Provider responses: prefer single session-scoped indexed lookup; fallback to full-scan
+            providerResponses =
+              await sm.adapter.getResponsesBySessionId(sessionId);
+          }
 
           // Assemble UI-friendly rounds from raw records
           try {
             const sortedTurns = Array.isArray(turns)
-              ? turns.sort((a, b) => (a.sequence ?? a.createdAt) - (b.sequence ?? b.createdAt))
+              ? turns.sort(
+                  (a, b) =>
+                    (a.sequence ?? a.createdAt) - (b.sequence ?? b.createdAt),
+                )
               : [];
 
             const rounds = [];
 
             // Pre-index provider responses by aiTurnId for efficient merging
             const responsesByAi = new Map();
-            for (const r of (providerResponses || [])) {
+            for (const r of providerResponses || []) {
               if (!r || !r.aiTurnId) continue;
-              if (!responsesByAi.has(r.aiTurnId)) responsesByAi.set(r.aiTurnId, []);
+              if (!responsesByAi.has(r.aiTurnId))
+                responsesByAi.set(r.aiTurnId, []);
               responsesByAi.get(r.aiTurnId).push(r);
             }
 
             for (let i = 0; i < sortedTurns.length; i++) {
               const user = sortedTurns[i];
-              if (!user || !(user.type === 'user' || user.role === 'user')) continue;
+              if (!user || !(user.type === "user" || user.role === "user"))
+                continue;
 
               // Collect all AI turns associated with this user turn (including historical reruns)
-              const allAiForUser = sortedTurns.filter(t => (t.type === 'ai' || t.role === 'assistant') && (t.userTurnId === user.id));
+              const allAiForUser = sortedTurns.filter(
+                (t) =>
+                  (t.type === "ai" || t.role === "assistant") &&
+                  t.userTurnId === user.id,
+              );
               if (!allAiForUser || allAiForUser.length === 0) continue;
 
               // Determine the primary AI turn (the one that is on-timeline)
               let primaryAi = null;
               // Prefer immediate next assistant
               const nextTurn = sortedTurns[i + 1];
-              if (nextTurn && (nextTurn.type === 'ai' || nextTurn.role === 'assistant') && nextTurn.userTurnId === user.id && !(nextTurn?.meta && nextTurn.meta.isHistoricalRerun) && nextTurn.sequence !== -1) {
+              if (
+                nextTurn &&
+                (nextTurn.type === "ai" || nextTurn.role === "assistant") &&
+                nextTurn.userTurnId === user.id &&
+                !(nextTurn?.meta && nextTurn.meta.isHistoricalRerun) &&
+                nextTurn.sequence !== -1
+              ) {
                 primaryAi = nextTurn;
               } else {
                 // Otherwise, choose the first AI without isHistoricalRerun flag (sequence != -1)
-                primaryAi = allAiForUser.find(t => !(t?.meta && t.meta.isHistoricalRerun) && t.sequence !== -1) || allAiForUser[0];
+                primaryAi =
+                  allAiForUser.find(
+                    (t) =>
+                      !(t?.meta && t.meta.isHistoricalRerun) &&
+                      t.sequence !== -1,
+                  ) || allAiForUser[0];
               }
 
               const createdAt = user.createdAt || user.updatedAt || Date.now();
-              const completedAt = Math.max(...allAiForUser.map(ai => ai.updatedAt || ai.createdAt || createdAt), createdAt);
+              const completedAt = Math.max(
+                ...allAiForUser.map(
+                  (ai) => ai.updatedAt || ai.createdAt || createdAt,
+                ),
+                createdAt,
+              );
 
               // Aggregate provider responses across all AI turns for this user
               const providers = {};
@@ -590,26 +695,31 @@ async function handleUnifiedMessage(message, sender, sendResponse) {
               const mappingResponses = {};
 
               for (const ai of allAiForUser) {
-                const responses = (responsesByAi.get(ai.id) || []).sort((a, b) => (a.responseIndex ?? 0) - (b.responseIndex ?? 0));
+                const responses = (responsesByAi.get(ai.id) || []).sort(
+                  (a, b) => (a.responseIndex ?? 0) - (b.responseIndex ?? 0),
+                );
                 for (const r of responses) {
                   const pid = r.providerId;
                   const baseResp = {
                     providerId: pid,
-                    text: r.text || '',
-                    status: r.status || 'completed',
+                    text: r.text || "",
+                    status: r.status || "completed",
                     meta: r.meta || {},
                     createdAt: r.createdAt || createdAt,
-                    updatedAt: r.updatedAt || completedAt
+                    updatedAt: r.updatedAt || completedAt,
                   };
-                  if (r.responseType === 'batch') {
+                  if (r.responseType === "batch") {
                     // Only take batch responses from the primary AI turn
                     if (ai.id === primaryAi.id) {
                       providers[pid] = baseResp;
                     }
-                  } else if (r.responseType === 'synthesis') {
-                    (synthesisResponses[pid] = synthesisResponses[pid] || []).push(baseResp);
-                  } else if (r.responseType === 'mapping') {
-                    (mappingResponses[pid] = mappingResponses[pid] || []).push(baseResp);
+                  } else if (r.responseType === "synthesis") {
+                    (synthesisResponses[pid] =
+                      synthesisResponses[pid] || []).push(baseResp);
+                  } else if (r.responseType === "mapping") {
+                    (mappingResponses[pid] = mappingResponses[pid] || []).push(
+                      baseResp,
+                    );
                   }
                 }
               }
@@ -617,12 +727,16 @@ async function handleUnifiedMessage(message, sender, sendResponse) {
               rounds.push({
                 userTurnId: user.id,
                 aiTurnId: primaryAi.id,
-                user: { id: user.id, text: user.text || user.content || '', createdAt },
+                user: {
+                  id: user.id,
+                  text: user.text || user.content || "",
+                  createdAt,
+                },
                 providers,
                 synthesisResponses,
                 mappingResponses,
                 createdAt,
-                completedAt
+                completedAt,
               });
             }
 
@@ -632,37 +746,51 @@ async function handleUnifiedMessage(message, sender, sendResponse) {
               data: {
                 id: (sessionRecord && sessionRecord.id) || sessionId,
                 sessionId,
-                title: (sessionRecord && sessionRecord.title) || 'New Chat',
+                title: (sessionRecord && sessionRecord.title) || "New Chat",
                 createdAt: (sessionRecord && sessionRecord.createdAt) || 0,
-                lastActivity: (sessionRecord && (sessionRecord.updatedAt || sessionRecord.lastActivity)) || 0,
+                lastActivity:
+                  (sessionRecord &&
+                    (sessionRecord.updatedAt || sessionRecord.lastActivity)) ||
+                  0,
                 turns: rounds,
-                providerContexts: {}
-              }
+                providerContexts: {},
+              },
             });
           } catch (assembleError) {
-            console.error('[SW] Failed to assemble rounds:', assembleError);
-            sendResponse({ success: true, data: { id: sessionId, sessionId, title: 'New Chat', createdAt: 0, lastActivity: 0, turns: [], providerContexts: {} } });
+            console.error("[SW] Failed to assemble rounds:", assembleError);
+            sendResponse({
+              success: true,
+              data: {
+                id: sessionId,
+                sessionId,
+                title: "New Chat",
+                createdAt: 0,
+                lastActivity: 0,
+                turns: [],
+                providerContexts: {},
+              },
+            });
           }
         } catch (e) {
-          console.error('[SW] GET_HISTORY_SESSION error:', e);
-          sendResponse({ success: false, error: 'Failed to load session' });
+          console.error("[SW] GET_HISTORY_SESSION error:", e);
+          sendResponse({ success: false, error: "Failed to load session" });
         }
         return true;
       }
-      
-      case 'GET_SYSTEM_STATUS': {
+
+      case "GET_SYSTEM_STATUS": {
         const layer = self.__HTOS_PERSISTENCE_LAYER || persistenceLayer;
         const ps = sm.getPersistenceStatus?.() || {};
-        sendResponse({ 
-          success: true, 
-          data: { 
+        sendResponse({
+          success: true,
+          data: {
             availableProviders: providerRegistry.listProviders(),
             persistenceEnabled: !!ps.persistenceEnabled,
-            sessionManagerType: sm?.constructor?.name || 'unknown',
+            sessionManagerType: sm?.constructor?.name || "unknown",
             persistenceLayerAvailable: !!layer,
             adapterReady: !!ps.adapterReady,
-            activeMode: 'indexeddb'
-          }
+            activeMode: "indexeddb",
+          },
         });
         return true;
       }
@@ -670,28 +798,34 @@ async function handleUnifiedMessage(message, sender, sendResponse) {
       // ========================================================================
       // PROMPT REFINEMENT
       // ========================================================================
-      case 'REFINE_PROMPT': {
+      case "REFINE_PROMPT": {
         try {
-          const draftPrompt = message.draftPrompt || message.payload?.draftPrompt || '';
+          const draftPrompt =
+            message.draftPrompt || message.payload?.draftPrompt || "";
           const incomingContext = message.payload?.context || {};
-          const sessionId = message.sessionId || message.payload?.sessionId || incomingContext.sessionId;
+          const sessionId =
+            message.sessionId ||
+            message.payload?.sessionId ||
+            incomingContext.sessionId;
           const desiredModel = incomingContext.model;
 
           if (!String(draftPrompt).trim()) {
-            sendResponse({ success: false, error: 'Missing draftPrompt' });
+            sendResponse({ success: false, error: "Missing draftPrompt" });
             return true;
           }
 
           // Build full turn context for refiner
           let turnContext = null;
           const providedContext = {
-            userPrompt: incomingContext.userPrompt || '',
-            synthesisText: incomingContext.synthesisText || '',
-            mappingText: incomingContext.mappingText || '',
-            batchText: incomingContext.batchText || ''
+            userPrompt: incomingContext.userPrompt || "",
+            synthesisText: incomingContext.synthesisText || "",
+            mappingText: incomingContext.mappingText || "",
+            batchText: incomingContext.batchText || "",
           };
 
-          const hasProvided = Object.values(providedContext).some(v => String(v || '').trim().length > 0);
+          const hasProvided = Object.values(providedContext).some(
+            (v) => String(v || "").trim().length > 0,
+          );
 
           if (hasProvided) {
             turnContext = providedContext;
@@ -699,48 +833,92 @@ async function handleUnifiedMessage(message, sender, sendResponse) {
 
           if (sessionId) {
             try {
-              const session = await sm.adapter.get('sessions', sessionId);
+              const session = await sm.adapter.get("sessions", sessionId);
               if (session?.lastTurnId) {
-                const lastTurn = await sm.adapter.get('turns', session.lastTurnId);
-                if (lastTurn?.type === 'ai') {
-                  const responses = await sm.adapter.getResponsesByTurnId(lastTurn.id);
+                const lastTurn = await sm.adapter.get(
+                  "turns",
+                  session.lastTurnId,
+                );
+                if (lastTurn?.type === "ai") {
+                  const responses = await sm.adapter.getResponsesByTurnId(
+                    lastTurn.id,
+                  );
 
                   // Find user prompt from last turn
-                  const userTurn = await sm.adapter.get('turns', lastTurn.userTurnId);
-                  const lastUserPrompt = userTurn?.content || userTurn?.text || '';
+                  const userTurn = await sm.adapter.get(
+                    "turns",
+                    lastTurn.userTurnId,
+                  );
+                  const lastUserPrompt =
+                    userTurn?.content || userTurn?.text || "";
 
                   // Find synthesis and mapping responses
-                  const synthesisResponse = Array.isArray(responses) ? responses.find(r => r.responseType === 'synthesis') : null;
-                  const mappingResponse = Array.isArray(responses) ? responses.find(r => r.responseType === 'mapping') : null;
-                  const batchResponses = Array.isArray(responses) ? responses.filter(r => r.responseType === 'batch') : [];
-                  const batchText = batchResponses.map(r => `**${(r.providerId || 'unknown').toUpperCase()}**:\n${r.text}`).join('\n\n');
+                  const synthesisResponse = Array.isArray(responses)
+                    ? responses.find((r) => r.responseType === "synthesis")
+                    : null;
+                  const mappingResponse = Array.isArray(responses)
+                    ? responses.find((r) => r.responseType === "mapping")
+                    : null;
+                  const batchResponses = Array.isArray(responses)
+                    ? responses.filter((r) => r.responseType === "batch")
+                    : [];
+                  const batchText = batchResponses
+                    .map(
+                      (r) =>
+                        `**${(r.providerId || "unknown").toUpperCase()}**:\n${r.text}`,
+                    )
+                    .join("\n\n");
 
                   const fetchedContext = {
                     userPrompt: lastUserPrompt,
-                    synthesisText: synthesisResponse?.text || '',
-                    mappingText: mappingResponse?.text || '',
-                    batchText: batchText || ''
+                    synthesisText: synthesisResponse?.text || "",
+                    mappingText: mappingResponse?.text || "",
+                    batchText: batchText || "",
                   };
 
                   turnContext = {
-                    userPrompt: (turnContext?.userPrompt && turnContext.userPrompt.trim()) ? turnContext.userPrompt : fetchedContext.userPrompt,
-                    synthesisText: (turnContext?.synthesisText && turnContext.synthesisText.trim()) ? turnContext.synthesisText : fetchedContext.synthesisText,
-                    mappingText: (turnContext?.mappingText && turnContext.mappingText.trim()) ? turnContext.mappingText : fetchedContext.mappingText,
-                    batchText: (turnContext?.batchText && turnContext.batchText.trim()) ? turnContext.batchText : fetchedContext.batchText
+                    userPrompt:
+                      turnContext?.userPrompt && turnContext.userPrompt.trim()
+                        ? turnContext.userPrompt
+                        : fetchedContext.userPrompt,
+                    synthesisText:
+                      turnContext?.synthesisText &&
+                      turnContext.synthesisText.trim()
+                        ? turnContext.synthesisText
+                        : fetchedContext.synthesisText,
+                    mappingText:
+                      turnContext?.mappingText && turnContext.mappingText.trim()
+                        ? turnContext.mappingText
+                        : fetchedContext.mappingText,
+                    batchText:
+                      turnContext?.batchText && turnContext.batchText.trim()
+                        ? turnContext.batchText
+                        : fetchedContext.batchText,
                   };
                 }
               }
             } catch (e) {
-              console.error('[SW] Refiner: Error fetching last turn context:', e);
+              console.error(
+                "[SW] Refiner: Error fetching last turn context:",
+                e,
+              );
             }
           }
 
-          promptRefinerService = new PromptRefinerService({ refinerModel: desiredModel });
+          promptRefinerService = new PromptRefinerService({
+            refinerModel: desiredModel,
+          });
 
-          const result = await promptRefinerService.refinePrompt(draftPrompt, turnContext);
+          const result = await promptRefinerService.refinePrompt(
+            draftPrompt,
+            turnContext,
+          );
 
           if (!result) {
-            sendResponse({ success: false, error: 'Refiner returned no result' });
+            sendResponse({
+              success: false,
+              error: "Refiner returned no result",
+            });
             return true;
           }
 
@@ -749,142 +927,163 @@ async function handleUnifiedMessage(message, sender, sendResponse) {
             data: {
               refinedPrompt: result.refinedPrompt,
               explanation: result.explanation,
-              originalPrompt: draftPrompt
-            }
+              originalPrompt: draftPrompt,
+            },
           });
         } catch (e) {
-          console.error('[SW] REFINE_PROMPT failed:', e);
+          console.error("[SW] REFINE_PROMPT failed:", e);
           sendResponse({ success: false, error: e?.message || String(e) });
         }
         return true;
       }
-      
+
       // GET_HEALTH_STATUS is handled in the message listener for immediate response
-      
+
       // ========================================================================
       // PERSISTENCE OPERATIONS (Enhanced functionality)
       // ========================================================================
-      case 'GET_SESSION': {
-        const operationId = persistenceMonitor.startOperation('GET_SESSION', {
-          sessionId: message.sessionId || message.payload?.sessionId
+      case "GET_SESSION": {
+        const operationId = persistenceMonitor.startOperation("GET_SESSION", {
+          sessionId: message.sessionId || message.payload?.sessionId,
         });
 
         try {
           const sessionId = message.sessionId || message.payload?.sessionId;
           const session = await sm.getOrCreateSession(sessionId);
-          persistenceMonitor.endOperation(operationId, { sessionFound: !!session });
+          persistenceMonitor.endOperation(operationId, {
+            sessionFound: !!session,
+          });
           sendResponse({ success: true, session });
         } catch (error) {
           persistenceMonitor.endOperation(operationId, null, error);
           const handledError = await errorHandler.handleError(error, {
-            operation: 'getSession',
+            operation: "getSession",
             sessionId: message.sessionId || message.payload?.sessionId,
-            retry: () => sm.getOrCreateSession(message.sessionId || message.payload?.sessionId)
+            retry: () =>
+              sm.getOrCreateSession(
+                message.sessionId || message.payload?.sessionId,
+              ),
           });
           sendResponse({ success: false, error: handledError.message });
         }
         return true;
       }
-        
-      case 'SAVE_TURN': {
+
+      case "SAVE_TURN": {
         const sessionId = message.sessionId || message.payload?.sessionId;
         await sm.addTurn(sessionId, message.turn);
         sendResponse({ success: true });
         return true;
       }
-        
-      case 'UPDATE_PROVIDER_CONTEXT': {
+
+      case "UPDATE_PROVIDER_CONTEXT": {
         const sessionId = message.sessionId || message.payload?.sessionId;
         await sm.updateProviderContext(
           sessionId,
           message.providerId || message.payload?.providerId,
-          message.context || message.payload?.context
+          message.context || message.payload?.context,
         );
         sendResponse({ success: true });
         return true;
       }
-        
-      case 'CREATE_THREAD': {
+
+      case "CREATE_THREAD": {
         const sessionId = message.sessionId || message.payload?.sessionId;
         const thread = await sm.createThread(
           sessionId,
           message.title || message.payload?.title,
-          message.sourceAiTurnId || message.payload?.sourceAiTurnId
+          message.sourceAiTurnId || message.payload?.sourceAiTurnId,
         );
         sendResponse({ success: true, thread });
         return true;
       }
-        
-      case 'SWITCH_THREAD': {
+
+      case "SWITCH_THREAD": {
         const sessionId = message.sessionId || message.payload?.sessionId;
-        await sm.switchThread(sessionId, message.threadId || message.payload?.threadId);
+        await sm.switchThread(
+          sessionId,
+          message.threadId || message.payload?.threadId,
+        );
         sendResponse({ success: true });
         return true;
       }
-        
-      case 'DELETE_SESSION': {
+
+      case "DELETE_SESSION": {
         const sessionId = message.sessionId || message.payload?.sessionId;
         try {
           const removed = await sm.deleteSession(sessionId);
           // Return explicit removed boolean so UI can react optimistically
           sendResponse({ success: true, removed });
         } catch (e) {
-          console.error('[SW] DELETE_SESSION failed:', e);
+          console.error("[SW] DELETE_SESSION failed:", e);
           sendResponse({ success: false, error: e?.message || String(e) });
         }
         return true;
       }
-      
-      case 'DELETE_SESSIONS': {
+
+      case "DELETE_SESSIONS": {
         try {
-          const ids = (message.sessionIds || message.payload?.sessionIds || []).filter(Boolean);
+          const ids = (
+            message.sessionIds ||
+            message.payload?.sessionIds ||
+            []
+          ).filter(Boolean);
           if (!Array.isArray(ids) || ids.length === 0) {
-            sendResponse({ success: false, error: 'No sessionIds provided' });
+            sendResponse({ success: false, error: "No sessionIds provided" });
             return true;
           }
 
-          const results = await Promise.all(ids.map(async (id) => {
-            try {
-              const removed = await sm.deleteSession(id);
-              return { id, removed };
-            } catch (err) {
-              console.error('[SW] DELETE_SESSIONS item failed:', id, err);
-              return { id, removed: false };
-            }
-          }));
+          const results = await Promise.all(
+            ids.map(async (id) => {
+              try {
+                const removed = await sm.deleteSession(id);
+                return { id, removed };
+              } catch (err) {
+                console.error("[SW] DELETE_SESSIONS item failed:", id, err);
+                return { id, removed: false };
+              }
+            }),
+          );
 
-          const removedIds = results.filter(r => r.removed).map(r => r.id);
-          sendResponse({ success: true, removed: removedIds.length, ids: removedIds });
+          const removedIds = results.filter((r) => r.removed).map((r) => r.id);
+          sendResponse({
+            success: true,
+            removed: removedIds.length,
+            ids: removedIds,
+          });
         } catch (e) {
-          console.error('[SW] DELETE_SESSIONS failed:', e);
+          console.error("[SW] DELETE_SESSIONS failed:", e);
           sendResponse({ success: false, error: e?.message || String(e) });
         }
         return true;
       }
 
-      case 'RENAME_SESSION': {
+      case "RENAME_SESSION": {
         try {
           const sessionId = message.sessionId || message.payload?.sessionId;
           const newTitleRaw = message.title || message.payload?.title;
           if (!sessionId) {
-            sendResponse({ success: false, error: 'Missing sessionId' });
+            sendResponse({ success: false, error: "Missing sessionId" });
             return true;
           }
-          const newTitle = String(newTitleRaw ?? '').trim();
+          const newTitle = String(newTitleRaw ?? "").trim();
           if (!newTitle) {
-            sendResponse({ success: false, error: 'Title cannot be empty' });
+            sendResponse({ success: false, error: "Title cannot be empty" });
             return true;
           }
 
           // Persistence-first rename
-          const record = await sm.adapter.get('sessions', sessionId);
+          const record = await sm.adapter.get("sessions", sessionId);
           if (!record) {
-            sendResponse({ success: false, error: `Session ${sessionId} not found` });
+            sendResponse({
+              success: false,
+              error: `Session ${sessionId} not found`,
+            });
             return true;
           }
           record.title = newTitle;
           record.updatedAt = Date.now();
-          await sm.adapter.put('sessions', record);
+          await sm.adapter.put("sessions", record);
 
           // Update lightweight cache if present
           try {
@@ -894,32 +1093,39 @@ async function handleUnifiedMessage(message, sender, sendResponse) {
             }
           } catch (_) {}
 
-          sendResponse({ success: true, updated: true, sessionId, title: newTitle });
+          sendResponse({
+            success: true,
+            updated: true,
+            sessionId,
+            title: newTitle,
+          });
         } catch (e) {
-          console.error('[SW] RENAME_SESSION failed:', e);
+          console.error("[SW] RENAME_SESSION failed:", e);
           sendResponse({ success: false, error: e?.message || String(e) });
         }
         return true;
       }
-        
-      case 'GET_PERSISTENCE_STATUS': {
+
+      case "GET_PERSISTENCE_STATUS": {
         const layer = self.__HTOS_PERSISTENCE_LAYER || persistenceLayer;
         const status = {
           persistenceEnabled: HTOS_PERSISTENCE_ENABLED,
-          sessionManagerType: sm?.constructor?.name || 'unknown',
+          sessionManagerType: sm?.constructor?.name || "unknown",
           persistenceLayerAvailable: !!layer,
-          adapterStatus: sm?.getPersistenceStatus ? sm.getPersistenceStatus() : null
+          adapterStatus: sm?.getPersistenceStatus
+            ? sm.getPersistenceStatus()
+            : null,
         };
         sendResponse({ success: true, status });
         return true;
       }
-        
+
       default:
         // Unknown message type - don't handle it
         return false;
     }
   } catch (error) {
-    console.error('[SW] Message handler error:', error);
+    console.error("[SW] Message handler error:", error);
     sendResponse({ success: false, error: error.message });
     return true;
   }
@@ -934,7 +1140,10 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
   // Best-effort: record activity for lifecycle manager on any incoming non-bus message.
   try {
-    if (self.lifecycleManager && typeof self.lifecycleManager.recordActivity === 'function') {
+    if (
+      self.lifecycleManager &&
+      typeof self.lifecycleManager.recordActivity === "function"
+    ) {
       self.lifecycleManager.recordActivity();
     }
   } catch (e) {
@@ -942,23 +1151,26 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   }
 
   // Lightweight activity ping - handled locally to quickly mark service worker as active
-  if (request?.type === 'htos.activity') {
+  if (request?.type === "htos.activity") {
     try {
-      if (self.lifecycleManager && typeof self.lifecycleManager.recordActivity === 'function') {
+      if (
+        self.lifecycleManager &&
+        typeof self.lifecycleManager.recordActivity === "function"
+      ) {
         self.lifecycleManager.recordActivity();
       }
-    } catch (e) { }
+    } catch (e) {}
     sendResponse({ success: true });
     return true;
   }
 
   // Immediate health status response (no async init await)
-  if (request?.type === 'GET_HEALTH_STATUS') {
+  if (request?.type === "GET_HEALTH_STATUS") {
     try {
       const status = getHealthStatus();
       sendResponse({ success: true, status });
     } catch (e) {
-      sendResponse({ success: false, error: e?.message || String(e)});
+      sendResponse({ success: false, error: e?.message || String(e) });
     }
     return true; // Explicitly keep channel open for async-style patterns
   }
@@ -968,7 +1180,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     handleUnifiedMessage(request, sender, sendResponse);
     return true; // Always return true to keep channel open for async responses
   }
-  
+
   return false;
 });
 
@@ -980,10 +1192,13 @@ chrome.runtime.onConnect.addListener(async (port) => {
 
   // Record activity on port connections so lifecycle manager can start a heartbeat
   try {
-    if (self.lifecycleManager && typeof self.lifecycleManager.recordActivity === 'function') {
+    if (
+      self.lifecycleManager &&
+      typeof self.lifecycleManager.recordActivity === "function"
+    ) {
       self.lifecycleManager.recordActivity();
     }
-  } catch (e) { }
+  } catch (e) {}
 
   console.log("[SW] New connection received, initializing handler...");
 
@@ -995,7 +1210,7 @@ chrome.runtime.onConnect.addListener(async (port) => {
   } catch (error) {
     console.error("[SW] Failed to initialize connection handler:", error);
     try {
-      port.postMessage({ type: 'INITIALIZATION_FAILED', error: error.message });
+      port.postMessage({ type: "INITIALIZATION_FAILED", error: error.message });
     } catch (_) {}
   }
 });
@@ -1009,7 +1224,8 @@ chrome.action?.onClicked.addListener(async () => {
     const [existingTab] = await chrome.tabs.query({ url });
     if (existingTab?.id) {
       await chrome.tabs.update(existingTab.id, { active: true });
-      if (existingTab.windowId) await chrome.windows.update(existingTab.windowId, { focused: true });
+      if (existingTab.windowId)
+        await chrome.windows.update(existingTab.windowId, { focused: true });
     } else {
       await chrome.tabs.create({ url });
     }
@@ -1022,8 +1238,8 @@ chrome.action?.onClicked.addListener(async () => {
 // INSTALL/UPDATE HANDLERS
 // ============================================================================
 chrome.runtime.onInstalled.addListener(async (details) => {
-  console.log('[SW] Extension installed/updated:', details.reason);
-  
+  console.log("[SW] Extension installed/updated:", details.reason);
+
   // Session migration disabled
 });
 
@@ -1031,20 +1247,19 @@ chrome.runtime.onInstalled.addListener(async (details) => {
 // PERIODIC MAINTENANCE (started post-init)
 // ============================================================================
 
-
 // ============================================================================
 // LIFECYCLE HANDLERS
 // ============================================================================
 chrome.runtime.onStartup.addListener(() => {
-  console.log('[SW] Browser startup detected');
+  console.log("[SW] Browser startup detected");
 });
 
 chrome.runtime.onSuspend.addListener(() => {
-  console.log('[SW] Service worker suspending');
+  console.log("[SW] Service worker suspending");
 });
 
 chrome.runtime.onSuspendCanceled.addListener(() => {
-  console.log('[SW] Service worker suspend canceled');
+  console.log("[SW] Service worker suspend canceled");
 });
 
 // ============================================================================
@@ -1054,25 +1269,31 @@ function getHealthStatus() {
   const sm = sessionManager;
   const layer = self.__HTOS_PERSISTENCE_LAYER || persistenceLayer;
   let providers = [];
-  try { providers = providerRegistry.listProviders(); } catch (_) {}
+  try {
+    providers = providerRegistry.listProviders();
+  } catch (_) {}
   const ps = sm?.getPersistenceStatus?.() || {};
-  
+
   return {
     timestamp: Date.now(),
-    serviceWorker: 'active',
-    sessionManager: sm ? (sm.isInitialized ? 'initialized' : 'initializing') : 'missing',
-    persistenceLayer: layer ? 'active' : 'disabled',
+    serviceWorker: "active",
+    sessionManager: sm
+      ? sm.isInitialized
+        ? "initialized"
+        : "initializing"
+      : "missing",
+    persistenceLayer: layer ? "active" : "disabled",
     featureFlags: {
       persistenceEnabled: HTOS_PERSISTENCE_ENABLED,
     },
     providers,
     details: {
-      sessionManagerType: sm?.constructor?.name || 'unknown',
+      sessionManagerType: sm?.constructor?.name || "unknown",
       persistenceEnabled: !!ps.persistenceEnabled,
       adapterReady: !!ps.adapterReady,
       persistenceLayerAvailable: !!layer,
-      initState: self.__HTOS_INIT_STATE || null
-    }
+      initState: self.__HTOS_INIT_STATE || null,
+    },
   };
 }
 
@@ -1085,14 +1306,16 @@ globalThis.__HTOS_SW = {
   reinitialize: initializeGlobalServices,
   runTests: async () => {
     try {
-      const { PersistenceIntegrationTest } = await import('./test-persistence-integration.js');
+      const { PersistenceIntegrationTest } = await import(
+        "./test-persistence-integration.js"
+      );
       const tester = new PersistenceIntegrationTest();
       return await tester.runAllTests();
     } catch (error) {
-      console.error('Failed to run persistence tests:', error);
+      console.error("Failed to run persistence tests:", error);
       throw error;
     }
-  }
+  },
 };
 
 // ============================================================================
@@ -1102,32 +1325,41 @@ globalThis.__HTOS_SW = {
   try {
     const INIT_TIMEOUT_MS = 30000; // 30s timeout for global initialization
     const timeoutPromise = new Promise((_, reject) => {
-      setTimeout(() => reject(new Error('[SW:INIT] Initialization timed out after 30s')), INIT_TIMEOUT_MS);
+      setTimeout(
+        () => reject(new Error("[SW:INIT] Initialization timed out after 30s")),
+        INIT_TIMEOUT_MS,
+      );
     });
-    const services = await Promise.race([initializeGlobalServices(), timeoutPromise]);
+    const services = await Promise.race([
+      initializeGlobalServices(),
+      timeoutPromise,
+    ]);
     SWBootstrap.init(services);
-  console.log("[SW] 🚀 Bootstrap complete. System ready.");
-  
-  // Log health status
-  const health = await getHealthStatus();
-  console.log("[SW] Health Status:", health);
+    console.log("[SW] 🚀 Bootstrap complete. System ready.");
+
+    // Log health status
+    const health = await getHealthStatus();
+    console.log("[SW] Health Status:", health);
 
     // Track init state
     self.__HTOS_INIT_STATE = {
       initializedAt: Date.now(),
       persistenceEnabled: HTOS_PERSISTENCE_ENABLED,
       persistenceReady: !!services.persistenceLayer,
-      providers: services?.orchestrator ? providerRegistry.listProviders() : []
+      providers: services?.orchestrator ? providerRegistry.listProviders() : [],
     };
 
     try {
       await resumeInflightWorkflows(services);
     } catch (e) {
-      console.error('[SW] Resume inflight workflows failed:', e);
+      console.error("[SW] Resume inflight workflows failed:", e);
     }
   } catch (e) {
-    if (e instanceof Error && e.message.includes('Initialization timed out')) {
-      console.error('[SW:INIT] Timeout occurred. Current init state:', self.__HTOS_INIT_STATE);
+    if (e instanceof Error && e.message.includes("Initialization timed out")) {
+      console.error(
+        "[SW:INIT] Timeout occurred. Current init state:",
+        self.__HTOS_INIT_STATE,
+      );
     }
     console.error("[SW] Bootstrap failed:", e);
   }
@@ -1136,19 +1368,21 @@ globalThis.__HTOS_SW = {
 async function resumeInflightWorkflows(services) {
   const { sessionManager, compiler, contextResolver, orchestrator } = services;
   if (!sessionManager?.adapter?.isReady || !sessionManager.adapter.isReady()) {
-    console.warn('[SW] Adapter not ready; skipping inflight resume');
+    console.warn("[SW] Adapter not ready; skipping inflight resume");
     return;
   }
 
   let records = [];
   try {
-    records = await sessionManager.adapter.getAll('metadata');
+    records = await sessionManager.adapter.getAll("metadata");
   } catch (e) {
-    console.warn('[SW] Failed to read metadata for resume:', e);
+    console.warn("[SW] Failed to read metadata for resume:", e);
     return;
   }
 
-  const inflight = (records || []).filter(r => r && r.type === 'inflight_workflow');
+  const inflight = (records || []).filter(
+    (r) => r && r.type === "inflight_workflow",
+  );
   if (inflight.length === 0) return;
 
   console.log(`[SW] Resuming ${inflight.length} inflight workflows`);
@@ -1156,7 +1390,7 @@ async function resumeInflightWorkflows(services) {
   for (const rec of inflight) {
     try {
       const sessionId = rec.sessionId;
-      const userMessage = rec.userMessage || '';
+      const userMessage = rec.userMessage || "";
       const providers = Array.isArray(rec.providers) ? rec.providers : [];
       const providerMeta = rec.providerMeta || {};
       const runId = rec.runId;
@@ -1164,10 +1398,20 @@ async function resumeInflightWorkflows(services) {
       // Idempotency: if the AI turn already persisted with same runId and isComplete, skip and delete inflight
       try {
         if (rec.entityId) {
-          const existingTurn = await sessionManager.adapter.get('turns', rec.entityId);
-          if (existingTurn && existingTurn.isComplete && existingTurn.meta && existingTurn.meta.runId === runId) {
+          const existingTurn = await sessionManager.adapter.get(
+            "turns",
+            rec.entityId,
+          );
+          if (
+            existingTurn &&
+            existingTurn.isComplete &&
+            existingTurn.meta &&
+            existingTurn.meta.runId === runId
+          ) {
             if (rec.key) {
-              try { await sessionManager.adapter.delete('metadata', rec.key); } catch (_) {}
+              try {
+                await sessionManager.adapter.delete("metadata", rec.key);
+              } catch (_) {}
             }
             continue;
           }
@@ -1175,7 +1419,7 @@ async function resumeInflightWorkflows(services) {
       } catch (_) {}
 
       const primitive = {
-        type: 'extend',
+        type: "extend",
         sessionId,
         userMessage,
         providers,
@@ -1183,19 +1427,24 @@ async function resumeInflightWorkflows(services) {
         includeSynthesis: providers.length > 1,
         useThinking: false,
         providerMeta,
-        clientUserTurnId: `user-${Date.now()}`
+        clientUserTurnId: `user-${Date.now()}`,
       };
 
       const resolved = await contextResolver.resolve(primitive);
       const workflowRequest = compiler.compile(primitive, resolved);
 
       try {
-        const prior = rec.entityId ? (await sessionManager.adapter.getResponsesByTurnId(rec.entityId)) : [];
+        const prior = rec.entityId
+          ? await sessionManager.adapter.getResponsesByTurnId(rec.entityId)
+          : [];
         const resumeMap = {};
         (prior || []).forEach((resp) => {
-          const pid = resp && resp.providerId ? String(resp.providerId) : '';
-          const txt = resp && typeof resp.text === 'string' ? resp.text : '';
-          const ts = resp && (resp.updatedAt || resp.createdAt) ? (resp.updatedAt || resp.createdAt) : 0;
+          const pid = resp && resp.providerId ? String(resp.providerId) : "";
+          const txt = resp && typeof resp.text === "string" ? resp.text : "";
+          const ts =
+            resp && (resp.updatedAt || resp.createdAt)
+              ? resp.updatedAt || resp.createdAt
+              : 0;
           if (!pid || !txt) return;
           const prev = resumeMap[pid];
           if (!prev || (prev._ts || 0) < ts) {
@@ -1211,23 +1460,30 @@ async function resumeInflightWorkflows(services) {
       } catch (_) {}
 
       const nullPort = { postMessage: () => {} };
-      const engine = new (await import('./core/workflow-engine.js')).WorkflowEngine(orchestrator, sessionManager, nullPort);
+      const engine = new (
+        await import("./core/workflow-engine.js")
+      ).WorkflowEngine(orchestrator, sessionManager, nullPort);
       await engine.execute(workflowRequest, resolved);
 
       try {
-        const sessionRecord = await sessionManager.adapter.get('sessions', sessionId);
+        const sessionRecord = await sessionManager.adapter.get(
+          "sessions",
+          sessionId,
+        );
         if (sessionRecord) {
           sessionRecord.hasUnreadUpdates = true;
           sessionRecord.updatedAt = Date.now();
-          await sessionManager.adapter.put('sessions', sessionRecord);
+          await sessionManager.adapter.put("sessions", sessionRecord);
         }
       } catch (_) {}
 
       if (rec.key) {
-        try { await sessionManager.adapter.delete('metadata', rec.key); } catch (_) {}
+        try {
+          await sessionManager.adapter.delete("metadata", rec.key);
+        } catch (_) {}
       }
     } catch (e) {
-      console.warn('[SW] Inflight resume for record failed:', e);
+      console.warn("[SW] Inflight resume for record failed:", e);
     }
   }
 }

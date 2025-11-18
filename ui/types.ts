@@ -13,9 +13,12 @@ import type {
   ProviderKey,
   ProviderResponse as ContractProviderResponse,
   AiTurn as ContractAiTurn,
-  PortMessage
-} from '../shared/contract';
-import { isUserTurn as isUserTurnContract, isAiTurn as isAiTurnContract } from '../shared/contract';
+  PortMessage,
+} from "../shared/contract";
+import {
+  isUserTurn as isUserTurnContract,
+  isAiTurn as isAiTurnContract,
+} from "../shared/contract";
 
 // Import types from persistence layer (schema types)
 import type {
@@ -24,18 +27,18 @@ import type {
   TurnRecord,
   UserTurnRecord,
   AiTurnRecord,
-  ProviderResponseRecord
-} from '../src/persistence/types';
+  ProviderResponseRecord,
+} from "../src/persistence/types";
 
 // =============================================================================
 // RE-EXPORTED TYPES FROM SHARED CONTRACT
 // =============================================================================
 
-export type { ProviderKey, PortMessage } from '../shared/contract';
+export type { ProviderKey, PortMessage } from "../shared/contract";
 
 // Provider response type (unified from contract)
 export type ProviderResponse = ContractProviderResponse;
-export type ProviderResponseStatus = ProviderResponse['status'];
+export type ProviderResponseStatus = ProviderResponse["status"];
 
 // =============================================================================
 // RE-EXPORTED TYPES FROM PERSISTENCE LAYER
@@ -47,21 +50,24 @@ export type {
   TurnRecord,
   UserTurnRecord,
   AiTurnRecord,
-  ProviderResponseRecord
-} from '../src/persistence/types';
+  ProviderResponseRecord,
+} from "../src/persistence/types";
 
 // =============================================================================
 // UI-SPECIFIC TYPES
 // =============================================================================
 
 /** The current high-level step of the UI, controlling what major controls are shown. */
-export type AppStep = 'initial' | 'awaitingSynthesis' | 'synthesis' | 'synthesisDone';
+export type AppStep =
+  | "initial"
+  | "awaitingSynthesis"
+  | "synthesis"
+  | "synthesisDone";
 
 /** The UI's finite state for core user interactions. */
-export type UiPhase = 'idle' | 'streaming' | 'awaiting_action';
+export type UiPhase = "idle" | "streaming" | "awaiting_action";
 
 /** Defines the primary view mode of the application. */
-
 
 /** Defines the properties for rendering a supported LLM provider in the UI. */
 export interface LLMProvider {
@@ -80,7 +86,7 @@ export interface LLMProvider {
 
 /** Represents a turn initiated by the user. */
 export interface UserTurn {
-  type: 'user';
+  type: "user";
   id: string;
   text: string;
   createdAt: number;
@@ -91,8 +97,8 @@ export interface UserTurn {
  * Represents a turn from the AI, containing all provider responses.
  * This extends the contract AiTurn with UI-specific properties.
  */
-export interface AiTurn extends Omit<ContractAiTurn, 'type'> {
-  type: 'ai';
+export interface AiTurn extends Omit<ContractAiTurn, "type"> {
+  type: "ai";
   hiddenBatchOutputs?: Record<string, ProviderResponse>;
 }
 
@@ -100,10 +106,12 @@ export interface AiTurn extends Omit<ContractAiTurn, 'type'> {
 export type TurnMessage = UserTurn | AiTurn;
 
 /** Type guard to check if a turn is a UserTurn. */
-export const isUserTurn = (turn: TurnMessage): turn is UserTurn => isUserTurnContract(turn as any);
+export const isUserTurn = (turn: TurnMessage): turn is UserTurn =>
+  isUserTurnContract(turn as any);
 
 /** Type guard to check if a turn is an AiTurn. */
-export const isAiTurn = (turn: TurnMessage): turn is AiTurn => isAiTurnContract(turn as any);
+export const isAiTurn = (turn: TurnMessage): turn is AiTurn =>
+  isAiTurnContract(turn as any);
 
 // =============================================================================
 // HISTORY & SESSION LOADING

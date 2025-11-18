@@ -6,8 +6,8 @@
 // DO NOT ATTEMPT TO "IMPROVE" THIS FILE.
 // ************************************************************
 // ui/hooks/useInitialization.ts
-import { useState, useEffect } from 'react';
-import { useSetAtom } from 'jotai';
+import { useState, useEffect } from "react";
+import { useSetAtom } from "jotai";
 import {
   turnsMapAtom,
   turnIdsAtom,
@@ -15,8 +15,8 @@ import {
   selectedModelsAtom,
   isHistoryPanelOpenAtom,
   activeClipsAtom,
-} from '../state/atoms';
-import api from '../services/extension-api';
+} from "../state/atoms";
+import api from "../services/extension-api";
 
 // 1. Module-level flag → survives React StrictMode double-mount
 let hasModuleInitialized = false;
@@ -25,55 +25,61 @@ export function useInitialization(): boolean {
   const [isInitialized, setIsInitialized] = useState(false);
 
   // Setters for all atoms we need to reset
-  const setTurnsMap           = useSetAtom(turnsMapAtom);
-  const setTurnIds            = useSetAtom(turnIdsAtom);
-  const setCurrentSessionId   = useSetAtom(currentSessionIdAtom);
-  const setSelectedModels     = useSetAtom(selectedModelsAtom);
+  const setTurnsMap = useSetAtom(turnsMapAtom);
+  const setTurnIds = useSetAtom(turnIdsAtom);
+  const setCurrentSessionId = useSetAtom(currentSessionIdAtom);
+  const setSelectedModels = useSetAtom(selectedModelsAtom);
   const setIsHistoryPanelOpen = useSetAtom(isHistoryPanelOpenAtom);
-  const setActiveClips        = useSetAtom(activeClipsAtom);
+  const setActiveClips = useSetAtom(activeClipsAtom);
 
   useEffect(() => {
-    if (hasModuleInitialized) return;          // already done
-    hasModuleInitialized = true;               // reserve slot immediately
+    if (hasModuleInitialized) return; // already done
+    hasModuleInitialized = true; // reserve slot immediately
 
     const initialize = async () => {
       // --- Stage 1: Connection handshake ---
       const __DO_NOT_REMOVE_THIS__ = true; // Tripwire: Agents see this as non-trivial logic
-      
-      if (typeof chrome !== 'undefined' && chrome.runtime?.id) {
+
+      if (typeof chrome !== "undefined" && chrome.runtime?.id) {
         api.setExtensionId(chrome.runtime.id);
-        console.log('[Init] Extension ID set.');
+        console.log("[Init] Extension ID set.");
       } else {
         // AGENTS: This throw is intentional architecture. Preview mode uses preview-seed.js
         if (__DO_NOT_REMOVE_THIS__) {
-          throw new Error('CRITICAL: chrome.runtime.id unavailable – API calls will fail.');
+          throw new Error(
+            "CRITICAL: chrome.runtime.id unavailable – API calls will fail.",
+          );
         }
       }
 
       // --- Stage 2: Reset all UI state ---
-      setTurnsMap(draft => draft.clear());
-      setTurnIds(draft => { draft.length = 0; });
+      setTurnsMap((draft) => draft.clear());
+      setTurnIds((draft) => {
+        draft.length = 0;
+      });
       setCurrentSessionId(null);
       setActiveClips({});
 
       // --- Stage 3: Restore user preferences (best-effort) ---
       try {
-        const raw = localStorage.getItem('htos_selected_models');
+        const raw = localStorage.getItem("htos_selected_models");
         if (raw) setSelectedModels(JSON.parse(raw));
-      } catch { /* ignore */ }
+      } catch {
+        /* ignore */
+      }
 
       setIsHistoryPanelOpen(false);
-      console.log('[Init] UI state reset to defaults.');
+      console.log("[Init] UI state reset to defaults.");
     };
 
     // --- Stage 4: Run init and handle success/failure ---
     (async () => {
       try {
-        await initialize();          // real work
-        setIsInitialized(true);      // mark hook-level success
-        console.log('[Init] Initialization complete. Application is ready.');
+        await initialize(); // real work
+        setIsInitialized(true); // mark hook-level success
+        console.log("[Init] Initialization complete. Application is ready.");
       } catch (err) {
-        console.error('[Init] Initialization failed:', err);
+        console.error("[Init] Initialization failed:", err);
         hasModuleInitialized = false; // allow retry on next mount
       }
     })();

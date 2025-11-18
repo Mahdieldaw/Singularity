@@ -1,4 +1,3 @@
-
 ---
 
 # Singularity System Architecture Overview
@@ -52,8 +51,8 @@ These are the only three message shapes the backend accepts:
 ```typescript
 // Start a new conversation
 interface InitializeRequest {
-  type: 'initialize';
-  sessionId?: string | null;  // Backend generates if null
+  type: "initialize";
+  sessionId?: string | null; // Backend generates if null
   userMessage: string;
   providers: ProviderKey[];
   includeMapping: boolean;
@@ -61,13 +60,13 @@ interface InitializeRequest {
   synthesizer?: ProviderKey;
   mapper?: ProviderKey;
   useThinking?: boolean;
-  clientUserTurnId?: string;  // Optimistic ID from UI
+  clientUserTurnId?: string; // Optimistic ID from UI
 }
 
 // Continue existing conversation
 interface ExtendRequest {
-  type: 'extend';
-  sessionId: string;  // Required
+  type: "extend";
+  sessionId: string; // Required
   userMessage: string;
   providers: ProviderKey[];
   includeMapping: boolean;
@@ -80,10 +79,10 @@ interface ExtendRequest {
 
 // Re-run historical step
 interface RecomputeRequest {
-  type: 'recompute';
+  type: "recompute";
   sessionId: string;
-  sourceTurnId: string;  // AI turn to recompute
-  stepType: 'synthesis' | 'mapping';
+  sourceTurnId: string; // AI turn to recompute
+  stepType: "synthesis" | "mapping";
   targetProvider: ProviderKey;
   useThinking?: boolean;
 }
@@ -96,30 +95,30 @@ The backend sends these messages over a persistent `chrome.runtime.Port`:
 ```typescript
 // Workflow lifecycle
 interface TurnCreatedMessage {
-  type: 'TURN_CREATED';
+  type: "TURN_CREATED";
   sessionId: string;
-  userTurnId: string;  // Canonical ID
-  aiTurnId: string;    // Canonical ID
+  userTurnId: string; // Canonical ID
+  aiTurnId: string; // Canonical ID
 }
 
 // Streaming updates (sent hundreds of times per turn)
 interface PartialResultMessage {
-  type: 'PARTIAL_RESULT';
+  type: "PARTIAL_RESULT";
   sessionId: string;
-  stepId: string;  // e.g., "batch-123", "synthesis-gemini-456"
+  stepId: string; // e.g., "batch-123", "synthesis-gemini-456"
   providerId: ProviderKey;
   chunk: { text: string; meta?: any };
 }
 
 // Step completion
 interface WorkflowStepUpdateMessage {
-  type: 'WORKFLOW_STEP_UPDATE';
+  type: "WORKFLOW_STEP_UPDATE";
   sessionId: string;
   stepId: string;
-  status: 'completed' | 'failed';
+  status: "completed" | "failed";
   result?: {
-    results?: Record<string, ProviderResponse>;  // For batch
-    providerId?: string;  // For synthesis/mapping
+    results?: Record<string, ProviderResponse>; // For batch
+    providerId?: string; // For synthesis/mapping
     text?: string;
     meta?: any;
   };
@@ -128,7 +127,7 @@ interface WorkflowStepUpdateMessage {
 
 // Final canonical data
 interface TurnFinalizedMessage {
-  type: 'TURN_FINALIZED';
+  type: "TURN_FINALIZED";
   sessionId: string;
   userTurnId: string;
   aiTurnId: string;
@@ -145,7 +144,7 @@ interface TurnFinalizedMessage {
 
 ```typescript
 interface UserTurn {
-  type: 'user';
+  type: "user";
   id: string;
   text: string;
   createdAt: number;
@@ -153,18 +152,18 @@ interface UserTurn {
 }
 
 interface AiTurn {
-  type: 'ai';
+  type: "ai";
   id: string;
   userTurnId: string;
   sessionId: string;
   threadId: string;
   createdAt: number;
-  
+
   // Response storage (keys are provider IDs)
   batchResponses: Record<string, ProviderResponse>;
   synthesisResponses: Record<string, ProviderResponse[]>;
   mappingResponses: Record<string, ProviderResponse[]>;
-  
+
   // Metadata
   meta?: {
     isOptimistic?: boolean;
@@ -178,7 +177,7 @@ interface AiTurn {
 interface ProviderResponse {
   providerId: ProviderKey;
   text: string;
-  status: 'pending' | 'streaming' | 'completed' | 'error';
+  status: "pending" | "streaming" | "completed" | "error";
   createdAt: number;
   updatedAt?: number;
   meta?: {
@@ -197,7 +196,7 @@ interface SessionRecord {
   title: string;
   createdAt: number;
   updatedAt: number;
-  lastTurnId: string | null;  // Points to latest AI turn on main timeline
+  lastTurnId: string | null; // Points to latest AI turn on main timeline
   turnCount: number;
 }
 
@@ -206,20 +205,20 @@ type TurnRecord = UserTurnRecord | AiTurnRecord;
 
 interface AiTurnRecord {
   id: string;
-  type: 'ai';
-  role: 'assistant';
+  type: "ai";
+  role: "assistant";
   sessionId: string;
   userTurnId: string;
   threadId: string;
   sequence: number;
   createdAt: number;
   updatedAt: number;
-  
+
   // Counts only; actual responses live in provider_responses
   batchResponseCount: number;
   synthesisResponseCount: number;
   mappingResponseCount: number;
-  
+
   // Snapshot of contexts at this point in time (for recompute)
   providerContexts?: Record<string, any>;
 }
@@ -230,7 +229,7 @@ interface ProviderResponseRecord {
   sessionId: string;
   aiTurnId: string;
   providerId: string;
-  responseType: 'batch' | 'synthesis' | 'mapping';
+  responseType: "batch" | "synthesis" | "mapping";
   responseIndex: number;
   text: string;
   status: string;
@@ -261,18 +260,18 @@ interface ProviderContextRecord {
 ```javascript
 async _handleExecuteWorkflow(message) {
   const request = message.payload;
-  
+
   // PHASE 1: Validate primitive type
   if (!['initialize', 'extend', 'recompute'].includes(request.type)) {
     throw new Error('Invalid request type');
   }
-  
+
   // PHASE 2: Resolve context
   const resolvedContext = await this.services.contextResolver.resolve(request);
-  
+
   // PHASE 3: Compile workflow
   const workflowRequest = this.services.compiler.compile(request, resolvedContext);
-  
+
   // PHASE 4: Emit TURN_CREATED (for non-recompute)
   if (request.type !== 'recompute') {
     this.port.postMessage({
@@ -282,7 +281,7 @@ async _handleExecuteWorkflow(message) {
       aiTurnId: workflowRequest.context.canonicalAiTurnId
     });
   }
-  
+
   // PHASE 5: Execute
   await this.workflowEngine.execute(workflowRequest, resolvedContext);
 }
@@ -299,11 +298,11 @@ async resolve(request) {
   switch (request.type) {
     case 'initialize':
       return { type: 'initialize', providers: request.providers };
-      
+
     case 'extend':
       // Fast path: indexed lookup on provider_contexts for the given session
       const contexts = await this.sessionManager.adapter.getContextsBySessionId(request.sessionId);
-      
+
       return {
         type: 'extend',
         sessionId: request.sessionId,
@@ -315,7 +314,7 @@ async resolve(request) {
           return acc;
         }, {})
       };
-      
+
     case 'recompute':
       // Heavy path: fetch historical turn + all responses
       const aiTurn = await this.sessionManager.adapter.get('turns', request.sourceTurnId);
@@ -325,11 +324,11 @@ async resolve(request) {
         'byAiTurnId',
         request.sourceTurnId
       );
-      
+
       // Build frozen outputs
       const frozenBatchOutputs = {};
       let latestMappingOutput = null;
-      
+
       responses.forEach(r => {
         if (r.responseType === 'batch') {
           frozenBatchOutputs[r.providerId] = {
@@ -346,7 +345,7 @@ async resolve(request) {
           };
         }
       });
-      
+
       return {
         type: 'recompute',
         sessionId: request.sessionId,
@@ -371,7 +370,7 @@ async resolve(request) {
 ```javascript
 compile(request, resolvedContext) {
   const steps = [];
-  
+
   if (request.type === 'recompute') {
     // Single step: synthesis or mapping
     if (request.stepType === 'synthesis') {
@@ -393,7 +392,7 @@ compile(request, resolvedContext) {
     // ... similar for mapping
   } else {
     // Normal flow: batch → mapping → synthesis
-    
+
     // Step 1: Prompt step
     steps.push({
       stepId: `batch-${Date.now()}`,
@@ -405,7 +404,7 @@ compile(request, resolvedContext) {
         useThinking: request.useThinking
       }
     });
-    
+
     // Step 2: Mapping (if requested)
     if (request.includeMapping && request.mapper) {
       steps.push({
@@ -419,13 +418,13 @@ compile(request, resolvedContext) {
         }
       });
     }
-    
+
     // Step 3: Synthesis (if requested)
     if (request.includeSynthesis && request.synthesizer) {
       const mappingStepIds = steps
         .filter(s => s.type === 'mapping')
         .map(s => s.stepId);
-        
+
       steps.push({
         stepId: `synthesis-${request.synthesizer}-${Date.now()}`,
         type: 'synthesis',
@@ -439,7 +438,7 @@ compile(request, resolvedContext) {
       });
     }
   }
-  
+
   return {
     workflowId: `wf-${Date.now()}`,
     context: {
@@ -463,14 +462,14 @@ compile(request, resolvedContext) {
 async execute(workflowRequest, resolvedContext) {
   const { context, steps } = workflowRequest;
   const stepResults = new Map();
-  
+
   // Execute batch steps first
   for (const step of steps.filter(s => s.type === 'prompt')) {
     // NEW: Signal step start to UI (planned)
     // this.port.postMessage({ type: 'WORKFLOW_STEP_STARTED', stepType: 'batch', stepId: step.stepId, sessionId: context.sessionId });
     const result = await this.executePromptStep(step, context);
     stepResults.set(step.stepId, { status: 'completed', result });
-    
+
     this.port.postMessage({
       type: 'WORKFLOW_STEP_UPDATE',
       sessionId: context.sessionId,
@@ -479,12 +478,12 @@ async execute(workflowRequest, resolvedContext) {
       result
     });
   }
-  
+
   // Execute mapping steps
   for (const step of steps.filter(s => s.type === 'mapping')) {
     const result = await this.executeMappingStep(step, context, stepResults);
     stepResults.set(step.stepId, { status: 'completed', result });
-    
+
     this.port.postMessage({
       type: 'WORKFLOW_STEP_UPDATE',
       sessionId: context.sessionId,
@@ -493,12 +492,12 @@ async execute(workflowRequest, resolvedContext) {
       result
     });
   }
-  
+
   // Execute synthesis steps
   for (const step of steps.filter(s => s.type === 'synthesis')) {
     const result = await this.executeSynthesisStep(step, context, stepResults);
     stepResults.set(step.stepId, { status: 'completed', result });
-    
+
     this.port.postMessage({
       type: 'WORKFLOW_STEP_UPDATE',
       sessionId: context.sessionId,
@@ -507,7 +506,7 @@ async execute(workflowRequest, resolvedContext) {
       result
     });
   }
-  
+
   // Persist to database
   await this.sessionManager.persist({
     type: resolvedContext.type,
@@ -516,7 +515,7 @@ async execute(workflowRequest, resolvedContext) {
     canonicalUserTurnId: context.canonicalUserTurnId,
     canonicalAiTurnId: context.canonicalAiTurnId
   }, resolvedContext, stepResults);
-  
+
   // Emit finalized turn
   this.port.postMessage({
     type: 'TURN_FINALIZED',
@@ -532,7 +531,7 @@ async execute(workflowRequest, resolvedContext) {
 
 async executePromptStep(step, context) {
   const { prompt, providers, providerContexts } = step.payload;
-  
+
   return new Promise((resolve) => {
     this.orchestrator.executeParallelFanout(prompt, providers, {
       sessionId: context.sessionId,
@@ -571,30 +570,42 @@ export const turnIdsAtom = atomWithImmer<string[]>([]);
 export const messagesAtom = atom<TurnMessage[]>((get) => {
   const ids = get(turnIdsAtom);
   const map = get(turnsMapAtom);
-  return ids.map(id => map.get(id)).filter((t): t is TurnMessage => !!t);
+  return ids.map((id) => map.get(id)).filter((t): t is TurnMessage => !!t);
 });
 
 // WORKFLOW STATE
-export const currentSessionIdAtom = atomWithStorage<string | null>('htos_last_session_id', null);
+export const currentSessionIdAtom = atomWithStorage<string | null>(
+  "htos_last_session_id",
+  null,
+);
 export const isLoadingAtom = atom<boolean>(false);
-export const uiPhaseAtom = atom<UiPhase>('idle');
+export const uiPhaseAtom = atom<UiPhase>("idle");
 export const activeAiTurnIdAtom = atom<string | null>(null);
 
 // RECOMPUTE TARGETING
 export const activeRecomputeStateAtom = atom<{
   aiTurnId: string;
-  stepType: 'synthesis' | 'mapping';
+  stepType: "synthesis" | "mapping";
   providerId: string;
 } | null>(null);
 
 // MODEL CONFIGURATION (persisted)
 export const selectedModelsAtom = atomWithStorage<Record<string, boolean>>(
-  'htos_selected_models',
-  {}
+  "htos_selected_models",
+  {},
 );
-export const mappingEnabledAtom = atomWithStorage<boolean>('htos_mapping_enabled', true);
-export const mappingProviderAtom = atomWithStorage<string | null>('htos_mapping_provider', null);
-export const synthesisProviderAtom = atomWithStorage<string | null>('htos_synthesis_provider', null);
+export const mappingEnabledAtom = atomWithStorage<boolean>(
+  "htos_mapping_enabled",
+  true,
+);
+export const mappingProviderAtom = atomWithStorage<string | null>(
+  "htos_mapping_provider",
+  null,
+);
+export const synthesisProviderAtom = atomWithStorage<string | null>(
+  "htos_synthesis_provider",
+  null,
+);
 ```
 
 ### 4.2 Message Handler: Backend → State Bridge
@@ -610,178 +621,191 @@ export function usePortMessageHandler() {
   const setCurrentSessionId = useSetAtom(currentSessionIdAtom);
   const setIsLoading = useSetAtom(isLoadingAtom);
   const setActiveAiTurnId = useSetAtom(activeAiTurnIdAtom);
-  
-  const handler = useCallback((message: any) => {
-    switch (message.type) {
-      case 'TURN_CREATED': {
-        const { userTurnId, aiTurnId, sessionId } = message;
-        
-        // Initialize session for new conversations
-        if (!currentSessionId) {
-          setCurrentSessionId(sessionId);
-        }
-        
-        // Get optimistic user turn (already created by useChat)
-        // NOTE: No ID swap occurs here. Backend provides canonical aiTurnId; UI creates
-        // an optimistic AI turn with that canonical ID and later merges data on TURN_FINALIZED.
-        const userTurn = turnsMap.get(userTurnId);
-        
-        // Create optimistic AI turn
-        const aiTurn = createOptimisticAiTurn(
-          aiTurnId,
-          userTurn,
-          activeProviders,
-          !!synthesisProvider,
-          !!mappingEnabled && !!mappingProvider,
-          synthesisProvider,
-          mappingProvider,
-          Date.now(),
-          userTurnId,
-          { // ← NEW: Store request intent
-            synthesis: !!synthesisProvider,
-            mapping: !!mappingEnabled && !!mappingProvider
+
+  const handler = useCallback(
+    (message: any) => {
+      switch (message.type) {
+        case "TURN_CREATED": {
+          const { userTurnId, aiTurnId, sessionId } = message;
+
+          // Initialize session for new conversations
+          if (!currentSessionId) {
+            setCurrentSessionId(sessionId);
           }
-        );
-        
-        setTurnsMap((draft) => {
-          draft.set(aiTurnId, aiTurn);
-        });
-        setTurnIds((draft) => {
-          draft.push(aiTurnId);
-        });
-        setActiveAiTurnId(aiTurnId);
-        break;
-      }
-      
-      case 'PARTIAL_RESULT': {
-        const { stepId, providerId, chunk } = message;
-        
-        // Determine step type from stepId pattern
-        const stepType = getStepType(stepId); // 'batch' | 'synthesis' | 'mapping'
-        
-        // Buffer streaming updates for 16ms batching
-        streamingBuffer.addDelta(providerId, chunk.text, 'streaming', stepType);
-        break;
-      }
-      
-      case 'WORKFLOW_STEP_UPDATE': {
-        const { stepId, status, result, error } = message;
-        
-        if (status === 'completed') {
-          streamingBuffer.flushImmediate();
-          
-          const stepType = getStepType(stepId);
-          const resultsMap = result.results || { [result.providerId]: result };
-          
-          Object.entries(resultsMap).forEach(([providerId, data]) => {
+
+          // Get optimistic user turn (already created by useChat)
+          // NOTE: No ID swap occurs here. Backend provides canonical aiTurnId; UI creates
+          // an optimistic AI turn with that canonical ID and later merges data on TURN_FINALIZED.
+          const userTurn = turnsMap.get(userTurnId);
+
+          // Create optimistic AI turn
+          const aiTurn = createOptimisticAiTurn(
+            aiTurnId,
+            userTurn,
+            activeProviders,
+            !!synthesisProvider,
+            !!mappingEnabled && !!mappingProvider,
+            synthesisProvider,
+            mappingProvider,
+            Date.now(),
+            userTurnId,
+            {
+              // ← NEW: Store request intent
+              synthesis: !!synthesisProvider,
+              mapping: !!mappingEnabled && !!mappingProvider,
+            },
+          );
+
+          setTurnsMap((draft) => {
+            draft.set(aiTurnId, aiTurn);
+          });
+          setTurnIds((draft) => {
+            draft.push(aiTurnId);
+          });
+          setActiveAiTurnId(aiTurnId);
+          break;
+        }
+
+        case "PARTIAL_RESULT": {
+          const { stepId, providerId, chunk } = message;
+
+          // Determine step type from stepId pattern
+          const stepType = getStepType(stepId); // 'batch' | 'synthesis' | 'mapping'
+
+          // Buffer streaming updates for 16ms batching
+          streamingBuffer.addDelta(
+            providerId,
+            chunk.text,
+            "streaming",
+            stepType,
+          );
+          break;
+        }
+
+        case "WORKFLOW_STEP_UPDATE": {
+          const { stepId, status, result, error } = message;
+
+          if (status === "completed") {
+            streamingBuffer.flushImmediate();
+
+            const stepType = getStepType(stepId);
+            const resultsMap = result.results || {
+              [result.providerId]: result,
+            };
+
+            Object.entries(resultsMap).forEach(([providerId, data]) => {
+              setTurnsMap((draft) => {
+                const turn = draft.get(activeAiTurnId) as AiTurn;
+
+                const completedEntry = {
+                  providerId,
+                  text: data.text || "",
+                  status: "completed" as const,
+                  createdAt: Date.now(),
+                  updatedAt: Date.now(),
+                  meta: data.meta || {},
+                };
+
+                if (stepType === "synthesis") {
+                  const arr = turn.synthesisResponses?.[providerId] || [];
+                  arr.push(completedEntry);
+                  turn.synthesisResponses = {
+                    ...turn.synthesisResponses,
+                    [providerId]: arr,
+                  };
+                } else if (stepType === "mapping") {
+                  const arr = turn.mappingResponses?.[providerId] || [];
+                  arr.push(completedEntry);
+                  turn.mappingResponses = {
+                    ...turn.mappingResponses,
+                    [providerId]: arr,
+                  };
+                } else if (stepType === "batch") {
+                  turn.batchResponses = {
+                    ...turn.batchResponses,
+                    [providerId]: completedEntry,
+                  };
+                }
+              });
+            });
+          } else if (status === "failed") {
+            // ✅ NEW: Handle errors
+            const stepType = getStepType(stepId);
+            const providerId = extractProviderFromStepId(stepId, stepType);
+
             setTurnsMap((draft) => {
               const turn = draft.get(activeAiTurnId) as AiTurn;
-              
-              const completedEntry = {
+
+              const errorResponse = {
                 providerId,
-                text: data.text || '',
-                status: 'completed' as const,
+                text: "",
+                status: "error" as const,
                 createdAt: Date.now(),
                 updatedAt: Date.now(),
-                meta: data.meta || {}
+                meta: { error: error || "Unknown error" },
               };
-              
-              if (stepType === 'synthesis') {
-                const arr = turn.synthesisResponses?.[providerId] || [];
-                arr.push(completedEntry);
+
+              if (stepType === "synthesis") {
                 turn.synthesisResponses = {
                   ...turn.synthesisResponses,
-                  [providerId]: arr
+                  [providerId]: [errorResponse],
                 };
-              } else if (stepType === 'mapping') {
-                const arr = turn.mappingResponses?.[providerId] || [];
-                arr.push(completedEntry);
+              } else if (stepType === "mapping") {
                 turn.mappingResponses = {
                   ...turn.mappingResponses,
-                  [providerId]: arr
-                };
-              } else if (stepType === 'batch') {
-                turn.batchResponses = {
-                  ...turn.batchResponses,
-                  [providerId]: completedEntry
+                  [providerId]: [errorResponse],
                 };
               }
             });
-          });
-        } else if (status === 'failed') {
-          // ✅ NEW: Handle errors
-          const stepType = getStepType(stepId);
-          const providerId = extractProviderFromStepId(stepId, stepType);
-          
-          setTurnsMap((draft) => {
-            const turn = draft.get(activeAiTurnId) as AiTurn;
-            
-            const errorResponse = {
-              providerId,
-              text: '',
-              status: 'error' as const,
-              createdAt: Date.now(),
-              updatedAt: Date.now(),
-              meta: { error: error || 'Unknown error' }
-            };
-            
-            if (stepType === 'synthesis') {
-              turn.synthesisResponses = {
-                ...turn.synthesisResponses,
-                [providerId]: [errorResponse]
-              };
-            } else if (stepType === 'mapping') {
-              turn.mappingResponses = {
-                ...turn.mappingResponses,
-                [providerId]: [errorResponse]
-              };
-            }
-          });
-          
-          setIsLoading(false);
+
+            setIsLoading(false);
+          }
+          break;
         }
-        break;
-      }
-      
-      case 'TURN_FINALIZED': {
-        const { aiTurnId, turn } = message;
-        
-        streamingBuffer.flushImmediate();
-        
-        // Merge canonical data into optimistic turn
-        setTurnsMap((draft) => {
-          const existingAi = draft.get(aiTurnId) as AiTurn;
-          const canonicalAi = turn.ai as AiTurn;
-          
-          draft.set(aiTurnId, {
-            ...existingAi,
-            ...canonicalAi,
-            batchResponses: {
-              ...existingAi.batchResponses,
-              ...canonicalAi.batchResponses
-            },
-            synthesisResponses: {
-              ...existingAi.synthesisResponses,
-              ...canonicalAi.synthesisResponses
-            },
-            mappingResponses: {
-              ...existingAi.mappingResponses,
-              ...canonicalAi.mappingResponses
-            },
-            meta: {
-              ...existingAi.meta,
-              isOptimistic: false
-            }
+
+        case "TURN_FINALIZED": {
+          const { aiTurnId, turn } = message;
+
+          streamingBuffer.flushImmediate();
+
+          // Merge canonical data into optimistic turn
+          setTurnsMap((draft) => {
+            const existingAi = draft.get(aiTurnId) as AiTurn;
+            const canonicalAi = turn.ai as AiTurn;
+
+            draft.set(aiTurnId, {
+              ...existingAi,
+              ...canonicalAi,
+              batchResponses: {
+                ...existingAi.batchResponses,
+                ...canonicalAi.batchResponses,
+              },
+              synthesisResponses: {
+                ...existingAi.synthesisResponses,
+                ...canonicalAi.synthesisResponses,
+              },
+              mappingResponses: {
+                ...existingAi.mappingResponses,
+                ...canonicalAi.mappingResponses,
+              },
+              meta: {
+                ...existingAi.meta,
+                isOptimistic: false,
+              },
+            });
           });
-        });
-        
-        setIsLoading(false);
-        setActiveAiTurnId(null);
-        break;
+
+          setIsLoading(false);
+          setActiveAiTurnId(null);
+          break;
+        }
       }
-    }
-  }, [/* deps */]);
-  
+    },
+    [
+      /* deps */
+    ],
+  );
+
   // Register handler with API
   useEffect(() => {
     api.setPortMessageHandler(handler);
@@ -801,64 +825,69 @@ export function useChat() {
   const setTurnsMap = useSetAtom(turnsMapAtom);
   const setTurnIds = useSetAtom(turnIdsAtom);
   const setIsLoading = useSetAtom(isLoadingAtom);
-  
-  const sendMessage = useCallback(async (prompt: string, mode: 'new' | 'continuation') => {
-    const ts = Date.now();
-    const userTurnId = `user-${ts}-${Math.random().toString(36).slice(2,8)}`;
-    
-    const userTurn: UserTurn = {
-      type: 'user',
-      id: userTurnId,
-      text: prompt,
-      createdAt: ts,
-      sessionId: currentSessionId
-    };
-    
-    // Write optimistic user turn
-    setTurnsMap((draft) => {
-      draft.set(userTurn.id, userTurn);
-    });
-    setTurnIds((draft) => {
-      draft.push(userTurn.id);
-    });
-    
-    setIsLoading(true);
-    
-    // Determine active providers
-    const activeProviders = LLM_PROVIDERS_CONFIG
-      .filter(p => selectedModels[p.id])
-      .map(p => p.id as ProviderKey);
-    
-    // Build primitive request
-    const isInitialize = (mode === 'new' && !currentSessionId);
-    
-    const primitive: PrimitiveWorkflowRequest = isInitialize
-      ? {
-          type: 'initialize',
-          sessionId: null,
-          userMessage: prompt,
-          providers: activeProviders,
-          includeMapping: mappingEnabled && !!mappingProvider,
-          includeSynthesis: !!synthesisProvider,
-          synthesizer: synthesisProvider,
-          mapper: mappingProvider,
-          clientUserTurnId: userTurnId
-        }
-      : {
-          type: 'extend',
-          sessionId: currentSessionId!,
-          userMessage: prompt,
-          providers: activeProviders,
-          includeMapping: mappingEnabled && !!mappingProvider,
-          includeSynthesis: !!synthesisProvider,
-          synthesizer: synthesisProvider,
-          mapper: mappingProvider,
-          clientUserTurnId: userTurnId
-        };
-    
-    await api.executeWorkflow(primitive);
-  }, [/* deps */]);
-  
+
+  const sendMessage = useCallback(
+    async (prompt: string, mode: "new" | "continuation") => {
+      const ts = Date.now();
+      const userTurnId = `user-${ts}-${Math.random().toString(36).slice(2, 8)}`;
+
+      const userTurn: UserTurn = {
+        type: "user",
+        id: userTurnId,
+        text: prompt,
+        createdAt: ts,
+        sessionId: currentSessionId,
+      };
+
+      // Write optimistic user turn
+      setTurnsMap((draft) => {
+        draft.set(userTurn.id, userTurn);
+      });
+      setTurnIds((draft) => {
+        draft.push(userTurn.id);
+      });
+
+      setIsLoading(true);
+
+      // Determine active providers
+      const activeProviders = LLM_PROVIDERS_CONFIG.filter(
+        (p) => selectedModels[p.id],
+      ).map((p) => p.id as ProviderKey);
+
+      // Build primitive request
+      const isInitialize = mode === "new" && !currentSessionId;
+
+      const primitive: PrimitiveWorkflowRequest = isInitialize
+        ? {
+            type: "initialize",
+            sessionId: null,
+            userMessage: prompt,
+            providers: activeProviders,
+            includeMapping: mappingEnabled && !!mappingProvider,
+            includeSynthesis: !!synthesisProvider,
+            synthesizer: synthesisProvider,
+            mapper: mappingProvider,
+            clientUserTurnId: userTurnId,
+          }
+        : {
+            type: "extend",
+            sessionId: currentSessionId!,
+            userMessage: prompt,
+            providers: activeProviders,
+            includeMapping: mappingEnabled && !!mappingProvider,
+            includeSynthesis: !!synthesisProvider,
+            synthesizer: synthesisProvider,
+            mapper: mappingProvider,
+            clientUserTurnId: userTurnId,
+          };
+
+      await api.executeWorkflow(primitive);
+    },
+    [
+      /* deps */
+    ],
+  );
+
   return { sendMessage };
 }
 ```
@@ -874,29 +903,29 @@ export default function App() {
   const isInitialized = useInitialization();
   const [viewMode] = useAtom(viewModeAtom);
   const [isHistoryOpen] = useAtom(isHistoryPanelOpenAtom);
-  
+
   // Global side effects
   usePortMessageHandler();
   useConnectionMonitoring();
   useHistoryLoader(isInitialized);
-  
+
   if (!isInitialized) {
     return <div className="loading-spinner" />;
   }
-  
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
       <Header />
       <BannerConnected />
-      
+
       <div style={{ display: 'flex', flex: 1 }}>
         <main style={{ flex: 1 }}>
           <ChatView />
         </main>
-        
+
         {isHistoryOpen && <HistoryPanelConnected />}
       </div>
-      
+
       <SettingsPanel />
     </div>
   );
@@ -909,11 +938,11 @@ export default function App() {
 export default function ChatView() {
   const [turnIds] = useAtom(turnIdsAtom);
   const [showWelcome] = useAtom(showWelcomeAtom);
-  
+
   const itemContent = useMemo(() => (index: number, turnId: string) => {
     return <MessageRow turnId={turnId} />;
   }, []);
-  
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       {showWelcome ? (
@@ -926,7 +955,7 @@ export default function ChatView() {
           itemContent={itemContent}
         />
       )}
-      
+
       <ChatInputConnected />
       <CompactModelTrayConnected />
     </div>
@@ -951,7 +980,7 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
 }) => {
   const [isSynthesisExpanded, setIsSynthesisExpanded] = useState(true);
   const [isMappingExpanded, setIsMappingExpanded] = useState(true);
-  
+
   // Normalize responses to arrays
   const synthesisResponses = useMemo(() => {
     const out: Record<string, ProviderResponse[]> = {};
@@ -960,7 +989,7 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
     });
     return out;
   }, [aiTurn.synthesisResponses]);
-  
+
   const mappingResponses = useMemo(() => {
     const out: Record<string, ProviderResponse[]> = {};
     Object.entries(aiTurn.mappingResponses || {}).forEach(([pid, resp]) => {
@@ -968,14 +997,14 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
     });
     return out;
   }, [aiTurn.mappingResponses]);
-  
+
   // Determine active provider (from props or first available)
-  const activeSynthPid = activeSynthesisClipProviderId || 
+  const activeSynthPid = activeSynthesisClipProviderId ||
     Object.keys(synthesisResponses).find(pid => synthesisResponses[pid].length > 0);
-  
+
   const activeMappingPid = activeMappingClipProviderId ||
     Object.keys(mappingResponses).find(pid => mappingResponses[pid].length > 0);
-  
+
   // Check if this turn is target of recompute
   const isSynthesisTarget = !!(
     activeRecomputeState &&
@@ -983,29 +1012,29 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
     activeRecomputeState.stepType === 'synthesis' &&
     activeRecomputeState.providerId === activeSynthPid
   );
-  
+
   const isMappingTarget = !!(
     activeRecomputeState &&
     activeRecomputeState.aiTurnId === aiTurn.id &&
     activeRecomputeState.stepType === 'mapping' &&
     activeRecomputeState.providerId === activeMappingPid
   );
-  
+
   // Get latest response for active provider
   const displayedSynthesisTake = activeSynthPid
     ? getLatestResponse(synthesisResponses[activeSynthPid])
     : undefined;
-    
+
   const displayedMappingTake = activeMappingPid
     ? getLatestResponse(mappingResponses[activeMappingPid])
     : undefined;
-  
+
   // ✅ NEW: Check if features were actually requested
   const wasRequested = {
     synthesis: aiTurn.meta?.requestedFeatures?.synthesis ?? true,
     mapping: aiTurn.meta?.requestedFeatures?.mapping ?? true
   };
-  
+
   return (
     <div className="ai-turn-block">
       <div style={{ display: 'flex', gap: 12 }}>
@@ -1017,7 +1046,7 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
               {isSynthesisExpanded ? '▲' : '▼'}
             </button>
           </div>
-          
+
           {isSynthesisExpanded && (
             <>
               <ClipsCarousel
@@ -1027,7 +1056,7 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
                 onClipClick={(pid) => onClipClick?.('synthesis', pid)}
                 type="synthesis"
               />
-              
+
               <div style={{ marginTop: 12, background: '#0f172a', padding: 12, borderRadius: 8 }}>
                 {(() => {
                   // ✅ CRITICAL FIX: Check request intent first
@@ -1038,13 +1067,13 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
                       </div>
                     );
                   }
-                  
+
                   // Check if generating
-                  const isGenerating = 
+                  const isGenerating =
                     (displayedSynthesisTake?.status === 'streaming' ||
                      displayedSynthesisTake?.status === 'pending') ||
                     isSynthesisTarget;
-                  
+
                   if (isGenerating) {
                     return (
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#94a3b8' }}>
@@ -1053,7 +1082,7 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
                       </div>
                     );
                   }
-                  
+
                   // ✅ NEW: Check for error state
                   if (displayedSynthesisTake?.status === 'error') {
                     return (
@@ -1073,7 +1102,7 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
                       </div>
                     );
                   }
-                  
+
                   // Render completed content
                   if (activeSynthPid && displayedSynthesisTake) {
                     const { synthesis } = parseSynthesisResponse(displayedSynthesisTake.text);
@@ -1106,7 +1135,7 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
                       </div>
                     );
                   }
-                  
+
                   // No provider selected
                   return (
                     <div style={{ color: '#64748b', fontStyle: 'italic', textAlign: 'center' }}>
@@ -1118,7 +1147,7 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
             </>
           )}
         </div>
-        
+
         {/* MAPPING SECTION */}
         <div style={{ flex: 1, border: '1px solid #475569', borderRadius: 8, padding: 12 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
@@ -1127,7 +1156,7 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
               {isMappingExpanded ? '▲' : '▼'}
             </button>
           </div>
-          
+
           {isMappingExpanded && (
             <>
               <ClipsCarousel
@@ -1137,7 +1166,7 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
                 onClipClick={(pid) => onClipClick?.('mapping', pid)}
                 type="mapping"
               />
-              
+
               <div style={{ marginTop: 12, background: '#0f172a', padding: 12, borderRadius: 8 }}>
                 {(() => {
                   // ✅ CRITICAL FIX: Check request intent first
@@ -1148,12 +1177,12 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
                       </div>
                     );
                   }
-                  
+
                   const isGenerating =
                     (displayedMappingTake?.status === 'streaming' ||
                      displayedMappingTake?.status === 'pending') ||
                     isMappingTarget;
-                  
+
                   if (isGenerating) {
                     return (
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#94a3b8' }}>
@@ -1162,7 +1191,7 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
                       </div>
                     );
                   }
-                  
+
                   // ✅ NEW: Check for error state
                   if (displayedMappingTake?.status === 'error') {
                     return (
@@ -1182,7 +1211,7 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
                       </div>
                     );
                   }
-                  
+
                   if (activeMappingPid && displayedMappingTake) {
                     return (
                       <div>
@@ -1213,7 +1242,7 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
                       </div>
                     );
                   }
-                  
+
                   return (
                     <div style={{ color: '#64748b', fontStyle: 'italic', textAlign: 'center' }}>
                       Choose a model to map
@@ -1225,7 +1254,7 @@ const AiTurnBlock: React.FC<AiTurnBlockProps> = ({
           )}
         </div>
       </div>
-      
+
       {/* SOURCE OUTPUTS TOGGLE */}
       {Object.keys(aiTurn.batchResponses || {}).length > 0 && (
         <div style={{ marginTop: 12, textAlign: 'center' }}>
@@ -1264,28 +1293,28 @@ sequenceDiagram
     participant Engine as WorkflowEngine
     participant Orch as Orchestrator
     participant SM as SessionManager
-    
+
     User->>UI: Types "Hello" + clicks Send
     UI->>UI: Create optimistic UserTurn
     UI->>UI: Add to turnsMap + turnIds
     UI->>CH: ExtendRequest{type:'initialize', userMessage:'Hello'}
-    
+
     CH->>CR: resolve(request)
     CR->>CR: type='initialize' → return empty context
     CR-->>CH: ResolvedContext{type:'initialize'}
-    
+
     CH->>Compiler: compile(request, context)
     Compiler->>Compiler: Generate [promptStep]
     Compiler-->>CH: WorkflowRequest{steps:[...]}
-    
+
     CH->>UI: TURN_CREATED{userTurnId, aiTurnId, sessionId}
     UI->>UI: Create optimistic AiTurn with meta.requestedFeatures
     UI->>UI: Add aiTurn to turnsMap + turnIds
-    
+
     CH->>Engine: execute(workflowRequest)
-    
+
     Engine->>Orch: executeParallelFanout('Hello', [claude,gemini])
-    
+
     loop For each provider
         Orch->>Provider: POST /chat {message:'Hello'}
         Provider-->>Orch: Stream chunk
@@ -1294,11 +1323,11 @@ sequenceDiagram
         UI->>UI: streamingBuffer.addDelta()
         UI->>UI: Batch update turnsMap (16ms)
     end
-    
+
     Orch-->>Engine: onAllComplete(results)
     Engine->>UI: WORKFLOW_STEP_UPDATE{stepId:'batch-123', status:'completed'}
     UI->>UI: Mark batchResponses as completed
-    
+
     Engine->>SM: persist(request, context, results)
     SM->>DB: Write SessionRecord
     SM->>DB: Write UserTurnRecord
@@ -1306,7 +1335,7 @@ sequenceDiagram
     SM->>DB: Write ProviderResponseRecords
     SM->>DB: Write ProviderContextRecords (live index)
     SM-->>Engine: Persist complete
-    
+
     Engine->>UI: TURN_FINALIZED{turn:{user, ai}}
     UI->>UI: Merge canonical data into turnsMap
     UI->>UI: Set meta.isOptimistic = false
@@ -1327,11 +1356,11 @@ sequenceDiagram
     participant Engine as WorkflowEngine
     participant Orch as Orchestrator
     participant SM as SessionManager
-    
+
     User->>UI: Clicks "gemini" clip on historical turn
     UI->>UI: setActiveRecomputeState({aiTurnId, stepType:'synthesis', providerId:'gemini'})
     UI->>CH: RecomputeRequest{sourceTurnId, stepType:'synthesis', targetProvider:'gemini'}
-    
+
     CH->>CR: resolve(request)
     CR->>DB: get('turns', sourceTurnId) → AiTurnRecord
     CR->>DB: get('turns', aiTurn.userTurnId) → UserTurnRecord
@@ -1340,32 +1369,32 @@ sequenceDiagram
     CR->>CR: Find latestMappingOutput from responses
     CR->>CR: Extract providerContextsAtSourceTurn from AiTurnRecord
     CR-->>CH: ResolvedContext{type:'recompute', frozenBatchOutputs, ...}
-    
+
     CH->>Compiler: compile(request, context)
     Compiler->>Compiler: Generate single synthesisStep with sourceHistorical
     Compiler-->>CH: WorkflowRequest{steps:[synthesisStep]}
-    
+
     CH->>Engine: execute(workflowRequest)
-    
+
     Engine->>Engine: resolveSourceData() → use frozenBatchOutputs
     Engine->>Orch: executeParallelFanout(synthPrompt, ['gemini'])
-    
+
     Orch->>Provider: POST /chat {message:synthPrompt}
     Provider-->>Orch: Stream chunk
     Orch->>Engine: onPartial('gemini', chunk)
     Engine->>UI: PARTIAL_RESULT{providerId:'gemini', chunk.text}
     UI->>UI: streamingBuffer.addDelta() on active turn
-    
+
     Orch-->>Engine: onAllComplete(results)
     Engine->>UI: WORKFLOW_STEP_UPDATE{stepId:'synthesis-gemini-456', status:'completed'}
     UI->>UI: Add new synthesis response to synthesisResponses['gemini']
-    
+
     Engine->>SM: persist(request, context, results)
     SM->>DB: Write NEW AiTurnRecord (linked to original userTurnId)
     SM->>DB: Write NEW ProviderResponseRecord
     SM->>DB: DO NOT update sessions.lastTurnId (historical branch)
     SM-->>Engine: Persist complete
-    
+
     Engine->>UI: TURN_FINALIZED (no-op for recompute)
     UI->>UI: setActiveRecomputeState(null)
     UI->>UI: setIsLoading(false)
@@ -1379,20 +1408,20 @@ sequenceDiagram
     participant Orch as Orchestrator
     participant Provider
     participant UI
-    
+
     Engine->>Orch: executeParallelFanout('prompt', [claude,gemini])
-    
+
     Orch->>Provider: POST /chat (claude)
     Provider-->>Orch: Stream chunks ✓
-    
+
     Orch->>Provider: POST /chat (gemini)
     Provider-->>Orch: 503 Overloaded ✗
-    
+
     Orch->>Orch: Catch error for gemini
     Orch->>Orch: Create error result {providerId:'gemini', status:'error'}
-    
+
     Orch-->>Engine: onAllComplete(results={claude:✓, gemini:✗})
-    
+
     alt At least one success
         Engine->>UI: WORKFLOW_STEP_UPDATE{status:'completed', stepId:'batch-... ', result:{results:{claude:✓, gemini:✗}}}
         UI->>UI: Render claude success, render gemini error card
@@ -1446,18 +1475,18 @@ const STREAMING_DEBUG = true; // See backend streaming deltas
 window.__JOTAI_STORE__ = jotaiStore;
 const turnsMap = jotaiStore.get(turnsMapAtom);
 const turnIds = jotaiStore.get(turnIdsAtom);
-console.log('Turns:', Array.from(turnsMap.entries()));
+console.log("Turns:", Array.from(turnsMap.entries()));
 
 // Inspect backend state
-chrome.runtime.sendMessage({ type: 'GET_HEALTH_STATUS' }, (response) => {
-  console.log('Backend health:', response);
+chrome.runtime.sendMessage({ type: "GET_HEALTH_STATUS" }, (response) => {
+  console.log("Backend health:", response);
 });
 
 // Check persistence layer
-const db = await window.indexedDB.open('HTOSPersistenceDB', 1);
-const tx = db.transaction(['turns'], 'readonly');
-const turns = await tx.objectStore('turns').getAll();
-console.log('Persisted turns:', turns);
+const db = await window.indexedDB.open("HTOSPersistenceDB", 1);
+const tx = db.transaction(["turns"], "readonly");
+const turns = await tx.objectStore("turns").getAll();
+console.log("Persisted turns:", turns);
 ```
 
 ### 7.3 Common Issues
@@ -1469,7 +1498,7 @@ console.log('Persisted turns:', turns);
 **Fix:** Normalize status checks:
 
 ```typescript
-const isGenerating = ['pending', 'streaming'].includes(latest?.status);
+const isGenerating = ["pending", "streaming"].includes(latest?.status);
 ```
 
 ---
@@ -1484,7 +1513,7 @@ const isGenerating = ['pending', 'streaming'].includes(latest?.status);
 const isSynthesisTarget = !!(
   activeRecomputeState &&
   activeRecomputeState.aiTurnId === aiTurn.id &&
-  activeRecomputeState.stepType === 'synthesis' &&
+  activeRecomputeState.stepType === "synthesis" &&
   (!activeSynthPid || activeRecomputeState.providerId === activeSynthPid)
 );
 ```
@@ -1499,7 +1528,7 @@ const isSynthesisTarget = !!(
 
 ```javascript
 const hasAnyValidResults = Object.values(formattedResults).some(
-  r => r.status === 'completed' && r.text && r.text.trim().length > 0
+  (r) => r.status === "completed" && r.text && r.text.trim().length > 0,
 );
 ```
 
@@ -1513,10 +1542,11 @@ const hasAnyValidResults = Object.values(formattedResults).some(
 
 ```javascript
 // Check live contexts
-const contexts = await db.transaction(['provider_contexts'])
-  .objectStore('provider_contexts')
+const contexts = await db
+  .transaction(["provider_contexts"])
+  .objectStore("provider_contexts")
   .getAll();
-console.log('Live contexts:', contexts);
+console.log("Live contexts:", contexts);
 
 // Force refresh
 await sessionManager.updateProviderContextsBatch(sessionId, results, true);
@@ -1533,27 +1563,27 @@ await sessionManager.updateProviderContextsBatch(sessionId, results, true);
 ```javascript
 export class NewProviderAdapter {
   async sendPrompt(request, onPartial, signal) {
-    const response = await fetch('https://api.newprovider.com/chat', {
-      method: 'POST',
+    const response = await fetch("https://api.newprovider.com/chat", {
+      method: "POST",
       signal,
-      body: JSON.stringify({ message: request.originalPrompt })
+      body: JSON.stringify({ message: request.originalPrompt }),
     });
-    
+
     const reader = response.body.getReader();
-    let fullText = '';
-    
+    let fullText = "";
+
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
-      
+
       const chunk = new TextDecoder().decode(value);
       fullText += chunk;
       onPartial({ text: chunk });
     }
-    
+
     return {
       text: fullText,
-      meta: { conversationId: response.headers.get('X-Conversation-Id') }
+      meta: { conversationId: response.headers.get("X-Conversation-Id") },
     };
   }
 }
@@ -1562,9 +1592,13 @@ export class NewProviderAdapter {
 2. **Register in service worker** (`sw-entry.js`):
 
 ```javascript
-import { NewProviderAdapter } from './providers/newprovider-adapter.js';
+import { NewProviderAdapter } from "./providers/newprovider-adapter.js";
 
-providerRegistry.register('newprovider', new NewProviderController(), new NewProviderAdapter());
+providerRegistry.register(
+  "newprovider",
+  new NewProviderController(),
+  new NewProviderAdapter(),
+);
 ```
 
 3. **Add UI config** (`ui/constants.ts`):
@@ -1573,11 +1607,11 @@ providerRegistry.register('newprovider', new NewProviderController(), new NewPro
 export const LLM_PROVIDERS_CONFIG: LLMProvider[] = [
   // ... existing providers
   {
-    id: 'newprovider',
-    name: 'New Provider',
-    color: '#ff6b6b',
-    emoji: '🆕'
-  }
+    id: "newprovider",
+    name: "New Provider",
+    color: "#ff6b6b",
+    emoji: "🆕",
+  },
 ];
 ```
 
@@ -1589,16 +1623,16 @@ Example: Add `regenerate` primitive to re-run the last turn with different setti
 
 ```typescript
 interface RegenerateRequest {
-  type: 'regenerate';
+  type: "regenerate";
   sessionId: string;
   providers: ProviderKey[];
   includeMapping: boolean;
   includeSynthesis: boolean;
 }
 
-export type PrimitiveWorkflowRequest = 
-  | InitializeRequest 
-  | ExtendRequest 
+export type PrimitiveWorkflowRequest =
+  | InitializeRequest
+  | ExtendRequest
   | RecomputeRequest
   | RegenerateRequest; // ← Add here
 ```
@@ -1611,7 +1645,7 @@ async resolve(request) {
     const session = await this.sessionManager.adapter.get('sessions', request.sessionId);
     const lastAiTurn = await this.sessionManager.adapter.get('turns', session.lastTurnId);
     const userTurn = await this.sessionManager.adapter.get('turns', lastAiTurn.userTurnId);
-    
+
     return {
       type: 'regenerate',
       sessionId: request.sessionId,
@@ -1648,13 +1682,13 @@ compile(request, resolvedContext) {
 ```typescript
 const regenerate = useCallback(async () => {
   const request: RegenerateRequest = {
-    type: 'regenerate',
+    type: "regenerate",
     sessionId: currentSessionId!,
     providers: activeProviders,
     includeMapping: mappingEnabled,
-    includeSynthesis: !!synthesisProvider
+    includeSynthesis: !!synthesisProvider,
   };
-  
+
   await api.executeWorkflow(request);
 }, [currentSessionId, activeProviders]);
 ```
@@ -1728,117 +1762,4 @@ This unified architecture overview provides a complete picture of the system. Fo
 - Frontend contributors: Focus on sections 2.2, 2.3, 4, 5, and 6
 - Full-stack contributors: Read sequentially
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 -
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

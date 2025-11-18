@@ -1,4 +1,4 @@
-import { checkDatabaseHealth, deleteDatabase, openDatabase } from './database';
+import { checkDatabaseHealth, deleteDatabase, openDatabase } from "./database";
 
 export interface SchemaHealth {
   isHealthy: boolean;
@@ -21,23 +21,32 @@ export async function verifySchemaAndRepair(autoRepair: boolean): Promise<{
     return { repaired: false, health };
   }
 
-  const hasMissingStores = (health.issues || []).some(issue => issue.includes('Missing object store'));
+  const hasMissingStores = (health.issues || []).some((issue) =>
+    issue.includes("Missing object store"),
+  );
   const versionMismatch = health.currentVersion !== health.expectedVersion;
   if (!autoRepair) {
-    const msg = `SchemaError: ${versionMismatch ? 'schema_version mismatch' : 'missing stores'}; issues=${health.issues?.join('; ')}`;
+    const msg = `SchemaError: ${versionMismatch ? "schema_version mismatch" : "missing stores"}; issues=${health.issues?.join("; ")}`;
     throw new Error(msg);
   }
 
-  console.warn('[SchemaVerification] Schema unhealthy, attempting auto-repair...', health);
+  console.warn(
+    "[SchemaVerification] Schema unhealthy, attempting auto-repair...",
+    health,
+  );
   try {
     // Best effort close if a DB is open elsewhere; deletion will proceed regardless
-    try { /* no-op: caller should close its own DB if needed */ } catch {}
+    try {
+      /* no-op: caller should close its own DB if needed */
+    } catch {}
     await deleteDatabase();
     const db = await openDatabase();
-    console.log('[SchemaVerification] Auto-repair completed: database recreated');
+    console.log(
+      "[SchemaVerification] Auto-repair completed: database recreated",
+    );
     return { repaired: true, db, health };
   } catch (error) {
-    console.error('[SchemaVerification] verifySchemaAndRepair failed:', error);
+    console.error("[SchemaVerification] verifySchemaAndRepair failed:", error);
     throw error instanceof Error ? error : new Error(String(error));
   }
 }

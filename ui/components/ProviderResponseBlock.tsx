@@ -1,19 +1,22 @@
 // ProviderResponseBlock.tsx - COMPLETE FIXED VERSION
-import React from 'react';
-import { LLMProvider, AppStep, ProviderResponse } from '../types';
-import { LLM_PROVIDERS_CONFIG, PRIMARY_STREAMING_PROVIDER_IDS } from '../constants';
-import { BotIcon } from './Icons';
-import { useState, useCallback, useMemo, useEffect } from 'react';
-import { ProviderPill } from './ProviderPill';
-import { useAtomValue } from 'jotai';
-import { providerContextsAtom } from '../state/atoms';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
-import CodeBlock from './CodeBlock';
+import React from "react";
+import { LLMProvider, AppStep, ProviderResponse } from "../types";
+import {
+  LLM_PROVIDERS_CONFIG,
+  PRIMARY_STREAMING_PROVIDER_IDS,
+} from "../constants";
+import { BotIcon } from "./Icons";
+import { useState, useCallback, useMemo, useEffect } from "react";
+import { ProviderPill } from "./ProviderPill";
+import { useAtomValue } from "jotai";
+import { providerContextsAtom } from "../state/atoms";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import CodeBlock from "./CodeBlock";
 
 interface ProviderState {
   text: string;
-  status: 'pending' | 'streaming' | 'completed' | 'error';
+  status: "pending" | "streaming" | "completed" | "error";
 }
 
 type ProviderStates = Record<string, ProviderState>;
@@ -31,87 +34,99 @@ interface ProviderResponseBlockProps {
 const CopyButton = ({ text, label }: { text: string; label: string }) => {
   const [copied, setCopied] = useState(false);
 
-  const handleCopy = useCallback(async (e: React.MouseEvent) => {
-    e.stopPropagation();
-    try {
-      await navigator.clipboard.writeText(text);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch (error) {
-      console.error('Failed to copy text:', error);
-    }
-  }, [text]);
+  const handleCopy = useCallback(
+    async (e: React.MouseEvent) => {
+      e.stopPropagation();
+      try {
+        await navigator.clipboard.writeText(text);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+      } catch (error) {
+        console.error("Failed to copy text:", error);
+      }
+    },
+    [text],
+  );
 
   return (
     <button
       onClick={handleCopy}
       aria-label={label}
       style={{
-        background: '#334155',
-        border: '1px solid #475569',
-        borderRadius: '6px',
-        padding: '4px 8px',
-        color: '#94a3b8',
-        fontSize: '12px',
-        cursor: 'pointer',
-        transition: 'all 0.2s ease',
+        background: "#334155",
+        border: "1px solid #475569",
+        borderRadius: "6px",
+        padding: "4px 8px",
+        color: "#94a3b8",
+        fontSize: "12px",
+        cursor: "pointer",
+        transition: "all 0.2s ease",
       }}
     >
-      {copied ? '✓' : '📋'} {copied ? 'Copied' : 'Copy'}
+      {copied ? "✓" : "📋"} {copied ? "Copied" : "Copy"}
     </button>
   );
 };
 
-const ProviderResponseBlock = ({ 
+const ProviderResponseBlock = ({
   providerResponses,
-  providerStates, 
-  isLoading, 
+  providerStates,
+  isLoading,
   isReducedMotion = false,
   aiTurnId,
-  sessionId
+  sessionId,
 }: ProviderResponseBlockProps) => {
   const providerContexts = useAtomValue(providerContextsAtom);
 
-  
   // Normalize responses
-  const effectiveProviderResponses = providerResponses 
+  const effectiveProviderResponses = providerResponses
     ? { ...providerResponses }
     : Object.fromEntries(
-      Object.entries(providerStates || {}).map(([id, s]) => [
-        id,
-        { text: s.text, status: s.status, meta: undefined },
-      ])
-    );
+        Object.entries(providerStates || {}).map(([id, s]) => [
+          id,
+          { text: s.text, status: s.status, meta: undefined },
+        ]),
+      );
 
-  const effectiveProviderStates = Object.entries(effectiveProviderResponses).reduce((acc, [providerId, response]) => {
+  const effectiveProviderStates = Object.entries(
+    effectiveProviderResponses,
+  ).reduce((acc, [providerId, response]) => {
     acc[providerId] = {
-      text: (response as any).text || '',
+      text: (response as any).text || "",
       status: (response as any).status,
     };
     return acc;
   }, {} as ProviderStates);
 
-
-  
   // Get all provider IDs in order (excluding 'system')
-  const allProviderIds = useMemo(() => 
-    LLM_PROVIDERS_CONFIG
-      .map(p => p.id)
-      .filter(id => Object.keys(effectiveProviderStates).includes(id) && id !== 'system'),
-    [effectiveProviderStates]
+  const allProviderIds = useMemo(
+    () =>
+      LLM_PROVIDERS_CONFIG.map((p) => p.id).filter(
+        (id) =>
+          Object.keys(effectiveProviderStates).includes(id) && id !== "system",
+      ),
+    [effectiveProviderStates],
   );
 
   // Visible slots state (shows 3 providers at a time), favor streaming providers (ChatGPT, Claude, Qwen)
   const [visibleSlots, setVisibleSlots] = useState<string[]>(() => {
     if (allProviderIds.length >= 4) {
-      const primaryStreaming = PRIMARY_STREAMING_PROVIDER_IDS.filter(id => allProviderIds.includes(id));
+      const primaryStreaming = PRIMARY_STREAMING_PROVIDER_IDS.filter((id) =>
+        allProviderIds.includes(id),
+      );
       let slots = primaryStreaming.slice(0, 3);
       if (slots.length < 3) {
-        const remaining = allProviderIds.filter(id => !slots.includes(id));
+        const remaining = allProviderIds.filter((id) => !slots.includes(id));
         // Prefer non-Gemini for remaining visible slots; Gemini/Gemini Pro will be pushed to carousel
-        const nonGemini = remaining.filter(id => id !== 'gemini' && id !== 'gemini-pro');
-        const gemini = remaining.filter(id => id === 'gemini' || id === 'gemini-pro');
-        slots = slots.concat([...nonGemini, ...gemini].slice(0, 3 - slots.length));
+        const nonGemini = remaining.filter(
+          (id) => id !== "gemini" && id !== "gemini-pro",
+        );
+        const gemini = remaining.filter(
+          (id) => id === "gemini" || id === "gemini-pro",
+        );
+        slots = slots.concat(
+          [...nonGemini, ...gemini].slice(0, 3 - slots.length),
+        );
       }
       return slots;
     }
@@ -120,10 +135,14 @@ const ProviderResponseBlock = ({
 
   // Calculate hidden providers (left and right)
   const hiddenProviders = useMemo(() => {
-    const hidden = allProviderIds.filter(id => !visibleSlots.includes(id));
+    const hidden = allProviderIds.filter((id) => !visibleSlots.includes(id));
     // Order hidden so Gemini/Gemini Pro appear first in the carousel
-    const geminiHidden = hidden.filter(id => id === 'gemini' || id === 'gemini-pro');
-    const othersHidden = hidden.filter(id => id !== 'gemini' && id !== 'gemini-pro');
+    const geminiHidden = hidden.filter(
+      (id) => id === "gemini" || id === "gemini-pro",
+    );
+    const othersHidden = hidden.filter(
+      (id) => id !== "gemini" && id !== "gemini-pro",
+    );
     const orderedHidden = [...geminiHidden, ...othersHidden];
     return {
       left: orderedHidden[0] || null,
@@ -132,14 +151,12 @@ const ProviderResponseBlock = ({
   }, [allProviderIds, visibleSlots]);
 
   const getProviderConfig = (providerId: string): LLMProvider | undefined => {
-    return LLM_PROVIDERS_CONFIG.find(p => p.id === providerId);
+    return LLM_PROVIDERS_CONFIG.find((p) => p.id === providerId);
   };
-
-
 
   // Swap a hidden provider into the first visible slot
   const swapProviderIn = useCallback((hiddenProviderId: string) => {
-    setVisibleSlots(prev => {
+    setVisibleSlots((prev) => {
       const newSlots = [...prev];
       // Replace the first slot with the clicked provider
       newSlots[0] = hiddenProviderId;
@@ -148,7 +165,9 @@ const ProviderResponseBlock = ({
   }, []);
 
   // Highlight target provider on citation click and scroll into view
-  const [highlightedProviderId, setHighlightedProviderId] = useState<string | null>(null);
+  const [highlightedProviderId, setHighlightedProviderId] = useState<
+    string | null
+  >(null);
   useEffect(() => {
     const handler = (evt: Event) => {
       try {
@@ -159,7 +178,7 @@ const ProviderResponseBlock = ({
         if (aiTurnId && targetTurnId && targetTurnId !== aiTurnId) return;
 
         // Ensure target provider is brought into view
-        setVisibleSlots(prev => {
+        setVisibleSlots((prev) => {
           if (prev.includes(targetProviderId)) return prev;
           const next = [...prev];
           next[0] = targetProviderId;
@@ -169,42 +188,57 @@ const ProviderResponseBlock = ({
         setHighlightedProviderId(targetProviderId);
         setTimeout(() => {
           // Use a per-turn unique ID to avoid collisions across turns
-          const el = document.getElementById(`provider-card-${targetTurnId || aiTurnId || 'unknown'}-${targetProviderId}`);
-          if (el && typeof el.scrollIntoView === 'function') {
-            el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          const el = document.getElementById(
+            `provider-card-${targetTurnId || aiTurnId || "unknown"}-${targetProviderId}`,
+          );
+          if (el && typeof el.scrollIntoView === "function") {
+            el.scrollIntoView({ behavior: "smooth", block: "center" });
           }
         }, 60);
         // Clear highlight after pulse
         setTimeout(() => setHighlightedProviderId(null), 1600);
       } catch (e) {
-        console.warn('scroll-to-provider handler failed', e);
+        console.warn("scroll-to-provider handler failed", e);
       }
     };
-    document.addEventListener('htos:scrollToProvider', handler as EventListener);
-    return () => document.removeEventListener('htos:scrollToProvider', handler as EventListener);
+    document.addEventListener(
+      "htos:scrollToProvider",
+      handler as EventListener,
+    );
+    return () =>
+      document.removeEventListener(
+        "htos:scrollToProvider",
+        handler as EventListener,
+      );
   }, [aiTurnId]);
-
-
-
-
 
   const getStatusColor = (status: string) => {
     switch (status) {
-      case 'pending': return '#f59e0b';
-      case 'streaming': return '#f59e0b';
-      case 'completed': return '#10b981';
-      case 'error': return '#ef4444';
-      default: return '#6b7280';
+      case "pending":
+        return "#f59e0b";
+      case "streaming":
+        return "#f59e0b";
+      case "completed":
+        return "#10b981";
+      case "error":
+        return "#ef4444";
+      default:
+        return "#6b7280";
     }
   };
 
   const getStatusText = (status: string) => {
     switch (status) {
-      case 'pending': return 'Waiting...';
-      case 'streaming': return 'Generating...';
-      case 'completed': return 'Complete';
-      case 'error': return 'Error';
-      default: return 'Unknown';
+      case "pending":
+        return "Waiting...";
+      case "streaming":
+        return "Generating...";
+      case "completed":
+        return "Complete";
+      case "error":
+        return "Error";
+      default:
+        return "Unknown";
     }
   };
 
@@ -216,66 +250,81 @@ const ProviderResponseBlock = ({
     const state = effectiveProviderStates[providerId];
     const provider = getProviderConfig(providerId);
     const context = providerContexts[providerId];
-    const isStreaming = state?.status === 'streaming';
-    const isError = state?.status === 'error';
+    const isStreaming = state?.status === "streaming";
+    const isError = state?.status === "error";
     const isHighlighted = highlightedProviderId === providerId;
 
-    const displayText = isError 
-      ? (context?.errorMessage || state?.text || 'Provider error') 
-      : (state?.text || getStatusText(state?.status));
+    const displayText = isError
+      ? context?.errorMessage || state?.text || "Provider error"
+      : state?.text || getStatusText(state?.status);
 
-  return (
-    <div
+    return (
+      <div
         key={providerId}
-        id={`provider-card-${aiTurnId || 'unknown'}-${providerId}`}
+        id={`provider-card-${aiTurnId || "unknown"}-${providerId}`}
         style={{
-          flex: '1 1 320px',
-          minWidth: '260px',
-          maxWidth: '380px',
-          width: '100%',
-          height: '300px',
-          display: isVisible ? 'flex' : 'none',
-          flexDirection: 'column',
-          background: '#1e293b',
-          border: isHighlighted ? '1px solid #3b82f6' : '1px solid #334155',
-          borderRadius: '12px',
-          padding: '12px',
+          flex: "1 1 320px",
+          minWidth: "260px",
+          maxWidth: "380px",
+          width: "100%",
+          height: "300px",
+          display: isVisible ? "flex" : "none",
+          flexDirection: "column",
+          background: "#1e293b",
+          border: isHighlighted ? "1px solid #3b82f6" : "1px solid #334155",
+          borderRadius: "12px",
+          padding: "12px",
           flexShrink: 0,
-          overflow: 'hidden',
-          boxShadow: isHighlighted ? '0 0 0 2px rgba(59,130,246,0.6), 0 10px 30px rgba(59,130,246,0.25)' : 'none',
-          transition: 'box-shadow 0.3s ease, border-color 0.3s ease',
+          overflow: "hidden",
+          boxShadow: isHighlighted
+            ? "0 0 0 2px rgba(59,130,246,0.6), 0 10px 30px rgba(59,130,246,0.25)"
+            : "none",
+          transition: "box-shadow 0.3s ease, border-color 0.3s ease",
         }}
         aria-live="polite"
       >
         {/* Fixed Header */}
-        <div style={{ 
-          display: 'flex', 
-          alignItems: 'center', 
-          gap: '8px', 
-          marginBottom: '12px',
-          flexShrink: 0,
-          height: '24px'
-        }}>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: "8px",
+            marginBottom: "12px",
+            flexShrink: 0,
+            height: "24px",
+          }}
+        >
           {provider && (
-            <div className={`model-logo ${provider.logoBgClass}`} style={{ width: '16px', height: '16px', borderRadius: '3px' }} />
+            <div
+              className={`model-logo ${provider.logoBgClass}`}
+              style={{ width: "16px", height: "16px", borderRadius: "3px" }}
+            />
           )}
-          <div style={{ fontWeight: 500, fontSize: '12px', color: '#94a3b8' }}>
+          <div style={{ fontWeight: 500, fontSize: "12px", color: "#94a3b8" }}>
             {provider?.name || providerId}
           </div>
           {context && (
-            <div style={{ fontSize: '10px', color: '#64748b', marginLeft: '4px' }}>
-              {context.rateLimitRemaining && `(${context.rateLimitRemaining} left)`}
+            <div
+              style={{ fontSize: "10px", color: "#64748b", marginLeft: "4px" }}
+            >
+              {context.rateLimitRemaining &&
+                `(${context.rateLimitRemaining} left)`}
               {context.modelName && ` • ${context.modelName}`}
             </div>
           )}
-          <div style={{ 
-            marginLeft: 'auto', 
-            width: '8px', 
-            height: '8px', 
-            borderRadius: '50%', 
-            background: getStatusColor(state?.status),
-            ...(isStreaming && !isReducedMotion && { animation: 'pulse 1.5s ease-in-out infinite' })
-          }} />
+          <div
+            style={{
+              marginLeft: "auto",
+              width: "8px",
+              height: "8px",
+              borderRadius: "50%",
+              background: getStatusColor(state?.status),
+              ...(isStreaming &&
+                !isReducedMotion && {
+                  animation: "pulse 1.5s ease-in-out infinite",
+                }),
+            }}
+          />
         </div>
 
         {/* Scrollable Content Area */}
@@ -314,81 +363,134 @@ const ProviderResponseBlock = ({
           }}
           style={{
             flex: 1,
-            overflowY: 'auto',
-            overflowX: 'hidden',
-            padding: '12px',
-            background: 'rgba(0, 0, 0, 0.18)',
-            borderRadius: '8px',
-            minHeight: 0
+            overflowY: "auto",
+            overflowX: "hidden",
+            padding: "12px",
+            background: "rgba(0, 0, 0, 0.18)",
+            borderRadius: "8px",
+            minHeight: 0,
           }}
         >
-          <div className="prose prose-sm max-w-none dark:prose-invert"
-               onClickCapture={(e) => {
-                 try {
-                   const target = e.target as HTMLElement | null;
-                   const anchor = target ? (target.closest('a[href^="citation:"]') as HTMLAnchorElement | null) : null;
-                   if (anchor) { e.preventDefault(); e.stopPropagation(); }
-                 } catch {}
-               }}
-               onMouseDownCapture={(e) => {
-                 try {
-                   const target = e.target as HTMLElement | null;
-                   const anchor = target ? (target.closest('a[href^="citation:"]') as HTMLAnchorElement | null) : null;
-                   const isAux = (e as any).button && (e as any).button !== 0;
-                   const isMod = (e.ctrlKey || (e as any).metaKey);
-                   if (anchor && (isAux || isMod)) { e.preventDefault(); e.stopPropagation(); }
-                 } catch {}
-               }}
-               onPointerDownCapture={(e) => {
-                 try {
-                   const target = e.target as HTMLElement | null;
-                   const anchor = target ? (target.closest('a[href^="citation:"]') as HTMLAnchorElement | null) : null;
-                   const isAux = (e as any).button && (e as any).button !== 0;
-                   const isMod = (e.ctrlKey || (e as any).metaKey);
-                   if (anchor && (isAux || isMod)) { e.preventDefault(); e.stopPropagation(); }
-                 } catch {}
-               }}
-               style={{ 
-            fontSize: '13px', 
-            lineHeight: '1.5', 
-            color: '#e2e8f0' 
-          }}>
-            <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ a: (props: any) => {
-              const href = props?.href || '';
-              const isCitation = typeof href === 'string' && href.startsWith('citation:');
-              if (!isCitation) {
-                return <a {...props} target="_blank" rel="noopener noreferrer" />;
-              }
-              const numMatch = String(href).match(/(\d+)/);
-              const num = numMatch ? parseInt(numMatch[1], 10) : NaN;
-              return (
-                <span role="button" tabIndex={0}
-                      onClick={(e) => { e.preventDefault(); e.stopPropagation(); /* citation handled by AiTurnBlock */ }}
-                      style={{ display: 'inline-flex', alignItems: 'center', padding: '2px 8px', margin: '0 4px',
-                               background: 'rgba(30, 64, 175, 0.35)', border: '1px solid #3b82f6', borderRadius: 9999,
-                               color: '#bfdbfe', fontSize: 12, fontWeight: 700, cursor: 'pointer', userSelect: 'none' }}
-                      title={isNaN(num) ? 'Citation' : `Citation ${num}`}>
-                  {props.children}
-                </span>
-              );
-            }, code: CodeBlock }}>
-              {String(displayText || '')}
+          <div
+            className="prose prose-sm max-w-none dark:prose-invert"
+            onClickCapture={(e) => {
+              try {
+                const target = e.target as HTMLElement | null;
+                const anchor = target
+                  ? (target.closest(
+                      'a[href^="citation:"]',
+                    ) as HTMLAnchorElement | null)
+                  : null;
+                if (anchor) {
+                  e.preventDefault();
+                  e.stopPropagation();
+                }
+              } catch {}
+            }}
+            onMouseDownCapture={(e) => {
+              try {
+                const target = e.target as HTMLElement | null;
+                const anchor = target
+                  ? (target.closest(
+                      'a[href^="citation:"]',
+                    ) as HTMLAnchorElement | null)
+                  : null;
+                const isAux = (e as any).button && (e as any).button !== 0;
+                const isMod = e.ctrlKey || (e as any).metaKey;
+                if (anchor && (isAux || isMod)) {
+                  e.preventDefault();
+                  e.stopPropagation();
+                }
+              } catch {}
+            }}
+            onPointerDownCapture={(e) => {
+              try {
+                const target = e.target as HTMLElement | null;
+                const anchor = target
+                  ? (target.closest(
+                      'a[href^="citation:"]',
+                    ) as HTMLAnchorElement | null)
+                  : null;
+                const isAux = (e as any).button && (e as any).button !== 0;
+                const isMod = e.ctrlKey || (e as any).metaKey;
+                if (anchor && (isAux || isMod)) {
+                  e.preventDefault();
+                  e.stopPropagation();
+                }
+              } catch {}
+            }}
+            style={{
+              fontSize: "13px",
+              lineHeight: "1.5",
+              color: "#e2e8f0",
+            }}
+          >
+            <ReactMarkdown
+              remarkPlugins={[remarkGfm]}
+              components={{
+                a: (props: any) => {
+                  const href = props?.href || "";
+                  const isCitation =
+                    typeof href === "string" && href.startsWith("citation:");
+                  if (!isCitation) {
+                    return (
+                      <a {...props} target="_blank" rel="noopener noreferrer" />
+                    );
+                  }
+                  const numMatch = String(href).match(/(\d+)/);
+                  const num = numMatch ? parseInt(numMatch[1], 10) : NaN;
+                  return (
+                    <span
+                      role="button"
+                      tabIndex={0}
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation(); /* citation handled by AiTurnBlock */
+                      }}
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        padding: "2px 8px",
+                        margin: "0 4px",
+                        background: "rgba(30, 64, 175, 0.35)",
+                        border: "1px solid #3b82f6",
+                        borderRadius: 9999,
+                        color: "#bfdbfe",
+                        fontSize: 12,
+                        fontWeight: 700,
+                        cursor: "pointer",
+                        userSelect: "none",
+                      }}
+                      title={isNaN(num) ? "Citation" : `Citation ${num}`}
+                    >
+                      {props.children}
+                    </span>
+                  );
+                },
+                code: CodeBlock,
+              }}
+            >
+              {String(displayText || "")}
             </ReactMarkdown>
             {isStreaming && <span className="streaming-dots" />}
           </div>
         </div>
 
         {/* Fixed Footer with actions */}
-        <div style={{ 
-          marginTop: '12px',
-          display: 'flex', 
-          justifyContent: 'flex-end', 
-          gap: '8px',
-          flexShrink: 0,
-          height: '32px'
-        }}>
-
-          <CopyButton text={state?.text} label={`Copy ${provider?.name || providerId}`} />
+        <div
+          style={{
+            marginTop: "12px",
+            display: "flex",
+            justifyContent: "flex-end",
+            gap: "8px",
+            flexShrink: 0,
+            height: "32px",
+          }}
+        >
+          <CopyButton
+            text={state?.text}
+            label={`Copy ${provider?.name || providerId}`}
+          />
           <ProviderPill id={providerId as any} />
         </div>
       </div>
@@ -399,13 +501,13 @@ const ProviderResponseBlock = ({
   const renderSideIndicator = (providerId: string) => {
     const state = effectiveProviderStates[providerId];
     const provider = getProviderConfig(providerId);
-    const isStreaming = state?.status === 'streaming';
-    const isCompleted = state?.status === 'completed';
-    
+    const isStreaming = state?.status === "streaming";
+    const isCompleted = state?.status === "completed";
+
     // State indicator similar to ClipsCarousel
-    const statusIcon = isStreaming ? '⏳' : isCompleted ? '◉' : '○';
-    const borderColor = isCompleted ? (provider?.color || '#475569') : '#475569';
-    const bgColor = isCompleted ? 'rgba(255,255,255,0.06)' : '#0f172a';
+    const statusIcon = isStreaming ? "⏳" : isCompleted ? "◉" : "○";
+    const borderColor = isCompleted ? provider?.color || "#475569" : "#475569";
+    const bgColor = isCompleted ? "rgba(255,255,255,0.06)" : "#0f172a";
 
     return (
       <button
@@ -414,112 +516,135 @@ const ProviderResponseBlock = ({
         title={`Click to view ${provider?.name || providerId}`}
         disabled={isStreaming}
         style={{
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          justifyContent: 'center',
-          gap: '4px',
-          padding: '12px 8px',
-          minWidth: '80px',
-          borderRadius: '12px',
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          justifyContent: "center",
+          gap: "4px",
+          padding: "12px 8px",
+          minWidth: "80px",
+          borderRadius: "12px",
           background: bgColor,
           border: `1px solid ${borderColor}`,
-          cursor: isStreaming ? 'not-allowed' : 'pointer',
+          cursor: isStreaming ? "not-allowed" : "pointer",
           flexShrink: 0,
-          transition: isReducedMotion ? 'none' : 'all 0.2s ease',
+          transition: isReducedMotion ? "none" : "all 0.2s ease",
           opacity: isStreaming ? 0.7 : 1,
-          boxShadow: '0 2px 8px rgba(0, 0, 0, 0.2)',
+          boxShadow: "0 2px 8px rgba(0, 0, 0, 0.2)",
         }}
         onMouseEnter={(e) => {
           if (!isStreaming) {
-            e.currentTarget.style.transform = 'translateY(-2px)';
-            e.currentTarget.style.boxShadow = '0 4px 12px rgba(0, 0, 0, 0.3)';
+            e.currentTarget.style.transform = "translateY(-2px)";
+            e.currentTarget.style.boxShadow = "0 4px 12px rgba(0, 0, 0, 0.3)";
           }
         }}
         onMouseLeave={(e) => {
           if (!isStreaming) {
-            e.currentTarget.style.transform = 'translateY(0)';
-            e.currentTarget.style.boxShadow = '0 2px 8px rgba(0, 0, 0, 0.2)';
+            e.currentTarget.style.transform = "translateY(0)";
+            e.currentTarget.style.boxShadow = "0 2px 8px rgba(0, 0, 0, 0.2)";
           }
         }}
       >
         {/* Provider Logo */}
         {provider && (
-          <div 
-            className={`model-logo ${provider.logoBgClass}`} 
-            style={{ 
-              width: '20px', 
-              height: '20px', 
-              borderRadius: '4px',
-            }} 
+          <div
+            className={`model-logo ${provider.logoBgClass}`}
+            style={{
+              width: "20px",
+              height: "20px",
+              borderRadius: "4px",
+            }}
           />
         )}
-        
+
         {/* Status + Name */}
-        <div style={{
-          fontSize: '10px',
-          fontWeight: 500,
-          color: '#e2e8f0',
-          textAlign: 'center',
-          lineHeight: 1.2,
-          display: 'flex',
-          alignItems: 'center',
-          gap: '3px'
-        }}>
-          <span style={{ fontSize: '12px' }}>{statusIcon}</span>
+        <div
+          style={{
+            fontSize: "10px",
+            fontWeight: 500,
+            color: "#e2e8f0",
+            textAlign: "center",
+            lineHeight: 1.2,
+            display: "flex",
+            alignItems: "center",
+            gap: "3px",
+          }}
+        >
+          <span style={{ fontSize: "12px" }}>{statusIcon}</span>
           <span>{provider?.name || providerId}</span>
         </div>
 
         {/* Streaming indicator dot */}
         {isStreaming && (
-          <div style={{
-            width: '6px',
-            height: '6px',
-            borderRadius: '50%',
-            background: getStatusColor(state?.status),
-            animation: isReducedMotion ? 'none' : 'pulse 1.5s ease-in-out infinite',
-          }} />
+          <div
+            style={{
+              width: "6px",
+              height: "6px",
+              borderRadius: "50%",
+              background: getStatusColor(state?.status),
+              animation: isReducedMotion
+                ? "none"
+                : "pulse 1.5s ease-in-out infinite",
+            }}
+          />
         )}
       </button>
     );
   };
 
   return (
-    <div className="response-container" style={{ marginBottom: '24px', display: 'flex' }}>
-      <BotIcon style={{
-          width: '32px', height: '32px', color: '#a78bfa', marginRight: '12px', flexShrink: 0, marginTop:'4px'
-      }} />
-      <div style={{flexGrow: 1}}>
+    <div
+      className="response-container"
+      style={{ marginBottom: "24px", display: "flex" }}
+    >
+      <BotIcon
+        style={{
+          width: "32px",
+          height: "32px",
+          color: "#a78bfa",
+          marginRight: "12px",
+          flexShrink: 0,
+          marginTop: "4px",
+        }}
+      />
+      <div style={{ flexGrow: 1 }}>
         {/* Global Controls Header */}
-        <div className="global-controls" style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          marginBottom: '12px',
-          padding: '8px 12px',
-          background: '#1e293b',
-          borderRadius: '8px',
-          border: '1px solid #334155'
-        }}>
-          <div style={{ fontSize: '14px', fontWeight: 500, color: '#94a3b8' }}>
+        <div
+          className="global-controls"
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            marginBottom: "12px",
+            padding: "8px 12px",
+            background: "#1e293b",
+            borderRadius: "8px",
+            border: "1px solid #334155",
+          }}
+        >
+          <div style={{ fontSize: "14px", fontWeight: 500, color: "#94a3b8" }}>
             AI Responses ({allProviderIds.length})
           </div>
-          <CopyButton 
-              text={allProviderIds.map(id => {
+          <CopyButton
+            text={allProviderIds
+              .map((id) => {
                 const state = effectiveProviderStates[id];
                 const provider = getProviderConfig(id);
                 return `${provider?.name || id}:\n${state.text}`;
-              }).join('\n\n---\n\n')} 
-              label="Copy all responses"
-            />
+              })
+              .join("\n\n---\n\n")}
+            label="Copy all responses"
+          />
         </div>
 
         {/* CAROUSEL LAYOUT: [Left Indicator] [3 Main Cards] [Right Indicator] */}
-        <div style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: '12px',
-        }}>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: "12px",
+          }}
+        >
           {/* Left Side Indicator */}
           {hiddenProviders.left && (
             <div style={{ flexShrink: 0 }}>
@@ -528,17 +653,19 @@ const ProviderResponseBlock = ({
           )}
 
           {/* Main Cards Container (3 slots) */}
-          <div style={{
-            display: 'flex',
-            gap: '8px',
-            flex: 1,
-            justifyContent: 'flex-start',
-            minWidth: 0,
-            flexWrap: 'wrap',
-            width: '100%',
-          }}>
+          <div
+            style={{
+              display: "flex",
+              gap: "8px",
+              flex: 1,
+              justifyContent: "flex-start",
+              minWidth: 0,
+              flexWrap: "wrap",
+              width: "100%",
+            }}
+          >
             {/* Render only visible providers to reduce re-render cost */}
-            {visibleSlots.map(id => renderProviderCard(id, true))}
+            {visibleSlots.map((id) => renderProviderCard(id, true))}
           </div>
 
           {/* Right Side Indicator */}
@@ -547,7 +674,6 @@ const ProviderResponseBlock = ({
               {renderSideIndicator(hiddenProviders.right)}
             </div>
           )}
-
         </div>
       </div>
     </div>

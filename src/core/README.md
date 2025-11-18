@@ -29,6 +29,7 @@ The DNR utilities provide a robust, session-aware system for managing network re
 #### Static Methods
 
 ##### `initialize()`
+
 Initializes the DNR utility system and restores persisted rules.
 
 ```javascript
@@ -36,9 +37,11 @@ await DNRUtils.initialize();
 ```
 
 ##### `registerHeaderRule(options)`
+
 Registers a header modification rule with comprehensive options.
 
 **Parameters:**
+
 - `options.urlFilter` (string) - URL pattern to match (required)
 - `options.headers` (object) - Headers to add/modify (required)
 - `options.provider` (string) - Provider identifier for scoping
@@ -51,28 +54,33 @@ Registers a header modification rule with comprehensive options.
 
 ```javascript
 const ruleId = await DNRUtils.registerHeaderRule({
-  urlFilter: 'https://chatgpt.com/*',
+  urlFilter: "https://chatgpt.com/*",
   headers: {
-    'Openai-Sentinel-Chat-Requirements-Token': 'token123',
-    'Openai-Sentinel-Proof-Token': 'proof456'
+    "Openai-Sentinel-Chat-Requirements-Token": "token123",
+    "Openai-Sentinel-Proof-Token": "proof456",
   },
-  provider: 'chatgpt',
-  duration: 300000 // 5 minutes
+  provider: "chatgpt",
+  duration: 300000, // 5 minutes
 });
 ```
 
 ##### `registerTemporaryHeaderRule(options, duration)`
+
 Convenience method for temporary header rules.
 
 ```javascript
-const ruleId = await DNRUtils.registerTemporaryHeaderRule({
-  urlFilter: 'https://claude.ai/*',
-  headers: { 'Authorization': 'Bearer token' },
-  provider: 'claude'
-}, 60000); // 1 minute
+const ruleId = await DNRUtils.registerTemporaryHeaderRule(
+  {
+    urlFilter: "https://claude.ai/*",
+    headers: { Authorization: "Bearer token" },
+    provider: "claude",
+  },
+  60000,
+); // 1 minute
 ```
 
 ##### `removeRule(ruleId)`
+
 Removes a specific rule by ID.
 
 ```javascript
@@ -80,23 +88,26 @@ await DNRUtils.removeRule(ruleId);
 ```
 
 ##### `removeProviderRules(provider)`
+
 Removes all rules associated with a provider.
 
 ```javascript
-await DNRUtils.removeProviderRules('chatgpt');
+await DNRUtils.removeProviderRules("chatgpt");
 ```
 
 ##### `getActiveRules()`
+
 Retrieves all active rules (dynamic and session).
 
 ```javascript
 const rules = await DNRUtils.getActiveRules();
-console.log('Active rules:', rules);
+console.log("Active rules:", rules);
 ```
 
 #### Debug Methods
 
 ##### `enableDebugMode()`
+
 Enables debug logging for rule matches.
 
 ```javascript
@@ -104,6 +115,7 @@ DNRUtils.enableDebugMode();
 ```
 
 ##### `disableDebugMode()`
+
 Disables debug logging.
 
 ```javascript
@@ -113,6 +125,7 @@ DNRUtils.disableDebugMode();
 #### Cleanup Methods
 
 ##### `startPeriodicCleanup(intervalMs)`
+
 Starts automatic cleanup of expired rules.
 
 ```javascript
@@ -120,6 +133,7 @@ DNRUtils.startPeriodicCleanup(60000); // Check every minute
 ```
 
 ##### `stopPeriodicCleanup()`
+
 Stops automatic cleanup.
 
 ```javascript
@@ -131,9 +145,11 @@ DNRUtils.stopPeriodicCleanup();
 #### Methods
 
 ##### `injectAEHeaders(options)`
+
 High-level method for AE header injection.
 
 **Parameters:**
+
 - `options.urlFilter` (string) - URL pattern to match
 - `options.headers` (object) - AE headers to inject
 - `options.provider` (string) - Provider identifier
@@ -141,18 +157,19 @@ High-level method for AE header injection.
 
 ```javascript
 await ArkoseController.injectAEHeaders({
-  urlFilter: 'https://chatgpt.com/*',
+  urlFilter: "https://chatgpt.com/*",
   headers: {
-    'Openai-Sentinel-Chat-Requirements-Token': sentinelToken,
-    'Openai-Sentinel-Proof-Token': powToken,
-    'Openai-Sentinel-Arkose-Token': arkoseToken
+    "Openai-Sentinel-Chat-Requirements-Token": sentinelToken,
+    "Openai-Sentinel-Proof-Token": powToken,
+    "Openai-Sentinel-Arkose-Token": arkoseToken,
   },
-  provider: 'chatgpt',
-  duration: 300000
+  provider: "chatgpt",
+  duration: 300000,
 });
 ```
 
 ##### `removeAEHeaderRule(ruleId)`
+
 Removes a specific AE header rule.
 
 ```javascript
@@ -160,10 +177,11 @@ await ArkoseController.removeAEHeaderRule(ruleId);
 ```
 
 ##### `removeAllAEHeaderRules(provider)`
+
 Removes all AE header rules for a provider.
 
 ```javascript
-await ArkoseController.removeAllAEHeaderRules('chatgpt');
+await ArkoseController.removeAllAEHeaderRules("chatgpt");
 ```
 
 ## Usage Examples
@@ -171,20 +189,20 @@ await ArkoseController.removeAllAEHeaderRules('chatgpt');
 ### Basic Header Injection
 
 ```javascript
-import { DNRUtils } from './dnr-utils.js';
+import { DNRUtils } from "./dnr-utils.js";
 
 // Initialize the system
 await DNRUtils.initialize();
 
 // Inject authentication headers
 const ruleId = await DNRUtils.registerHeaderRule({
-  urlFilter: 'https://api.example.com/*',
+  urlFilter: "https://api.example.com/*",
   headers: {
-    'Authorization': 'Bearer ' + token,
-    'X-API-Key': apiKey
+    Authorization: "Bearer " + token,
+    "X-API-Key": apiKey,
   },
-  provider: 'example-provider',
-  duration: 3600000 // 1 hour
+  provider: "example-provider",
+  duration: 3600000, // 1 hour
 });
 
 // Later, remove the rule
@@ -196,19 +214,19 @@ await DNRUtils.removeRule(ruleId);
 ```javascript
 // Add multiple rules for a provider
 const rule1 = await DNRUtils.registerHeaderRule({
-  urlFilter: 'https://chatgpt.com/backend-api/*',
-  headers: { 'X-Custom-Header': 'value1' },
-  provider: 'chatgpt'
+  urlFilter: "https://chatgpt.com/backend-api/*",
+  headers: { "X-Custom-Header": "value1" },
+  provider: "chatgpt",
 });
 
 const rule2 = await DNRUtils.registerHeaderRule({
-  urlFilter: 'https://chatgpt.com/api/*',
-  headers: { 'X-Another-Header': 'value2' },
-  provider: 'chatgpt'
+  urlFilter: "https://chatgpt.com/api/*",
+  headers: { "X-Another-Header": "value2" },
+  provider: "chatgpt",
 });
 
 // Remove all rules for the provider at once
-await DNRUtils.removeProviderRules('chatgpt');
+await DNRUtils.removeProviderRules("chatgpt");
 ```
 
 ### Tab-Specific Rules
@@ -216,10 +234,10 @@ await DNRUtils.removeProviderRules('chatgpt');
 ```javascript
 // Inject headers only for a specific tab
 const ruleId = await DNRUtils.registerHeaderRule({
-  urlFilter: 'https://example.com/*',
-  headers: { 'X-Tab-Specific': 'true' },
+  urlFilter: "https://example.com/*",
+  headers: { "X-Tab-Specific": "true" },
   tabId: 123,
-  provider: 'tab-provider'
+  provider: "tab-provider",
 });
 ```
 
@@ -231,9 +249,9 @@ DNRUtils.enableDebugMode();
 
 // Register a rule
 const ruleId = await DNRUtils.registerHeaderRule({
-  urlFilter: 'https://debug.example.com/*',
-  headers: { 'X-Debug': 'enabled' },
-  provider: 'debug-provider'
+  urlFilter: "https://debug.example.com/*",
+  headers: { "X-Debug": "enabled" },
+  provider: "debug-provider",
 });
 
 // Check console for debug output when requests match
@@ -248,11 +266,14 @@ DNRUtils.disableDebugMode();
 DNRUtils.startPeriodicCleanup(300000); // Check every 5 minutes
 
 // Register temporary rules that will be cleaned up automatically
-const ruleId = await DNRUtils.registerTemporaryHeaderRule({
-  urlFilter: 'https://temp.example.com/*',
-  headers: { 'X-Temporary': 'true' },
-  provider: 'temp-provider'
-}, 60000); // Expires in 1 minute
+const ruleId = await DNRUtils.registerTemporaryHeaderRule(
+  {
+    urlFilter: "https://temp.example.com/*",
+    headers: { "X-Temporary": "true" },
+    provider: "temp-provider",
+  },
+  60000,
+); // Expires in 1 minute
 ```
 
 ## Integration with Providers
@@ -261,38 +282,39 @@ const ruleId = await DNRUtils.registerTemporaryHeaderRule({
 
 ```javascript
 // In chatgpt.js
-import { ArkoseController } from '../HTOS/NetRulesManager.js';
+import { ArkoseController } from "../HTOS/NetRulesManager.js";
 
 class ChatGPTSessionApi {
   async _injectAEHeaders(headers, requirements) {
     // Prepare headers for DNR injection
     const headersToInject = {};
-    
+
     // Add sentinel token
     if (sentinelToken) {
-      headersToInject['Openai-Sentinel-Chat-Requirements-Token'] = sentinelToken;
+      headersToInject["Openai-Sentinel-Chat-Requirements-Token"] =
+        sentinelToken;
     }
-    
+
     // Add PoW token
     if (powToken) {
-      headersToInject['Openai-Sentinel-Proof-Token'] = powToken;
+      headersToInject["Openai-Sentinel-Proof-Token"] = powToken;
     }
-    
+
     // Add Arkose token
     if (arkoseToken) {
-      headersToInject['Openai-Sentinel-Arkose-Token'] = arkoseToken;
+      headersToInject["Openai-Sentinel-Arkose-Token"] = arkoseToken;
     }
-    
+
     // Inject via DNR
     if (Object.keys(headersToInject).length > 0) {
       await ArkoseController.injectAEHeaders({
-        urlFilter: 'https://chatgpt.com/*',
+        urlFilter: "https://chatgpt.com/*",
         headers: headersToInject,
-        provider: 'chatgpt',
-        duration: 300000 // 5 minutes
+        provider: "chatgpt",
+        duration: 300000, // 5 minutes
       });
     }
-    
+
     return headers;
   }
 }
@@ -305,11 +327,11 @@ The DNR utilities include comprehensive error handling:
 ```javascript
 try {
   await DNRUtils.registerHeaderRule({
-    urlFilter: 'invalid-url',
-    headers: { 'X-Test': 'value' }
+    urlFilter: "invalid-url",
+    headers: { "X-Test": "value" },
   });
 } catch (error) {
-  console.error('DNR rule registration failed:', error);
+  console.error("DNR rule registration failed:", error);
   // Handle error appropriately
 }
 ```
@@ -347,14 +369,14 @@ try {
 ```javascript
 // Check active rules
 const rules = await DNRUtils.getActiveRules();
-console.log('Active rules:', rules.length);
+console.log("Active rules:", rules.length);
 
 // Enable debug logging
 DNRUtils.enableDebugMode();
 
 // Check persisted rules
 const stored = await chrome.storage.local.get(DNRUtils.STORAGE_KEY);
-console.log('Stored rules:', stored);
+console.log("Stored rules:", stored);
 ```
 
 ## Migration Notes

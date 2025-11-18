@@ -1,23 +1,30 @@
 // ============================================================================
 // CORE TYPES & ENUMS
 // ============================================================================
-export type ProviderKey = "claude" | "gemini" | "gemini-pro" | "chatgpt" | "qwen";
+export type ProviderKey =
+  | "claude"
+  | "gemini"
+  | "gemini-pro"
+  | "chatgpt"
+  | "qwen";
 export type WorkflowStepType = "prompt" | "synthesis" | "mapping";
 export type SynthesisStrategy = "continuation" | "fresh";
-
 
 // ============================================================================
 // SECTION 1: WORKFLOW PRIMITIVES (UI -> BACKEND)
 // These are the three fundamental requests the UI can send to the backend.
 // ============================================================================
 
-export type PrimitiveWorkflowRequest = InitializeRequest | ExtendRequest | RecomputeRequest;
+export type PrimitiveWorkflowRequest =
+  | InitializeRequest
+  | ExtendRequest
+  | RecomputeRequest;
 
 /**
  * Starts a new conversation thread.
  */
 export interface InitializeRequest {
-  type: 'initialize';
+  type: "initialize";
   sessionId?: string | null; // Optional: can be omitted to let the backend create a new session.
   userMessage: string;
   providers: ProviderKey[];
@@ -34,7 +41,7 @@ export interface InitializeRequest {
  * Continues an existing conversation with a new user message.
  */
 export interface ExtendRequest {
-  type: 'extend';
+  type: "extend";
   sessionId: string;
   userMessage: string;
   providers: ProviderKey[];
@@ -51,14 +58,13 @@ export interface ExtendRequest {
  * Re-runs a synthesis or mapping step for a historical turn with a different provider.
  */
 export interface RecomputeRequest {
-  type: 'recompute';
+  type: "recompute";
   sessionId: string;
   sourceTurnId: string;
-  stepType: 'synthesis' | 'mapping';
+  stepType: "synthesis" | "mapping";
   targetProvider: ProviderKey;
   useThinking?: boolean;
 }
-
 
 // ============================================================================
 // SECTION 2: COMPILED WORKFLOW (BACKEND-INTERNAL)
@@ -68,7 +74,10 @@ export interface RecomputeRequest {
 export interface PromptStepPayload {
   prompt: string;
   providers: ProviderKey[];
-  providerContexts?: Record<ProviderKey, { meta: any; continueThread: boolean }>;
+  providerContexts?: Record<
+    ProviderKey,
+    { meta: any; continueThread: boolean }
+  >;
   providerMeta?: Partial<Record<ProviderKey, any>>;
   hidden?: boolean;
   useThinking?: boolean;
@@ -89,7 +98,8 @@ export interface SynthesisStepPayload {
   preferredMappingProvider?: ProviderKey;
 }
 
-export interface MappingStepPayload extends Omit<SynthesisStepPayload, "synthesisProvider"> {
+export interface MappingStepPayload
+  extends Omit<SynthesisStepPayload, "synthesisProvider"> {
   mappingProvider: ProviderKey;
 }
 
@@ -111,37 +121,38 @@ export interface WorkflowRequest {
   steps: WorkflowStep[];
 }
 
-
 // ============================================================================
 // SECTION 2b: RESOLVED CONTEXT (Output of ContextResolver)
 // ============================================================================
 
-export type ResolvedContext = InitializeContext | ExtendContext | RecomputeContext;
+export type ResolvedContext =
+  | InitializeContext
+  | ExtendContext
+  | RecomputeContext;
 
 export interface InitializeContext {
-  type: 'initialize';
+  type: "initialize";
   providers: ProviderKey[];
 }
 
 export interface ExtendContext {
-  type: 'extend';
+  type: "extend";
   sessionId: string;
   lastTurnId: string;
   providerContexts: Record<ProviderKey, { meta: any; continueThread: boolean }>;
 }
 
 export interface RecomputeContext {
-  type: 'recompute';
+  type: "recompute";
   sessionId: string;
   sourceTurnId: string;
   frozenBatchOutputs: Record<ProviderKey, ProviderResponse>;
   latestMappingOutput?: { providerId: string; text: string; meta: any } | null;
   providerContextsAtSourceTurn: Record<ProviderKey, { meta: any }>;
-  stepType: 'synthesis' | 'mapping';
+  stepType: "synthesis" | "mapping";
   targetProvider: ProviderKey;
   sourceUserMessage: string;
 }
-
 
 // ============================================================================
 // SECTION 3: REAL-TIME MESSAGING (BACKEND -> UI)
@@ -194,7 +205,7 @@ export interface TurnFinalizedMessage {
   turn: {
     user: {
       id: string;
-      type: 'user';
+      type: "user";
       text: string;
       createdAt: number;
       sessionId: string;
@@ -209,7 +220,6 @@ export type PortMessage =
   | WorkflowCompleteMessage
   | TurnFinalizedMessage
   | TurnCreatedMessage;
-
 
 // ============================================================================
 // SECTION 4: PERSISTENT DATA MODELS
@@ -236,7 +246,7 @@ export interface AiTurn {
   type: "ai";
   sessionId: string | null;
   threadId: string;
-  userTurnId:string;
+  userTurnId: string;
   createdAt: number;
   isComplete?: boolean;
   batchResponses: Record<string, ProviderResponse>;
@@ -263,22 +273,23 @@ export interface Thread {
   lastActivity: number;
 }
 
-
 // ============================================================================
 // TYPE GUARDS
 // ============================================================================
 export function isPromptPayload(payload: any): payload is PromptStepPayload {
   return "prompt" in payload && "providers" in payload;
 }
-export function isSynthesisPayload(payload: any): payload is SynthesisStepPayload {
+export function isSynthesisPayload(
+  payload: any,
+): payload is SynthesisStepPayload {
   return "synthesisProvider" in payload;
 }
 export function isMappingPayload(payload: any): payload is MappingStepPayload {
   return "mappingProvider" in payload;
 }
-export function isUserTurn(turn: any): turn is { type: 'user' } {
-  return !!turn && typeof turn === 'object' && turn.type === 'user';
+export function isUserTurn(turn: any): turn is { type: "user" } {
+  return !!turn && typeof turn === "object" && turn.type === "user";
 }
-export function isAiTurn(turn: any): turn is { type: 'ai' } {
-  return !!turn && typeof turn === 'object' && turn.type === 'ai';
+export function isAiTurn(turn: any): turn is { type: "ai" } {
+  return !!turn && typeof turn === "object" && turn.type === "ai";
 }

@@ -1,5 +1,5 @@
 // src/ui/utils/streamingBuffer.ts
-type ResponseType = 'batch' | 'synthesis' | 'mapping';
+type ResponseType = "batch" | "synthesis" | "mapping";
 
 interface BatchUpdate {
   providerId: string;
@@ -11,12 +11,15 @@ interface BatchUpdate {
 
 export class StreamingBuffer {
   // Keyed by `${responseType}:${providerId}` to avoid collisions across types
-  private pendingDeltas: Map<string, {
-    deltas: { text: string; ts: number }[];
-    status: string;
-    responseType: ResponseType;
-  }> = new Map();
-  
+  private pendingDeltas: Map<
+    string,
+    {
+      deltas: { text: string; ts: number }[];
+      status: string;
+      responseType: ResponseType;
+    }
+  > = new Map();
+
   private flushTimer: number | null = null;
   private onFlushCallback: (updates: BatchUpdate[]) => void;
 
@@ -24,21 +27,26 @@ export class StreamingBuffer {
     this.onFlushCallback = onFlush;
   }
 
-  addDelta(providerId: string, delta: string, status: string, responseType: ResponseType) {
+  addDelta(
+    providerId: string,
+    delta: string,
+    status: string,
+    responseType: ResponseType,
+  ) {
     const key = `${responseType}:${providerId}`;
     if (!this.pendingDeltas.has(key)) {
       this.pendingDeltas.set(key, {
         deltas: [],
         status,
-        responseType
+        responseType,
       });
     }
-    
+
     const entry = this.pendingDeltas.get(key)!;
     entry.deltas.push({ text: delta, ts: Date.now() });
     entry.status = status;
     entry.responseType = responseType;
-    
+
     this.scheduleBatchFlush();
   }
 
@@ -47,7 +55,7 @@ export class StreamingBuffer {
     if (this.flushTimer !== null) {
       cancelAnimationFrame(this.flushTimer);
     }
-    
+
     // ⭐ DOUBLE-RAF PATTERN: First RAF schedules, second RAF executes after layout
     this.flushTimer = window.requestAnimationFrame(() => {
       window.requestAnimationFrame(() => {
@@ -59,12 +67,14 @@ export class StreamingBuffer {
 
   private flushAll() {
     const updates: BatchUpdate[] = [];
-    
+
     this.pendingDeltas.forEach((entry, compositeKey) => {
-      const idx = compositeKey.indexOf(':');
+      const idx = compositeKey.indexOf(":");
       const providerId = idx >= 0 ? compositeKey.slice(idx + 1) : compositeKey;
-      const concatenatedText = entry.deltas.map(d => d.text).join('');
-      const lastTs = entry.deltas.length ? entry.deltas[entry.deltas.length - 1].ts : Date.now();
+      const concatenatedText = entry.deltas.map((d) => d.text).join("");
+      const lastTs = entry.deltas.length
+        ? entry.deltas[entry.deltas.length - 1].ts
+        : Date.now();
       updates.push({
         providerId,
         text: concatenatedText,
@@ -73,9 +83,9 @@ export class StreamingBuffer {
         createdAt: lastTs,
       });
     });
-    
+
     this.pendingDeltas.clear();
-    
+
     if (updates.length > 0) {
       updates.sort((a, b) => a.createdAt - b.createdAt);
       this.onFlushCallback(updates);

@@ -8,7 +8,7 @@ function buildSynthesisPrompt(
   originalPrompt,
   sourceResults,
   synthesisProvider,
-  mappingResult = null
+  mappingResult = null,
 ) {
   console.log(`[WorkflowEngine] buildSynthesisPrompt called with:`, {
     originalPromptLength: originalPrompt?.length,
@@ -27,7 +27,7 @@ function buildSynthesisPrompt(
 
   const otherItems = filteredResults.map(
     (res) =>
-      `**${(res.providerId || "UNKNOWN").toUpperCase()}:**\n${String(res.text)}`
+      `**${(res.providerId || "UNKNOWN").toUpperCase()}:**\n${String(res.text)}`,
   );
 
   // Note: Mapping result is NOT added to otherItems to avoid duplication
@@ -77,7 +77,12 @@ Begin`;
   return finalPrompt;
 }
 
-function buildMappingPrompt(userPrompt, sourceResults, synthesisText = "", citationOrder = []) {
+function buildMappingPrompt(
+  userPrompt,
+  sourceResults,
+  synthesisText = "",
+  citationOrder = [],
+) {
   // Build MODEL 1, MODEL 2 numbered blocks with optional provider labels
   const providerToNumber = new Map();
   if (Array.isArray(citationOrder) && citationOrder.length > 0) {
@@ -143,9 +148,6 @@ For each option:
 - Order by prevalence
 
 Begin.`;
-
-
-
 }
 
 // Track last seen text per provider/session for delta streaming
@@ -189,7 +191,7 @@ function makeDelta(sessionId, providerId, fullText = "") {
       });
     } else {
       logger.stream(
-        `Divergence detected for ${providerId}: commonPrefix=${prefixLen}/${prev.length}`
+        `Divergence detected for ${providerId}: commonPrefix=${prefixLen}/${prev.length}`,
       );
       lastStreamState.set(key, fullText);
       return fullText.slice(prefixLen); // ✅ Emit from divergence point
@@ -239,7 +241,7 @@ function makeDelta(sessionId, providerId, fullText = "") {
           fullLen: fullText.length,
           regression,
           regressionPercent: regressionPercent.toFixed(1) + "%",
-        }
+        },
       );
       lastStreamState.set(lastWarnKey, now);
       lastStreamState.set(warnCountKey, currentCount + 1);
@@ -267,7 +269,7 @@ function clearDeltaCache(sessionId) {
 
   keysToDelete.forEach((key) => lastStreamState.delete(key));
   logger.debug(
-    `[makeDelta] Cleared ${keysToDelete.length} cache entries for session ${sessionId}`
+    `[makeDelta] Cleared ${keysToDelete.length} cache entries for session ${sessionId}`,
   );
 }
 // =============================================================================
@@ -318,7 +320,7 @@ export class WorkflowEngine {
     providerId,
     text,
     label = null,
-    isFinal = false
+    isFinal = false,
   ) {
     try {
       const delta = makeDelta(sessionId, providerId, text);
@@ -378,7 +380,7 @@ export class WorkflowEngine {
       // ========================================================================
       if (resolvedContext && resolvedContext.type === "recompute") {
         console.log(
-          "[WorkflowEngine] Seeding frozen batch outputs for recompute"
+          "[WorkflowEngine] Seeding frozen batch outputs for recompute",
         );
         try {
           // Seed a synthetic batch step result so downstream mapping/synthesis can reference it
@@ -389,14 +391,14 @@ export class WorkflowEngine {
         } catch (e) {
           console.warn(
             "[WorkflowEngine] Failed to seed frozen batch outputs:",
-            e
+            e,
           );
         }
 
         // Cache historical contexts for providers at the source turn
         try {
           Object.entries(
-            resolvedContext.providerContextsAtSourceTurn || {}
+            resolvedContext.providerContextsAtSourceTurn || {},
           ).forEach(([pid, ctx]) => {
             if (ctx && typeof ctx === "object") {
               workflowContexts[pid] = ctx;
@@ -405,7 +407,7 @@ export class WorkflowEngine {
         } catch (e) {
           console.warn(
             "[WorkflowEngine] Failed to cache historical provider contexts:",
-            e
+            e,
           );
         }
       }
@@ -416,20 +418,24 @@ export class WorkflowEngine {
           const ctxs = resolvedContext.providerContexts || {};
           const cachedProviders = [];
           Object.entries(ctxs).forEach(([pid, meta]) => {
-            if (meta && typeof meta === "object" && Object.keys(meta).length > 0) {
+            if (
+              meta &&
+              typeof meta === "object" &&
+              Object.keys(meta).length > 0
+            ) {
               workflowContexts[pid] = meta;
               cachedProviders.push(pid);
             }
           });
           if (cachedProviders.length > 0) {
             console.log(
-              `[WorkflowEngine] Pre-cached contexts from ResolvedContext.extend for providers: ${cachedProviders.join(", ")}`
+              `[WorkflowEngine] Pre-cached contexts from ResolvedContext.extend for providers: ${cachedProviders.join(", ")}`,
             );
           }
         } catch (e) {
           console.warn(
             "[WorkflowEngine] Failed to cache provider contexts from extend:",
-            e
+            e,
           );
         }
       }
@@ -469,8 +475,8 @@ export class WorkflowEngine {
             if (cachedProviders.length > 0) {
               console.log(
                 `[WorkflowEngine] Cached contexts for providers: ${cachedProviders.join(
-                  ", "
-                )}`
+                  ", ",
+                )}`,
               );
             }
           } catch (e) {
@@ -479,7 +485,7 @@ export class WorkflowEngine {
         } catch (error) {
           console.error(
             `[WorkflowEngine] Prompt step ${step.stepId} failed:`,
-            error
+            error,
           );
           stepResults.set(step.stepId, {
             status: "failed",
@@ -517,7 +523,7 @@ export class WorkflowEngine {
               context,
               stepResults,
               workflowContexts,
-              resolvedContext
+              resolvedContext,
             );
             stepResults.set(step.stepId, { status: "completed", result });
             this.port.postMessage({
@@ -533,7 +539,7 @@ export class WorkflowEngine {
           } catch (error) {
             console.error(
               `[WorkflowEngine] Synthesis step ${step.stepId} failed:`,
-              error
+              error,
             );
             stepResults.set(step.stepId, {
               status: "failed",
@@ -563,7 +569,7 @@ export class WorkflowEngine {
               context,
               stepResults,
               workflowContexts,
-              resolvedContext
+              resolvedContext,
             );
             stepResults.set(step.stepId, { status: "completed", result });
             this.port.postMessage({
@@ -579,7 +585,7 @@ export class WorkflowEngine {
           } catch (error) {
             console.error(
               `[WorkflowEngine] Mapping step ${step.stepId} failed:`,
-              error
+              error,
             );
             stepResults.set(step.stepId, {
               status: "failed",
@@ -612,7 +618,7 @@ export class WorkflowEngine {
               context,
               stepResults,
               workflowContexts,
-              resolvedContext
+              resolvedContext,
             );
             stepResults.set(step.stepId, { status: "completed", result });
             this.port.postMessage({
@@ -627,7 +633,7 @@ export class WorkflowEngine {
           } catch (error) {
             console.error(
               `[WorkflowEngine] Synthesis step ${step.stepId} failed:`,
-              error
+              error,
             );
             stepResults.set(step.stepId, {
               status: "failed",
@@ -691,12 +697,12 @@ export class WorkflowEngine {
           persistRequest.canonicalAiTurnId = context.canonicalAiTurnId;
 
         console.log(
-          `[WorkflowEngine] Persisting (consolidated) ${persistRequest.type} workflow to SessionManager`
+          `[WorkflowEngine] Persisting (consolidated) ${persistRequest.type} workflow to SessionManager`,
         );
         const persistResult = await this.sessionManager.persist(
           persistRequest,
           resolvedContext,
-          result
+          result,
         );
 
         if (persistResult) {
@@ -710,7 +716,7 @@ export class WorkflowEngine {
           ) {
             context.sessionId = persistResult.sessionId;
             console.log(
-              `[WorkflowEngine] Initialize complete: session=${persistResult.sessionId}`
+              `[WorkflowEngine] Initialize complete: session=${persistResult.sessionId}`,
             );
           }
         }
@@ -734,7 +740,7 @@ export class WorkflowEngine {
     } catch (error) {
       console.error(
         `[WorkflowEngine] Critical workflow execution error:`,
-        error
+        error,
       );
       this.port.postMessage({
         type: "WORKFLOW_COMPLETE",
@@ -753,7 +759,7 @@ export class WorkflowEngine {
     // Skip for historical reruns (they don't create new user turns)
     if (context?.targetUserTurnId) {
       console.log(
-        "[WorkflowEngine] Skipping TURN_FINALIZED for historical rerun"
+        "[WorkflowEngine] Skipping TURN_FINALIZED for historical rerun",
       );
       return;
     }
@@ -913,7 +919,7 @@ export class WorkflowEngine {
     workflowContexts,
     previousResults,
     resolvedContext,
-    stepType = "step"
+    stepType = "step",
   ) {
     const providerContexts = {};
 
@@ -926,8 +932,8 @@ export class WorkflowEngine {
       try {
         wdbg(
           `[WorkflowEngine] ${stepType} using workflow-cached context for ${providerId}: ${Object.keys(
-            workflowContexts[providerId]
-          ).join(",")}`
+            workflowContexts[providerId],
+          ).join(",")}`,
         );
       } catch (_) {}
       return providerContexts;
@@ -944,7 +950,7 @@ export class WorkflowEngine {
         };
         try {
           wdbg(
-            `[WorkflowEngine] ${stepType} using historical context from ResolvedContext for ${providerId}`
+            `[WorkflowEngine] ${stepType} using historical context from ResolvedContext for ${providerId}`,
           );
         } catch (_) {}
         return providerContexts;
@@ -963,7 +969,7 @@ export class WorkflowEngine {
           };
           try {
             wdbg(
-              `[WorkflowEngine] ${stepType} continuing conversation for ${providerId} via batch step`
+              `[WorkflowEngine] ${stepType} continuing conversation for ${providerId} via batch step`,
             );
           } catch (_) {}
           return providerContexts;
@@ -975,7 +981,7 @@ export class WorkflowEngine {
     try {
       const persisted = this.sessionManager.getProviderContexts(
         context.sessionId,
-        context.threadId || "default-thread"
+        context.threadId || "default-thread",
       );
       const persistedMeta = persisted?.[providerId]?.meta;
       if (persistedMeta && Object.keys(persistedMeta).length > 0) {
@@ -986,8 +992,8 @@ export class WorkflowEngine {
         try {
           console.log(
             `[WorkflowEngine] ${stepType} using persisted context for ${providerId}: ${Object.keys(
-              persistedMeta
-            ).join(",")}`
+              persistedMeta,
+            ).join(",")}`,
           );
         } catch (_) {}
         return providerContexts;
@@ -1014,7 +1020,7 @@ export class WorkflowEngine {
             sessionId,
             updates,
             true,
-            { skipSave: true }
+            { skipSave: true },
           );
           this.sessionManager.saveSession(sessionId);
         } catch (e) {
@@ -1045,7 +1051,7 @@ export class WorkflowEngine {
             step.stepId,
             providerId,
             chunk.text,
-            "Prompt"
+            "Prompt",
           );
         },
         onAllComplete: (results, errors) => {
@@ -1066,8 +1072,8 @@ export class WorkflowEngine {
             if (contextsSummary.length > 0) {
               wdbg(
                 `[WorkflowEngine] Cached context for ${contextsSummary.join(
-                  "; "
-                )}`
+                  "; ",
+                )}`,
               );
             }
           } catch (_) {}
@@ -1077,7 +1083,7 @@ export class WorkflowEngine {
             context.sessionId,
             batchUpdates,
             true, // continueThread
-            { skipSave: true }
+            { skipSave: true },
           );
 
           this._persistProviderContextsAsync(context.sessionId, batchUpdates);
@@ -1107,12 +1113,12 @@ export class WorkflowEngine {
           // Validate at least one provider succeeded
           const hasAnyValidResults = Object.values(formattedResults).some(
             (r) =>
-              r.status === "completed" && r.text && r.text.trim().length > 0
+              r.status === "completed" && r.text && r.text.trim().length > 0,
           );
 
           if (!hasAnyValidResults) {
             reject(
-              new Error("All providers failed or returned empty responses")
+              new Error("All providers failed or returned empty responses"),
             );
             return;
           }
@@ -1134,7 +1140,7 @@ export class WorkflowEngine {
       // Historical source
       const { turnId, responseType } = payload.sourceHistorical;
       console.log(
-        `[WorkflowEngine] Resolving historical data from turn: ${turnId}`
+        `[WorkflowEngine] Resolving historical data from turn: ${turnId}`,
       );
 
       // Prefer adapter lookup: turnId may be a user or AI turn
@@ -1150,7 +1156,7 @@ export class WorkflowEngine {
             // If we have the user turn, try to locate the subsequent AI turn in memory
             if (session && Array.isArray(session.turns)) {
               const userIdx = session.turns.findIndex(
-                (t) => t.id === turnId && t.type === "user"
+                (t) => t.id === turnId && t.type === "user",
               );
               if (userIdx !== -1) {
                 const next = session.turns[userIdx + 1];
@@ -1170,12 +1176,12 @@ export class WorkflowEngine {
             (t) =>
               t &&
               t.id === turnId &&
-              (t.type === "ai" || t.role === "assistant")
+              (t.type === "ai" || t.role === "assistant"),
           ) || null;
         if (!aiTurn) {
           // Otherwise treat as user id and take the next AI turn
           const userTurnIndex = session.turns.findIndex(
-            (t) => t.id === turnId && t.type === "user"
+            (t) => t.id === turnId && t.type === "user",
           );
           if (userTurnIndex !== -1) {
             aiTurn = session.turns[userTurnIndex + 1] || null;
@@ -1193,7 +1199,7 @@ export class WorkflowEngine {
               (t) =>
                 t &&
                 t.id === turnId &&
-                (t.type === "ai" || t.role === "assistant")
+                (t.type === "ai" || t.role === "assistant"),
             );
             if (direct) {
               aiTurn = direct;
@@ -1201,13 +1207,13 @@ export class WorkflowEngine {
               break;
             }
             const idx = s.turns.findIndex(
-              (t) => t.id === turnId && t.type === "user"
+              (t) => t.id === turnId && t.type === "user",
             );
             if (idx !== -1) {
               aiTurn = s.turns[idx + 1];
               session = s;
               console.warn(
-                `[WorkflowEngine] Historical turn ${turnId} resolved in different session ${sid}; proceeding with that context.`
+                `[WorkflowEngine] Historical turn ${turnId} resolved in different session ${sid}; proceeding with that context.`,
               );
               break;
             }
@@ -1247,7 +1253,7 @@ export class WorkflowEngine {
                 found = searchInSession(s);
                 if (found) {
                   console.warn(
-                    `[WorkflowEngine] Historical fallback matched by text in different session ${sid}; proceeding with that context.`
+                    `[WorkflowEngine] Historical fallback matched by text in different session ${sid}; proceeding with that context.`,
                   );
                   break;
                 }
@@ -1258,12 +1264,12 @@ export class WorkflowEngine {
               aiTurn = found;
             } else {
               throw new Error(
-                `Could not find corresponding AI turn for ${turnId}`
+                `Could not find corresponding AI turn for ${turnId}`,
               );
             }
           } catch (e) {
             throw new Error(
-              `Could not find corresponding AI turn for ${turnId}`
+              `Could not find corresponding AI turn for ${turnId}`,
             );
           }
         } else {
@@ -1289,7 +1295,9 @@ export class WorkflowEngine {
         .flat()
         .filter(
           (res) =>
-            res.status === "completed" && res.text && res.text.trim().length > 0
+            res.status === "completed" &&
+            res.text &&
+            res.text.trim().length > 0,
         )
         .map((res) => ({
           providerId: res.providerId,
@@ -1309,11 +1317,11 @@ export class WorkflowEngine {
             "function"
           ) {
             responses = await this.sessionManager.adapter.getResponsesByTurnId(
-              aiTurn.id
+              aiTurn.id,
             );
           } else {
             responses = await this.sessionManager.adapter.getResponsesByTurnId(
-              aiTurn.id
+              aiTurn.id,
             );
           }
           const respType = responseType || "batch";
@@ -1323,29 +1331,29 @@ export class WorkflowEngine {
                 r &&
                 r.responseType === respType &&
                 r.text &&
-                String(r.text).trim().length > 0
+                String(r.text).trim().length > 0,
             )
             .sort(
               (a, b) =>
                 (a.updatedAt || a.createdAt || 0) -
-                (b.updatedAt || b.createdAt || 0)
+                (b.updatedAt || b.createdAt || 0),
             )
             .map((r) => ({ providerId: r.providerId, text: r.text }));
           if (sourceArray.length > 0) {
             console.log(
-              "[WorkflowEngine] provider_responses fallback succeeded for historical sources"
+              "[WorkflowEngine] provider_responses fallback succeeded for historical sources",
             );
           }
         } catch (e) {
           console.warn(
             "[WorkflowEngine] provider_responses fallback failed for historical sources:",
-            e
+            e,
           );
         }
       }
 
       console.log(
-        `[WorkflowEngine] Found ${sourceArray.length} historical sources`
+        `[WorkflowEngine] Found ${sourceArray.length} historical sources`,
       );
       return sourceArray;
     } else if (payload.sourceStepIds) {
@@ -1357,7 +1365,7 @@ export class WorkflowEngine {
 
         if (!stepResult || stepResult.status !== "completed") {
           console.warn(
-            `[WorkflowEngine] Step ${stepId} not found or incomplete`
+            `[WorkflowEngine] Step ${stepId} not found or incomplete`,
           );
           continue;
         }
@@ -1380,7 +1388,7 @@ export class WorkflowEngine {
       }
 
       console.log(
-        `[WorkflowEngine] Found ${sourceArray.length} current workflow sources`
+        `[WorkflowEngine] Found ${sourceArray.length} current workflow sources`,
       );
       return sourceArray;
     }
@@ -1396,25 +1404,25 @@ export class WorkflowEngine {
     context,
     previousResults,
     workflowContexts = {},
-    resolvedContext
+    resolvedContext,
   ) {
     const payload = step.payload;
     const sourceData = await this.resolveSourceData(
       payload,
       context,
-      previousResults
+      previousResults,
     );
 
     if (sourceData.length < 2) {
       throw new Error(
-        `Synthesis requires at least 2 valid sources, but found ${sourceData.length}.`
+        `Synthesis requires at least 2 valid sources, but found ${sourceData.length}.`,
       );
     }
 
     wdbg(
       `[WorkflowEngine] Running synthesis with ${
         sourceData.length
-      } sources: ${sourceData.map((s) => s.providerId).join(", ")}`
+      } sources: ${sourceData.map((s) => s.providerId).join(", ")}`,
     );
 
     // Look for mapping results from the current workflow
@@ -1428,8 +1436,8 @@ export class WorkflowEngine {
             {
               status: mappingStepResult?.status,
               hasResult: !!mappingStepResult?.result,
-            }
-          )}`
+            },
+          )}`,
         );
 
         if (
@@ -1438,7 +1446,7 @@ export class WorkflowEngine {
         ) {
           mappingResult = mappingStepResult.result;
           wdbg(
-            `[WorkflowEngine] Found mapping result from step ${mappingStepId} for synthesis: providerId=${mappingResult.providerId}, textLength=${mappingResult.text?.length}`
+            `[WorkflowEngine] Found mapping result from step ${mappingStepId} for synthesis: providerId=${mappingResult.providerId}, textLength=${mappingResult.text?.length}`,
           );
           break;
         } else {
@@ -1446,7 +1454,7 @@ export class WorkflowEngine {
             `[WorkflowEngine] Mapping step ${mappingStepId} not suitable: status=${
               mappingStepResult?.status
             }, hasResult=${!!mappingStepResult?.result}, hasText=${!!mappingStepResult
-              ?.result?.text}`
+              ?.result?.text}`,
           );
         }
       }
@@ -1454,10 +1462,10 @@ export class WorkflowEngine {
       if (!mappingResult || !String(mappingResult.text || "").trim()) {
         console.error(
           `[WorkflowEngine] No valid mapping result found. mappingResult:`,
-          mappingResult
+          mappingResult,
         );
         throw new Error(
-          "Synthesis requires a completed Map result; none found."
+          "Synthesis requires a completed Map result; none found.",
         );
       }
     } else {
@@ -1469,7 +1477,7 @@ export class WorkflowEngine {
       ) {
         mappingResult = resolvedContext.latestMappingOutput;
         wdbg(
-          `[WorkflowEngine] Using pre-fetched historical mapping from ${mappingResult.providerId}`
+          `[WorkflowEngine] Using pre-fetched historical mapping from ${mappingResult.providerId}`,
         );
       }
     }
@@ -1478,7 +1486,7 @@ export class WorkflowEngine {
       payload.originalPrompt,
       sourceData,
       payload.synthesisProvider,
-      mappingResult
+      mappingResult,
     );
 
     // Resolve provider context using three-tier resolution
@@ -1489,7 +1497,7 @@ export class WorkflowEngine {
       workflowContexts,
       previousResults,
       resolvedContext,
-      "Synthesis"
+      "Synthesis",
     );
 
     return new Promise((resolve, reject) => {
@@ -1509,7 +1517,7 @@ export class WorkflowEngine {
               step.stepId,
               providerId,
               chunk.text,
-              "Synthesis"
+              "Synthesis",
             );
           },
           onAllComplete: (results) => {
@@ -1523,15 +1531,15 @@ export class WorkflowEngine {
                 payload.synthesisProvider,
                 finalResult.text,
                 "Synthesis",
-                true
+                true,
               );
             }
 
             if (!finalResult || !finalResult.text) {
               reject(
                 new Error(
-                  `Synthesis provider ${payload.synthesisProvider} returned empty response`
-                )
+                  `Synthesis provider ${payload.synthesisProvider} returned empty response`,
+                ),
               );
               return;
             }
@@ -1547,7 +1555,7 @@ export class WorkflowEngine {
                 wdbg(
                   `[WorkflowEngine] Updated workflow context for ${
                     payload.synthesisProvider
-                  }: ${Object.keys(finalResult.meta).join(",")}`
+                  }: ${Object.keys(finalResult.meta).join(",")}`,
                 );
               }
             } catch (_) {}
@@ -1559,7 +1567,7 @@ export class WorkflowEngine {
               meta: finalResult.meta || {},
             });
           },
-        }
+        },
       );
     });
   }
@@ -1572,31 +1580,34 @@ export class WorkflowEngine {
     context,
     previousResults,
     workflowContexts = {},
-    resolvedContext
+    resolvedContext,
   ) {
     const payload = step.payload;
     const sourceData = await this.resolveSourceData(
       payload,
       context,
-      previousResults
+      previousResults,
     );
 
     if (sourceData.length === 0) {
       throw new Error(
-        "No valid sources for mapping. All providers returned empty or failed responses."
+        "No valid sources for mapping. All providers returned empty or failed responses.",
       );
     }
 
     wdbg(
       `[WorkflowEngine] Running mapping with ${
         sourceData.length
-      } sources: ${sourceData.map((s) => s.providerId).join(", ")}`
+      } sources: ${sourceData.map((s) => s.providerId).join(", ")}`,
     );
 
     // Resolve synthesis text from prior synthesis step or recompute context
     let synthesisText = "";
     try {
-      if (Array.isArray(payload.synthesisStepIds) && payload.synthesisStepIds.length > 0) {
+      if (
+        Array.isArray(payload.synthesisStepIds) &&
+        payload.synthesisStepIds.length > 0
+      ) {
         for (const synthStepId of payload.synthesisStepIds) {
           const synthResult = previousResults.get(synthStepId);
           if (
@@ -1608,11 +1619,17 @@ export class WorkflowEngine {
             break;
           }
         }
-      } else if (resolvedContext?.type === "recompute" && resolvedContext?.latestSynthesisOutput?.text) {
+      } else if (
+        resolvedContext?.type === "recompute" &&
+        resolvedContext?.latestSynthesisOutput?.text
+      ) {
         synthesisText = resolvedContext.latestSynthesisOutput.text;
       }
     } catch (e) {
-      logger.warn("[WorkflowEngine] Failed to resolve synthesisText for mapping:", e);
+      logger.warn(
+        "[WorkflowEngine] Failed to resolve synthesisText for mapping:",
+        e,
+      );
     }
 
     // Compute citation order mapping number→providerId
@@ -1620,14 +1637,14 @@ export class WorkflowEngine {
       ? payload.providerOrder
       : sourceData.map((s) => s.providerId);
     const citationOrder = providerOrder.filter((pid) =>
-      sourceData.some((s) => s.providerId === pid)
+      sourceData.some((s) => s.providerId === pid),
     );
 
     const mappingPrompt = buildMappingPrompt(
       payload.originalPrompt,
       sourceData,
       synthesisText,
-      citationOrder
+      citationOrder,
     );
 
     // Resolve provider context using three-tier resolution
@@ -1638,7 +1655,7 @@ export class WorkflowEngine {
       workflowContexts,
       previousResults,
       resolvedContext,
-      "Mapping"
+      "Mapping",
     );
 
     return new Promise((resolve, reject) => {
@@ -1658,7 +1675,7 @@ export class WorkflowEngine {
               step.stepId,
               providerId,
               chunk.text,
-              "Mapping"
+              "Mapping",
             );
           },
           onAllComplete: (results) => {
@@ -1672,15 +1689,15 @@ export class WorkflowEngine {
                 payload.mappingProvider,
                 finalResult.text,
                 "Mapping",
-                true
+                true,
               );
             }
 
             if (!finalResult || !finalResult.text) {
               reject(
                 new Error(
-                  `Mapping provider ${payload.mappingProvider} returned empty response`
-                )
+                  `Mapping provider ${payload.mappingProvider} returned empty response`,
+                ),
               );
               return;
             }
@@ -1705,11 +1722,12 @@ export class WorkflowEngine {
             // Update workflow-cached context for subsequent steps in the same workflow
             try {
               if (finalResultWithMeta?.meta) {
-                workflowContexts[payload.mappingProvider] = finalResultWithMeta.meta;
+                workflowContexts[payload.mappingProvider] =
+                  finalResultWithMeta.meta;
                 wdbg(
                   `[WorkflowEngine] Updated workflow context for ${
                     payload.mappingProvider
-                  }: ${Object.keys(finalResultWithMeta.meta).join(",")}`
+                  }: ${Object.keys(finalResultWithMeta.meta).join(",")}`,
                 );
               }
             } catch (_) {}
@@ -1721,7 +1739,7 @@ export class WorkflowEngine {
               meta: finalResultWithMeta.meta || {},
             });
           },
-        }
+        },
       );
     });
   }

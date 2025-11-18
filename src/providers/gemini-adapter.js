@@ -8,7 +8,9 @@ import { classifyProviderError } from "../core/request-lifecycle-manager.js";
 
 // Provider-specific adapter debug flag (off by default)
 const GEMINI_ADAPTER_DEBUG = false;
-const pad = (...args) => { if (GEMINI_ADAPTER_DEBUG) console.log(...args); };
+const pad = (...args) => {
+  if (GEMINI_ADAPTER_DEBUG) console.log(...args);
+};
 
 export class GeminiAdapter {
   constructor(controller) {
@@ -59,12 +61,12 @@ export class GeminiAdapter {
           signal,
           cursor: req.meta?.cursor,
           model, // Pass model to the API
-        }
+        },
       );
 
       // Emit a single partial update so WorkflowEngine treats this like streaming
       try {
-        const fullText = result?.text ?? '';
+        const fullText = result?.text ?? "";
         if (onChunk && fullText && fullText.length > 0) {
           onChunk({
             providerId: this.id,
@@ -137,7 +139,7 @@ export class GeminiAdapter {
 
       if (!cursor) {
         console.warn(
-          "[GeminiAdapter] No cursor found in provider context, falling back to new chat"
+          "[GeminiAdapter] No cursor found in provider context, falling back to new chat",
         );
         // Fall back to regular sendPrompt if no context available
         const metaForPrompt = {
@@ -147,7 +149,7 @@ export class GeminiAdapter {
         return await this.sendPrompt(
           { originalPrompt: prompt, sessionId, meta: metaForPrompt },
           onChunk,
-          signal
+          signal,
         );
       }
 
@@ -162,7 +164,7 @@ export class GeminiAdapter {
 
       // Emit a single partial update so WorkflowEngine treats this like streaming
       try {
-        const fullText = result?.text ?? '';
+        const fullText = result?.text ?? "";
         if (onChunk && fullText && fullText.length > 0) {
           onChunk({
             providerId: this.id,
@@ -221,24 +223,47 @@ export class GeminiAdapter {
    * Unified ask API: prefer continuation when cursor exists, else start new.
    * ask(prompt, providerContext?, sessionId?, onChunk?, signal?)
    */
-  async ask(prompt, providerContext = null, sessionId = undefined, onChunk = undefined, signal = undefined) {
+  async ask(
+    prompt,
+    providerContext = null,
+    sessionId = undefined,
+    onChunk = undefined,
+    signal = undefined,
+  ) {
     try {
       const meta = providerContext?.meta || providerContext || {};
       const hasCursor = Boolean(meta.cursor || providerContext?.cursor);
-      pad(`[ProviderAdapter] ASK_STARTED provider=${this.id} hasContext=${hasCursor}`);
+      pad(
+        `[ProviderAdapter] ASK_STARTED provider=${this.id} hasContext=${hasCursor}`,
+      );
       let res;
       if (hasCursor) {
-        res = await this.sendContinuation(prompt, providerContext, sessionId, onChunk, signal);
+        res = await this.sendContinuation(
+          prompt,
+          providerContext,
+          sessionId,
+          onChunk,
+          signal,
+        );
       } else {
-        res = await this.sendPrompt({ originalPrompt: prompt, sessionId, meta }, onChunk, signal);
+        res = await this.sendPrompt(
+          { originalPrompt: prompt, sessionId, meta },
+          onChunk,
+          signal,
+        );
       }
       try {
-        const len = (res?.text || '').length;
-        pad(`[ProviderAdapter] ASK_COMPLETED provider=${this.id} ok=${res?.ok !== false} textLen=${len}`);
+        const len = (res?.text || "").length;
+        pad(
+          `[ProviderAdapter] ASK_COMPLETED provider=${this.id} ok=${res?.ok !== false} textLen=${len}`,
+        );
       } catch (_) {}
       return res;
     } catch (e) {
-      console.warn(`[ProviderAdapter] ASK_FAILED provider=${this.id}:`, e?.message || String(e));
+      console.warn(
+        `[ProviderAdapter] ASK_FAILED provider=${this.id}:`,
+        e?.message || String(e),
+      );
       throw e;
     }
   }

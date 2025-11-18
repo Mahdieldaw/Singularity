@@ -53,7 +53,7 @@ export interface ThreadRecord {
 // 3. Turns Store
 export interface BaseTurnRecord {
   id: string;
-  type: 'user' | 'ai';
+  type: "user" | "ai";
   sessionId: string;
   threadId: string;
   createdAt: number;
@@ -67,12 +67,12 @@ export interface BaseTurnRecord {
 }
 
 export interface UserTurnRecord extends BaseTurnRecord {
-  type: 'user';
+  type: "user";
   text: string;
 }
 
 export interface AiTurnRecord extends BaseTurnRecord {
-  type: 'ai';
+  type: "ai";
   userTurnId: string;
   meta?: {
     branchPointTurnId?: string;
@@ -93,10 +93,10 @@ export interface ProviderResponseRecord {
   sessionId: string;
   aiTurnId: string;
   providerId: string;
-  responseType: 'batch' | 'synthesis' | 'mapping' | 'hidden';
+  responseType: "batch" | "synthesis" | "mapping" | "hidden";
   responseIndex: number;
   text: string;
-  status: 'pending' | 'streaming' | 'completed' | 'error' | 'cancelled';
+  status: "pending" | "streaming" | "completed" | "error" | "cancelled";
   meta?: any;
   attemptNumber?: number;
   createdAt: number;

@@ -1,7 +1,7 @@
 /* Basic styles for Hybrid Thinking OS */
 
 body {
-  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
   margin: 0;
   padding: 0;
   background-color: #0f172a;
@@ -112,8 +112,13 @@ footer {
 }
 
 @keyframes pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.5; }
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
 }
 
 .streaming-dots::after {
@@ -144,11 +149,15 @@ footer {
 
 /* Connection status banner animation */
 @keyframes spin {
-  to { transform: rotate(360deg); }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 /* Layout clamps to prevent horizontal overflow in Chat/Composer */
-html, body, #root {
+html,
+body,
+#root {
   max-width: 100%;
   overflow-x: hidden;
 }
@@ -173,7 +182,10 @@ html, body, #root {
 }
 
 /* ensure wrapper elements in chat layout allow children to shrink */
-.chat-view, .chat-input-wrapper, .chat-main, main {
+.chat-view,
+.chat-input-wrapper,
+.chat-main,
+main {
   min-height: 0 !important;
 }
 

@@ -87,7 +87,7 @@ export class GeminiSessionApi {
       model = "gemini-flash",
       signal,
     } = {},
-    retrying = false
+    retrying = false,
   ) {
     token || (token = await this._fetchToken());
     const reqId = Math.floor(Math.random() * 900000) + 100000;
@@ -223,12 +223,13 @@ export class GeminiSessionApi {
       this._throw("failedToReadResponse", { step: "answer", error: p });
     }
 
-    if (GEMINI_DEBUG) console.info("[Gemini] Response received:", {
-      hasText: !!u?.text,
-      textLength: u?.text?.length || 0,
-      status: response?.status || "unknown",
-      model: modelConfig.name,
-    });
+    if (GEMINI_DEBUG)
+      console.info("[Gemini] Response received:", {
+        hasText: !!u?.text,
+        textLength: u?.text?.length || 0,
+        status: response?.status || "unknown",
+        model: modelConfig.name,
+      });
 
     return {
       text: u.text,
@@ -343,11 +344,11 @@ export class GeminiProviderController {
     if (typeof BusController !== "undefined") {
       BusController.on(
         "gemini-provider.ask",
-        this._handleAskRequest.bind(this)
+        this._handleAskRequest.bind(this),
       );
       BusController.on(
         "gemini-provider.fetchToken",
-        this._handleFetchTokenRequest.bind(this)
+        this._handleFetchTokenRequest.bind(this),
       );
     }
     this.initialized = true;
@@ -357,7 +358,7 @@ export class GeminiProviderController {
     return await this.api.ask(
       payload.prompt,
       payload.options || {},
-      payload.retrying || false
+      payload.retrying || false,
     );
   }
 

@@ -6,7 +6,9 @@ import { classifyProviderError } from "../core/request-lifecycle-manager.js";
 
 // Provider-specific adapter debug flag (off by default)
 const GEMINI_PRO_ADAPTER_DEBUG = false;
-const pad = (...args) => { if (GEMINI_PRO_ADAPTER_DEBUG) console.log(...args); };
+const pad = (...args) => {
+  if (GEMINI_PRO_ADAPTER_DEBUG) console.log(...args);
+};
 
 export class GeminiProAdapter {
   constructor(controller) {
@@ -46,17 +48,18 @@ export class GeminiProAdapter {
           signal,
           cursor: req.meta?.cursor,
           model,
-        }
+        },
       );
 
       // Debug raw provider payload to help diagnose parsing mismatch
-      if (GEMINI_PRO_ADAPTER_DEBUG) console.info("[GeminiProAdapter] raw result:", result);
+      if (GEMINI_PRO_ADAPTER_DEBUG)
+        console.info("[GeminiProAdapter] raw result:", result);
 
       // Normalize text: try common shapes, then fallback to JSON string
       const normalizedText =
         result?.text ??
-        (result?.candidates?.[0]?.content ??
-          (typeof result === "string" ? result : JSON.stringify(result)));
+        result?.candidates?.[0]?.content ??
+        (typeof result === "string" ? result : JSON.stringify(result));
 
       // Emit a single partial update so WorkflowEngine treats this like streaming
       try {
@@ -122,7 +125,7 @@ export class GeminiProAdapter {
         return await this.sendPrompt(
           { originalPrompt: prompt, sessionId, meta: metaForPrompt },
           onChunk,
-          signal
+          signal,
         );
       }
 
@@ -132,11 +135,12 @@ export class GeminiProAdapter {
         model,
       });
 
-      if (GEMINI_PRO_ADAPTER_DEBUG) console.info("[GeminiProAdapter] raw continuation result:", result);
+      if (GEMINI_PRO_ADAPTER_DEBUG)
+        console.info("[GeminiProAdapter] raw continuation result:", result);
       const normalizedText =
         result?.text ??
-        (result?.candidates?.[0]?.content ??
-          (typeof result === "string" ? result : JSON.stringify(result)));
+        result?.candidates?.[0]?.content ??
+        (typeof result === "string" ? result : JSON.stringify(result));
 
       // Emit a single partial update so WorkflowEngine treats this like streaming
       try {
@@ -195,24 +199,47 @@ export class GeminiProAdapter {
    * Unified ask API: prefer continuation when cursor exists, else start new.
    * ask(prompt, providerContext?, sessionId?, onChunk?, signal?)
    */
-  async ask(prompt, providerContext = null, sessionId = undefined, onChunk = undefined, signal = undefined) {
+  async ask(
+    prompt,
+    providerContext = null,
+    sessionId = undefined,
+    onChunk = undefined,
+    signal = undefined,
+  ) {
     try {
       const meta = providerContext?.meta || providerContext || {};
       const hasCursor = Boolean(meta.cursor || providerContext?.cursor);
-      pad(`[ProviderAdapter] ASK_STARTED provider=${this.id} hasContext=${hasCursor}`);
+      pad(
+        `[ProviderAdapter] ASK_STARTED provider=${this.id} hasContext=${hasCursor}`,
+      );
       let res;
       if (hasCursor) {
-        res = await this.sendContinuation(prompt, providerContext, sessionId, onChunk, signal);
+        res = await this.sendContinuation(
+          prompt,
+          providerContext,
+          sessionId,
+          onChunk,
+          signal,
+        );
       } else {
-        res = await this.sendPrompt({ originalPrompt: prompt, sessionId, meta }, onChunk, signal);
+        res = await this.sendPrompt(
+          { originalPrompt: prompt, sessionId, meta },
+          onChunk,
+          signal,
+        );
       }
       try {
-        const len = (res?.text || '').length;
-        pad(`[ProviderAdapter] ASK_COMPLETED provider=${this.id} ok=${res?.ok !== false} textLen=${len}`);
+        const len = (res?.text || "").length;
+        pad(
+          `[ProviderAdapter] ASK_COMPLETED provider=${this.id} ok=${res?.ok !== false} textLen=${len}`,
+        );
       } catch (_) {}
       return res;
     } catch (e) {
-      console.warn(`[ProviderAdapter] ASK_FAILED provider=${this.id}:`, e?.message || String(e));
+      console.warn(
+        `[ProviderAdapter] ASK_FAILED provider=${this.id}:`,
+        e?.message || String(e),
+      );
       throw e;
     }
   }

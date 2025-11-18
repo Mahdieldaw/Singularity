@@ -5,8 +5,15 @@ declare namespace chrome {
     const lastError: { message: string } | undefined;
 
     // Overloads for sendMessage
-    function sendMessage(message: any, callback?: (response: any) => void): void;
-    function sendMessage(extensionId: string, message: any, callback?: (response: any) => void): void;
+    function sendMessage(
+      message: any,
+      callback?: (response: any) => void,
+    ): void;
+    function sendMessage(
+      extensionId: string,
+      message: any,
+      callback?: (response: any) => void,
+    ): void;
 
     // onMessage event with add/remove listener methods
     const onMessage: {
@@ -14,15 +21,15 @@ declare namespace chrome {
         callback: (
           message: any,
           sender: any,
-          sendResponse: (response?: any) => void
-        ) => void
+          sendResponse: (response?: any) => void,
+        ) => void,
       ): void;
       removeListener(
         callback: (
           message: any,
           sender: any,
-          sendResponse: (response?: any) => void
-        ) => void
+          sendResponse: (response?: any) => void,
+        ) => void,
       ): void;
     };
   }
@@ -49,7 +56,11 @@ declare namespace chrome {
 
     // update
     function update(tabId: number, updateProperties: any): Promise<Tab>;
-    function update(tabId: number, updateProperties: any, callback: (tab: Tab) => void): void;
+    function update(
+      tabId: number,
+      updateProperties: any,
+      callback: (tab: Tab) => void,
+    ): void;
 
     // create
     function create(createProperties: any): Promise<Tab>;
@@ -61,17 +72,38 @@ declare namespace chrome {
 
     // reload
     function reload(tabId?: number, reloadProperties?: any): Promise<void>;
-    function reload(tabId: number, reloadProperties: any, callback: () => void): void;
+    function reload(
+      tabId: number,
+      reloadProperties: any,
+      callback: () => void,
+    ): void;
 
     // sendMessage
-    function sendMessage(tabId: number, message: any, options?: any): Promise<any>;
-    function sendMessage(tabId: number, message: any, responseCallback: (response: any) => void): void;
-    function sendMessage(tabId: number, message: any, options: any, responseCallback: (response: any) => void): void;
+    function sendMessage(
+      tabId: number,
+      message: any,
+      options?: any,
+    ): Promise<any>;
+    function sendMessage(
+      tabId: number,
+      message: any,
+      responseCallback: (response: any) => void,
+    ): void;
+    function sendMessage(
+      tabId: number,
+      message: any,
+      options: any,
+      responseCallback: (response: any) => void,
+    ): void;
 
     // events (minimal)
     const onUpdated: {
-      addListener(callback: (tabId: number, changeInfo: any, tab: Tab) => void): void;
-      removeListener(callback: (tabId: number, changeInfo: any, tab: Tab) => void): void;
+      addListener(
+        callback: (tabId: number, changeInfo: any, tab: Tab) => void,
+      ): void;
+      removeListener(
+        callback: (tabId: number, changeInfo: any, tab: Tab) => void,
+      ): void;
     };
     const onRemoved: {
       addListener(callback: (tabId: number, removeInfo?: any) => void): void;

@@ -5,7 +5,6 @@ const p = require("path");
 fs.mkdirSync("dist/ui", { recursive: true });
 fs.mkdirSync("dist/icons", { recursive: true });
 
-
 // NOTE: main-world-injector.js is now built by esbuild into dist/main-world-injector.js
 
 // copy manifest
@@ -19,7 +18,6 @@ if (fs.existsSync("ui/index.html")) {
     .replace("/icons/icon-16.png", "/icons/icon32.svg");
   fs.writeFileSync("dist/ui/index.html", html);
 }
-
 
 // optional assets
 if (fs.existsSync("ui/index.css"))
@@ -43,7 +41,7 @@ for (const [src, dst] of map) {
 if (!fs.existsSync("dist/icons/icon32.svg"))
   fs.writeFileSync(
     "dist/icons/icon32.svg",
-    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="100%" height="100%" fill="#764ba2"/><text x="50%" y="54%" font-family="Arial, Helvetica, sans-serif" font-size="10" text-anchor="middle" fill="#fff">HT</text></svg>'
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="100%" height="100%" fill="#764ba2"/><text x="50%" y="54%" font-family="Arial, Helvetica, sans-serif" font-size="10" text-anchor="middle" fill="#fff">HT</text></svg>',
   );
 
 console.log("[postbuild] Completed");

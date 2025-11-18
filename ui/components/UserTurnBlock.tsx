@@ -1,25 +1,35 @@
-import { UserTurn } from '../types';
-import { UserIcon, ChevronDownIcon, ChevronUpIcon } from './Icons';
-import { useState, useCallback } from 'react';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
-import CodeBlock from './CodeBlock';
+import { UserTurn } from "../types";
+import { UserIcon, ChevronDownIcon, ChevronUpIcon } from "./Icons";
+import { useState, useCallback } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import CodeBlock from "./CodeBlock";
 
-
-const CopyButton = ({ text, label, onClick }: { text: string; label: string; onClick?: () => void }) => {
+const CopyButton = ({
+  text,
+  label,
+  onClick,
+}: {
+  text: string;
+  label: string;
+  onClick?: () => void;
+}) => {
   const [copied, setCopied] = useState(false);
 
-  const handleCopy = useCallback(async (e: React.MouseEvent) => {
-    e.stopPropagation();
-    try {
-      await navigator.clipboard.writeText(text);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-      onClick?.();
-    } catch (error) {
-      console.error('Failed to copy text:', error);
-    }
-  }, [text, onClick]);
+  const handleCopy = useCallback(
+    async (e: React.MouseEvent) => {
+      e.stopPropagation();
+      try {
+        await navigator.clipboard.writeText(text);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+        onClick?.();
+      } catch (error) {
+        console.error("Failed to copy text:", error);
+      }
+    },
+    [text, onClick],
+  );
 
   return (
     <button
@@ -27,17 +37,17 @@ const CopyButton = ({ text, label, onClick }: { text: string; label: string; onC
       aria-label={label}
       className="copy-button"
       style={{
-        background: '#334155',
-        border: '1px solid #475569',
-        borderRadius: '6px',
-        padding: '4px 8px',
-        color: '#94a3b8',
-        fontSize: '12px',
-        cursor: 'pointer',
-        transition: 'all 0.2s ease',
+        background: "#334155",
+        border: "1px solid #475569",
+        borderRadius: "6px",
+        padding: "4px 8px",
+        color: "#94a3b8",
+        fontSize: "12px",
+        cursor: "pointer",
+        transition: "all 0.2s ease",
       }}
     >
-      {copied ? '✓' : '📋'} {copied ? 'Copied' : 'Copy'}
+      {copied ? "✓" : "📋"} {copied ? "Copied" : "Copy"}
     </button>
   );
 };
@@ -50,79 +60,114 @@ interface UserTurnBlockProps {
   // The UserTurnBlock is now a pure display component for the prompt.
 }
 
-const UserTurnBlock = ({ userTurn, isExpanded, onToggle }: UserTurnBlockProps) => {
-
+const UserTurnBlock = ({
+  userTurn,
+  isExpanded,
+  onToggle,
+}: UserTurnBlockProps) => {
   const date = new Date(userTurn.createdAt);
-  const readableTimestamp = date.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+  const readableTimestamp = date.toLocaleString(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  });
   const isoTimestamp = date.toISOString();
 
   return (
     <div
       className="user-turn-block"
       style={{
-        display: 'flex',
-        gap: '12px',
-        padding: '12px 16px',
-        background: 'linear-gradient(135deg, #1e293b 0%, #334155 100%)',
-        border: '1px solid #475569',
-        borderRadius: '1rem',
+        display: "flex",
+        gap: "12px",
+        padding: "12px 16px",
+        background: "linear-gradient(135deg, #1e293b 0%, #334155 100%)",
+        border: "1px solid #475569",
+        borderRadius: "1rem",
       }}
     >
       <div
         className="user-avatar"
         style={{
-          width: '32px',
-          height: '32px',
-          borderRadius: '8px',
-          background: 'rgba(99, 102, 241, 0.2)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
+          width: "32px",
+          height: "32px",
+          borderRadius: "8px",
+          background: "rgba(99, 102, 241, 0.2)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
           flexShrink: 0,
         }}
       >
-        <UserIcon style={{ width: '18px', height: '18px', color: '#6366f1' }} />
+        <UserIcon style={{ width: "18px", height: "18px", color: "#6366f1" }} />
       </div>
-      <div className="user-content" style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', overflow: 'visible', minHeight: '80px' }}>
-        <div 
-          style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', marginBottom: isExpanded ? '8px' : '0px' }}
+      <div
+        className="user-content"
+        style={{
+          flex: 1,
+          minWidth: 0,
+          display: "flex",
+          flexDirection: "column",
+          overflow: "visible",
+          minHeight: "80px",
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            cursor: "pointer",
+            marginBottom: isExpanded ? "8px" : "0px",
+          }}
           onClick={() => onToggle(userTurn.id)}
         >
-          <span style={{ fontSize: '12px', fontWeight: 600, color: '#e2e8f0' }}>Your Prompt</span>
+          <span style={{ fontSize: "12px", fontWeight: 600, color: "#e2e8f0" }}>
+            Your Prompt
+          </span>
           {isExpanded ? (
-            <ChevronUpIcon style={{ width: '16px', height: '16px', color: '#cbd5e1' }} />
+            <ChevronUpIcon
+              style={{ width: "16px", height: "16px", color: "#cbd5e1" }}
+            />
           ) : (
-            <ChevronDownIcon style={{ width: '16px', height: '16px', color: '#cbd5e1' }} />
+            <ChevronDownIcon
+              style={{ width: "16px", height: "16px", color: "#cbd5e1" }}
+            />
           )}
         </div>
 
         {isExpanded ? (
           <>
-          <div
-            className="user-message prose prose-sm max-w-none dark:prose-invert"
-            style={{
-              fontSize: '14px',
-              lineHeight: '1.5',
-              color: '#f1f5f9',
-              wordBreak: 'break-word',
-                marginBottom: '8px',
+            <div
+              className="user-message prose prose-sm max-w-none dark:prose-invert"
+              style={{
+                fontSize: "14px",
+                lineHeight: "1.5",
+                color: "#f1f5f9",
+                wordBreak: "break-word",
+                marginBottom: "8px",
               }}
             >
-              <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ code: CodeBlock }}>
+              <ReactMarkdown
+                remarkPlugins={[remarkGfm]}
+                components={{ code: CodeBlock }}
+              >
                 {String(userTurn.text || "")}
               </ReactMarkdown>
             </div>
             <div
               className="user-metadata"
               style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '12px',
-                fontSize: '11px',
-                color: '#94a3b8',
+                display: "flex",
+                alignItems: "center",
+                gap: "12px",
+                fontSize: "11px",
+                color: "#94a3b8",
               }}
             >
-              <span className="timestamp" title={isoTimestamp} aria-label={`Sent at ${readableTimestamp}`}>
+              <span
+                className="timestamp"
+                title={isoTimestamp}
+                aria-label={`Sent at ${readableTimestamp}`}
+              >
                 {readableTimestamp}
               </span>
               {userTurn.sessionId && (
@@ -130,45 +175,52 @@ const UserTurnBlock = ({ userTurn, isExpanded, onToggle }: UserTurnBlockProps) =
                   Session: {userTurn.sessionId.slice(-6)}
                 </span>
               )}
-</div>
-            <div style={{ marginTop: 'auto', display: 'flex', justifyContent: 'flex-end' }}>
-              <CopyButton 
-                text={userTurn.text} 
-                label="Copy user prompt" 
-              />
             </div>
-            
+            <div
+              style={{
+                marginTop: "auto",
+                display: "flex",
+                justifyContent: "flex-end",
+              }}
+            >
+              <CopyButton text={userTurn.text} label="Copy user prompt" />
+            </div>
           </>
         ) : (
-            <div 
-              className="user-message-preview" 
-              style={{
-                fontSize: '14px', 
-                color: '#cbd5e1', 
-                 
-                overflow: 'hidden', 
-                
-                paddingTop: '4px',
-                marginBottom: '4px',
-                display: '-webkit-box',
-                WebkitLineClamp: 3,
-                WebkitBoxOrient: 'vertical',
-              }}
-              title={userTurn.text}
-            >
-              {userTurn.text}
-            </div>
-        )}
+          <div
+            className="user-message-preview"
+            style={{
+              fontSize: "14px",
+              color: "#cbd5e1",
 
-        {!isExpanded && (
-          <div style={{ marginTop: 'auto', display: 'flex', justifyContent: 'flex-end' }}>
-            <CopyButton 
-              text={String(userTurn.text || '')} 
-              label="Copy user prompt" 
-            />
+              overflow: "hidden",
+
+              paddingTop: "4px",
+              marginBottom: "4px",
+              display: "-webkit-box",
+              WebkitLineClamp: 3,
+              WebkitBoxOrient: "vertical",
+            }}
+            title={userTurn.text}
+          >
+            {userTurn.text}
           </div>
         )}
 
+        {!isExpanded && (
+          <div
+            style={{
+              marginTop: "auto",
+              display: "flex",
+              justifyContent: "flex-end",
+            }}
+          >
+            <CopyButton
+              text={String(userTurn.text || "")}
+              label="Copy user prompt"
+            />
+          </div>
+        )}
       </div>
     </div>
   );

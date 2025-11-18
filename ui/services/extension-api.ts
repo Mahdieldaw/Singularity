@@ -12,7 +12,7 @@ import {
 
 import type { HistorySessionSummary, HistoryApiResponse } from "../types";
 import type { PrimitiveWorkflowRequest } from "../../shared/contract";
-import { PortHealthManager } from './port-health-manager';
+import { PortHealthManager } from "./port-health-manager";
 
 interface BackendApiResponse<T = any> {
   success: boolean;
@@ -24,28 +24,33 @@ let EXTENSION_ID: string | null = null;
 
 class ExtensionAPI {
   private portHealthManager: PortHealthManager | null = null;
-  private connectionStateCallbacks: Set<(connected: boolean) => void> = new Set();
+  private connectionStateCallbacks: Set<(connected: boolean) => void> =
+    new Set();
   private port: chrome.runtime.Port | null = null;
   private portMessageHandler: ((message: any) => void) | null = null;
 
   constructor() {
-    this.portHealthManager = new PortHealthManager('htos-popup', {
+    this.portHealthManager = new PortHealthManager("htos-popup", {
       onHealthy: () => this.notifyConnectionState(true),
       onUnhealthy: () => this.notifyConnectionState(false),
       onReconnect: () => this.notifyConnectionState(true),
     });
 
     try {
-      window.addEventListener('beforeunload', () => this.disconnectAll());
-      window.addEventListener('unload', () => this.disconnectAll());
+      window.addEventListener("beforeunload", () => this.disconnectAll());
+      window.addEventListener("unload", () => this.disconnectAll());
     } catch (e) {
-      console.warn('[ExtensionAPI] Failed to attach unload handlers', e);
+      console.warn("[ExtensionAPI] Failed to attach unload handlers", e);
     }
   }
 
   private disconnectAll() {
-    try { this.portHealthManager?.disconnect(); } catch {}
-    try { this.port?.disconnect(); } catch {}
+    try {
+      this.portHealthManager?.disconnect();
+    } catch {}
+    try {
+      this.port?.disconnect();
+    } catch {}
     this.port = null;
   }
 
@@ -55,18 +60,24 @@ class ExtensionAPI {
   }
 
   private notifyConnectionState(connected: boolean) {
-    this.connectionStateCallbacks.forEach(cb => {
-      try { cb(connected); } catch (e) { console.error('[ExtensionAPI] Connection state callback error:', e); }
+    this.connectionStateCallbacks.forEach((cb) => {
+      try {
+        cb(connected);
+      } catch (e) {
+        console.error("[ExtensionAPI] Connection state callback error:", e);
+      }
     });
   }
 
   getConnectionStatus() {
-    return this.portHealthManager?.getStatus() || {
-      isConnected: !!this.port,
-      reconnectAttempts: 0,
-      lastPongTimestamp: 0,
-      timeSinceLastPong: Infinity
-    };
+    return (
+      this.portHealthManager?.getStatus() || {
+        isConnected: !!this.port,
+        reconnectAttempts: 0,
+        lastPongTimestamp: 0,
+        timeSinceLastPong: Infinity,
+      }
+    );
   }
 
   checkHealth() {
@@ -79,9 +90,15 @@ class ExtensionAPI {
     }
   }
 
-  async ensurePort(options: { sessionId?: string; force?: boolean } = {}): Promise<chrome.runtime.Port> {
+  async ensurePort(
+    options: { sessionId?: string; force?: boolean } = {},
+  ): Promise<chrome.runtime.Port> {
     const { sessionId, force = false } = options;
-    if (this.port && !force && this.portHealthManager?.getStatus().isConnected) {
+    if (
+      this.port &&
+      !force &&
+      this.portHealthManager?.getStatus().isConnected
+    ) {
       return this.port;
     }
 
@@ -89,19 +106,22 @@ class ExtensionAPI {
       this.port = this.portHealthManager.connect(
         this.portMessageHandler,
         () => {
-          console.warn('[ExtensionAPI] Port disconnected via callback');
+          console.warn("[ExtensionAPI] Port disconnected via callback");
           this.port = null;
-        }
+        },
       );
       return this.port;
     }
 
     // Fallback if manager isn't ready
-    if (!EXTENSION_ID) throw new Error('Extension ID not set. Call setExtensionId() on startup.');
-    this.port = chrome.runtime.connect(EXTENSION_ID, { name: 'htos-popup' });
+    if (!EXTENSION_ID)
+      throw new Error(
+        "Extension ID not set. Call setExtensionId() on startup.",
+      );
+    this.port = chrome.runtime.connect(EXTENSION_ID, { name: "htos-popup" });
     this.port.onMessage.addListener((msg) => this.portMessageHandler?.(msg));
     this.port.onDisconnect.addListener(() => {
-      console.warn('[ExtensionAPI] Port disconnected (fallback)');
+      console.warn("[ExtensionAPI] Port disconnected (fallback)");
       this.port = null;
     });
     return this.port;
@@ -117,10 +137,13 @@ class ExtensionAPI {
       this.portHealthManager?.checkHealth();
       port.postMessage({
         type: EXECUTE_WORKFLOW,
-        payload: request
+        payload: request,
       });
     } catch (error) {
-      console.error('[ExtensionAPI] Failed to post executeWorkflow message, attempting reconnect:', error);
+      console.error(
+        "[ExtensionAPI] Failed to post executeWorkflow message, attempting reconnect:",
+        error,
+      );
       // Attempt a single reconnect and retry
       const newPort = await this.ensurePort({ force: true });
       newPort.postMessage({ type: EXECUTE_WORKFLOW, payload: request });
@@ -130,50 +153,83 @@ class ExtensionAPI {
   async abortWorkflow(sessionId: string): Promise<void> {
     try {
       const port = await this.ensurePort();
-      port.postMessage({ type: 'abort', sessionId });
+      port.postMessage({ type: "abort", sessionId });
       console.log(`[ExtensionAPI] Sent abort signal for session ${sessionId}`);
     } catch (error) {
-      console.error('[ExtensionAPI] Failed to send abort signal:', error);
+      console.error("[ExtensionAPI] Failed to send abort signal:", error);
     }
   }
 
-  async queryBackend<T = any>(message: { type: string; [key: string]: any }): Promise<T> {
-    if (!EXTENSION_ID) throw new Error("Extension not connected. Please call setExtensionId on startup or reload the extension.");
+  async queryBackend<T = any>(message: {
+    type: string;
+    [key: string]: any;
+  }): Promise<T> {
+    if (!EXTENSION_ID)
+      throw new Error(
+        "Extension not connected. Please call setExtensionId on startup or reload the extension.",
+      );
 
     return new Promise<T>((resolve, reject) => {
       try {
-        chrome.runtime.sendMessage(EXTENSION_ID as string, message, (response: BackendApiResponse<T> | null) => {
-          if (chrome.runtime.lastError) {
-            console.error("[API] Connection error:", chrome.runtime.lastError);
-            return reject(new Error(`Extension connection failed: ${chrome.runtime.lastError.message}. Try reloading the extension.`));
-          }
-
-          if (!response) {
-            console.error("[API] Empty response received for", message.type);
-            return reject(new Error("No response from extension. The service worker may be inactive."));
-          }
-
-          if (response?.success) {
-            if (response.data !== undefined) {
-              return resolve(response.data as T);
+        chrome.runtime.sendMessage(
+          EXTENSION_ID as string,
+          message,
+          (response: BackendApiResponse<T> | null) => {
+            if (chrome.runtime.lastError) {
+              console.error(
+                "[API] Connection error:",
+                chrome.runtime.lastError,
+              );
+              return reject(
+                new Error(
+                  `Extension connection failed: ${chrome.runtime.lastError.message}. Try reloading the extension.`,
+                ),
+              );
             }
-            const copy: any = { ...response };
-            delete copy.success;
-            delete copy.error;
-            const keys = Object.keys(copy);
-            if (keys.length === 1) {
-              return resolve(copy[keys[0]] as T);
-            }
-            return resolve(copy as T);
-          }
 
-          console.error("[API] Backend error for", message.type, ":", response?.error);
-          const errMsg = (response?.error as any)?.message || response?.error || "Unknown backend error. See extension logs.";
-          return reject(new Error(errMsg as string));
-        });
+            if (!response) {
+              console.error("[API] Empty response received for", message.type);
+              return reject(
+                new Error(
+                  "No response from extension. The service worker may be inactive.",
+                ),
+              );
+            }
+
+            if (response?.success) {
+              if (response.data !== undefined) {
+                return resolve(response.data as T);
+              }
+              const copy: any = { ...response };
+              delete copy.success;
+              delete copy.error;
+              const keys = Object.keys(copy);
+              if (keys.length === 1) {
+                return resolve(copy[keys[0]] as T);
+              }
+              return resolve(copy as T);
+            }
+
+            console.error(
+              "[API] Backend error for",
+              message.type,
+              ":",
+              response?.error,
+            );
+            const errMsg =
+              (response?.error as any)?.message ||
+              response?.error ||
+              "Unknown backend error. See extension logs.";
+            return reject(new Error(errMsg as string));
+          },
+        );
       } catch (err) {
         console.error("[API] Fatal extension error:", err);
-        reject(new Error(`Extension communication error: ${err instanceof Error ? err.message : String(err)}`));
+        reject(
+          new Error(
+            `Extension communication error: ${err instanceof Error ? err.message : String(err)}`,
+          ),
+        );
       }
     });
   }
@@ -184,38 +240,63 @@ class ExtensionAPI {
   }
 
   getHistorySession(sessionId: string): Promise<HistorySessionSummary> {
-    return this.queryBackend<HistorySessionSummary>({ type: GET_HISTORY_SESSION, payload: { sessionId } });
-  }
-
-  deleteBackgroundSession(sessionId: string): Promise<{ removed: boolean }> {
-    return this.queryBackend<{ removed: boolean }>({ type: DELETE_SESSION, payload: { sessionId } });
-  }
-
-  deleteBackgroundSessions(sessionIds: string[]): Promise<{ removed: number; ids: string[] }> {
-    return this.queryBackend<{ removed: number; ids: string[] }>({ type: DELETE_SESSIONS, payload: { sessionIds } });
-  }
-
-  renameSession(sessionId: string, title: string): Promise<{ updated: boolean; sessionId: string; title: string }> {
-    return this.queryBackend<{ updated: boolean; sessionId: string; title: string }>({
-      type: RENAME_SESSION,
-      payload: { sessionId, title }
+    return this.queryBackend<HistorySessionSummary>({
+      type: GET_HISTORY_SESSION,
+      payload: { sessionId },
     });
   }
 
-  refinePrompt(draftPrompt: string, context: any): Promise<{ refinedPrompt: string, explanation: string }> {
-    return this.queryBackend<{ refinedPrompt: string, explanation: string }>({
+  deleteBackgroundSession(sessionId: string): Promise<{ removed: boolean }> {
+    return this.queryBackend<{ removed: boolean }>({
+      type: DELETE_SESSION,
+      payload: { sessionId },
+    });
+  }
+
+  deleteBackgroundSessions(
+    sessionIds: string[],
+  ): Promise<{ removed: number; ids: string[] }> {
+    return this.queryBackend<{ removed: number; ids: string[] }>({
+      type: DELETE_SESSIONS,
+      payload: { sessionIds },
+    });
+  }
+
+  renameSession(
+    sessionId: string,
+    title: string,
+  ): Promise<{ updated: boolean; sessionId: string; title: string }> {
+    return this.queryBackend<{
+      updated: boolean;
+      sessionId: string;
+      title: string;
+    }>({
+      type: RENAME_SESSION,
+      payload: { sessionId, title },
+    });
+  }
+
+  refinePrompt(
+    draftPrompt: string,
+    context: any,
+  ): Promise<{ refinedPrompt: string; explanation: string }> {
+    return this.queryBackend<{ refinedPrompt: string; explanation: string }>({
       type: REFINE_PROMPT,
-      payload: { draftPrompt, context }
+      payload: { draftPrompt, context },
     });
   }
 
   // === DEPRECATED & NO-OP HELPERS ===
   setSessionId(sessionId: string): void {
-    console.log(`[API] setSessionId called for ${sessionId}, but this is now handled automatically.`);
+    console.log(
+      `[API] setSessionId called for ${sessionId}, but this is now handled automatically.`,
+    );
   }
 
   updateProviderContext(providerId: string, context: any): void {
-    console.warn("`updateProviderContext` is deprecated. Context is managed by the backend.");
+    console.warn(
+      "`updateProviderContext` is deprecated. Context is managed by the backend.",
+    );
   }
 }
 
