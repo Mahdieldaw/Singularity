@@ -8,7 +8,7 @@ import {
   isLoadingAtom,
   currentAppStepAtom,
   isReducedMotionAtom,
-  showSourceOutputsAtom,
+  showSourceOutputsFamily,
   activeClipsAtom,
   activeAiTurnIdAtom,
   activeRecomputeStateAtom,
@@ -28,7 +28,7 @@ export default function AiTurnBlockConnected({
   const [currentAppStep] = useAtom(currentAppStepAtom);
   const [isReducedMotion] = useAtom(isReducedMotionAtom);
   const [showSourceOutputs, setShowSourceOutputs] = useAtom(
-    showSourceOutputsAtom,
+    showSourceOutputsFamily(aiTurn.id),
   );
   const [activeClips] = useAtom(activeClipsAtom);
   const [activeAiTurnId] = useAtom(activeAiTurnIdAtom);

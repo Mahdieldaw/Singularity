@@ -94,7 +94,10 @@ export const turnExpandedStateFamily = atomFamily(
   (turnId: string) => atom(false),
   (a, b) => a === b,
 );
-export const showSourceOutputsAtom = atom<boolean>(false);
+export const showSourceOutputsFamily = atomFamily(
+  (turnId: string) => atom(false),
+  (a, b) => a === b,
+);
 export const showScrollToBottomAtom = atom<boolean>(false);
 
 // -----------------------------

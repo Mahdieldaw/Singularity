@@ -417,9 +417,10 @@ export class ConnectionHandler {
     this.services = null;
     this.lifecycleManager = null;
     this.isInitialized = false;
-  }
-}
+
     if (this.activeSessionId) {
       sessionRegistry.unregister(this.activeSessionId);
       this.activeSessionId = null;
     }
+  }
+}

@@ -155,22 +155,31 @@ Begin your analysis.`;
 
     const ac = new AbortController();
     const timer = setTimeout(() => ac.abort(), 15000);
+    let aggregatedText = "";
+    const onChunk = (chunk: any) => {
+      const t = typeof chunk === "string" ? chunk : chunk?.text;
+      if (t) aggregatedText += t;
+    };
 
     try {
       if (typeof adapter.ask === "function") {
-        return await adapter.ask(
+        const resp = await adapter.ask(
           prompt,
           { meta: { model: this._preferredModel(adapter) } },
           undefined,
-          undefined,
+          onChunk,
           ac.signal,
         );
+        if (resp && !resp.text && aggregatedText) resp.text = aggregatedText;
+        return resp;
       } else if (typeof adapter.sendPrompt === "function") {
         const req = {
           originalPrompt: prompt,
           meta: { model: this._preferredModel(adapter) },
         };
-        return await adapter.sendPrompt(req, undefined, ac.signal);
+        const resp = await adapter.sendPrompt(req, onChunk, ac.signal);
+        if (resp && !resp.text && aggregatedText) resp.text = aggregatedText;
+        return resp;
       } else {
         throw new Error("Adapter does not support ask/sendPrompt");
       }
@@ -195,7 +204,7 @@ Begin your analysis.`;
   private _parseRefinerResponse(text: string): RefinerResult | null {
     try {
       const refinedMatch = text.match(
-        /REFINED_PROMPT:\s*([\s\S]*?)(?=EXPLANATION:|$)/i,
+        /REFINED[_\s]PROMPT:\s*([\s\S]*?)(?=EXPLANATION:|$)/i,
       );
       const explanationMatch = text.match(/EXPLANATION:\s*([\s\S]*?)$/i);
 
